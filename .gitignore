@@ -5,6 +5,9 @@
 # Personal dev notes (not committed)
 DEV_WALKTHROUGH.md
 
+# Private session context for Claude-assisted work (PLAN.md is the public map)
+CLAUDE.md
+
 # Scratch space for throwaway experiment outputs (viz PNGs, test parquets,
 # spike dumps). Keeps raw_local/ as source video only.
 scratch/
