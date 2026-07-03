@@ -17,9 +17,42 @@ What is actually built in the repo (the rung markers further down describe the *
 - **Rung 2.5 — done.** ByteTrack over SAHI-merged detections (`preprocess/tracking.py`); 15 stable tracks, 0 flicker on the test clip.
 - **Rung 3 — done.** TCN autoencoder over pose-sequence windows (`features/windows.py` + `models/tcn_autoencoder.py`), with `scripts/rung3_demo.py`.
 - **Annotation tooling — done** (`annotate/annotator.py`).
-- **Dataset:** 72 clips registered in `data/manifests/pool_footage.jsonl`. Distress events annotated as time windows; many occur >25 s into a clip (so full-clip extraction is required — see the Colab `max_frames` lesson in `docs/COLAB_TRAINING.md`).
-- **In flight:** batch pose extraction on Colab GPU → keypoint Parquets → first real train/eval of Rungs 2–3 on actual data.
-- **Not started:** Rung 4 (per-swimmer state machine, `detect/`), the active **partial-pose retention** fix in `normalize.py` (see Open questions).
+- **Dataset:** 72 clips registered in `data/manifests/pool_footage.jsonl` (66 `distress`, 2 `normal`, 4 `unlabeled`); each distress clip has one time-window event, all generically tagged `distress` (no `submerged`/`face_down` sub-typing). Events are from "Spot the Drowning" wavepool-rescue footage; many occur >25 s in (so full-clip extraction is required — see the Colab `max_frames` lesson in `docs/COLAB_TRAINING.md`).
+- **First Colab TCN run — done, and it's the pivotal result.** ROC-AUC **0.539 ≈ chance.** Diagnosed (in code, not guessed) as a **representation problem, not tuning.** Full writeup in the next section. This redirected the project: the next build is **Plan A — the not-surfacing state machine (Rung 4)**, not more model tuning.
+- **Not started:** Plan A (Rung 4 state machine, `detect/`) — the decided next step; the displacement-feature upgrade; the **partial-pose retention** fix in `normalize.py` (see Open questions). These three converge — all are "stop discarding signal in the feature layer."
+
+---
+
+## First results & the representation pivot *(2026-06-20/21)*
+
+**The number:** first Colab TCN-autoencoder run scored **ROC-AUC 0.539** (PR-AUC 0.522) — essentially a coin flip. (ROC-AUC = "pick a random distress window and a random normal window; what's the probability the model scores the distress one as more anomalous?" 0.5 = guessing.)
+
+**The diagnostic** (reconstruction-error percentiles, 3821 held-out normal vs 3872 distress windows):
+
+| pct | normal | distress |
+|---|---|---|
+| p50 | 0.105 | 0.111 |
+| p90 | 0.322 | 0.323 |
+| p99 | 1.414 | 1.680 |
+
+The distributions are **identical through p90.** The separated *means* (0.194 vs 0.345) were purely a thin p99 tail — a handful of windows, not usable signal. So: **not a tuning problem** (more epochs / threshold / STG-NF can't move a number capped by what's in the feature vector) — a **representation problem.**
+
+**Why, by signal** (this is the key insight — see [[representation-displacement-gap]]):
+1. **Not-surfacing (silent sink — the case that matters most):** *structurally absent.* When a swimmer submerges, keypoint confidence collapses, `normalize.py:39` drops those frames, and `windows.py` stitches over the gap. The submersion never enters the dataset; the 3,872 distress windows that survive are the *visible* (normal-looking) portions. The AE literally cannot see the drowning.
+2. **Passive face-down:** *anti-signal.* A motionless prone pose is trivial to reconstruct → **low** error → scores as normal.
+3. **Flailing:** *weakly present* — the only signal reconstruction error natively catches; it's the p99 tail.
+
+This matches PLAN's original split: *"ML scores anomalies; logic handles explicit temporal rules."* The AE's real lane is **flailing**; the other signals need explicit track/pose logic.
+
+### Five distress signatures (the lifeguard expanded the original three)
+
+See [[distress-signal-taxonomy]]: **silent sink, passive face-down, flailing, bobbing-in-place, effort-without-progress.** The last two are new and both hinge on **net displacement through the scene** — the exact thing normalization throws away. Bobbing defeats a lone submersion timer (each resurface resets the clock); "effort without progress" (incl. fighting the wavepool current) is invisible because the AE sees only hip-centered *shape*, not motion through the water.
+
+### Decided direction
+
+- **Plan A (next) — not-surfacing state machine (Rung 4).** A *family* of per-track rules over the `box_conf` + centroid timeline, no ML/training. **v1 silent-sink rule:** track loss / `box_conf` collapse in the pool **interior** → start timer → ALERT if no track re-associates within radius R within N seconds; **suppress** if the loss is at a frame edge (left frame) or velocity heads out. Built so the **bobbing rule** (#4: K cycles + near-zero net displacement + deep zone) drops in as rule 2. Eval = **per-event recall + latency** (how *early* it fired) on the existing 66 events — no annotation pass needed.
+- **Plan B (later) — add velocity/displacement to the AE features**, sharpening flailing and enabling #5.
+- **Labeling fix (for B, not A):** Cell 4 labels windows by *time* overlap, so during a rescue the **lifeguard's track** gets stamped distress → inflates the AE eval. Fix = **track-scoped (victim), not time-scoped** labeling. Do **not** trim the rescue period — real victim distress continues during the save. A is naturally robust (it keys on the victim submerging; the guard's track stays confident and moving), so A needs no re-annotation.
 
 ---
 
