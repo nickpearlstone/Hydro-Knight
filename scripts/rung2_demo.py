@@ -15,11 +15,12 @@ Run: PYTHONPATH=src .venv/bin/python scripts/rung2_demo.py <keypoints.parquet>
 """
 
 import sys
+
 import numpy as np
 import pandas as pd
 
 from hydro_knight.features.normalize import features_from_dataframe
-from hydro_knight.models.autoencoder import train_autoencoder, reconstruction_error
+from hydro_knight.models.autoencoder import reconstruction_error, train_autoencoder
 
 
 def main(parquet_path: str):
@@ -40,7 +41,11 @@ def main(parquet_path: str):
     flipped = flipped.reshape(-1, 34)
     rand = (np.random.randn(*test.shape) * test.std()).astype(np.float32)
 
-    for name, X in [("held-out REAL", test), ("vertically-flipped", flipped), ("randomized", rand)]:
+    for name, X in [
+        ("held-out REAL", test),
+        ("vertically-flipped", flipped),
+        ("randomized", rand),
+    ]:
         e = reconstruction_error(model, X, scaler)
         print(f"  {name:20s}: mean recon-error = {e.mean():.3f}")
 

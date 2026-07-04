@@ -17,7 +17,6 @@ BLOCKLIST_PATH = Path("data/blocklist.txt")
 
 
 class Blocklist:
-
     def __init__(self, path: Path = BLOCKLIST_PATH) -> None:
         self.path = Path(path)
 

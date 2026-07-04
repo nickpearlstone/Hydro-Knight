@@ -24,11 +24,14 @@ class PoseAutoencoder(nn.Module):
     def __init__(self, dim: int = 34, bottleneck: int = 12):
         super().__init__()
         self.encoder = nn.Sequential(
-            nn.Linear(dim, 24), nn.ReLU(),
-            nn.Linear(24, bottleneck), nn.ReLU(),
+            nn.Linear(dim, 24),
+            nn.ReLU(),
+            nn.Linear(24, bottleneck),
+            nn.ReLU(),
         )
         self.decoder = nn.Sequential(
-            nn.Linear(bottleneck, 24), nn.ReLU(),
+            nn.Linear(bottleneck, 24),
+            nn.ReLU(),
             nn.Linear(24, dim),
         )
 
@@ -36,8 +39,13 @@ class PoseAutoencoder(nn.Module):
         return self.decoder(self.encoder(x))
 
 
-def train_autoencoder(features: np.ndarray, epochs: int = 80, lr: float = 1e-3,
-                      bottleneck: int = 12, seed: int = 0):
+def train_autoencoder(
+    features: np.ndarray,
+    epochs: int = 80,
+    lr: float = 1e-3,
+    bottleneck: int = 12,
+    seed: int = 0,
+):
     """
     Train on normal poses. Returns (model, scaler) where scaler = (mean, std)
     used to standardize features (zero-mean/unit-variance) — standardization
@@ -53,7 +61,7 @@ def train_autoencoder(features: np.ndarray, epochs: int = 80, lr: float = 1e-3,
     loss_fn = nn.MSELoss()
 
     model.train()
-    for ep in range(epochs):
+    for _ in range(epochs):
         opt.zero_grad()
         recon = model(X)
         loss = loss_fn(recon, X)

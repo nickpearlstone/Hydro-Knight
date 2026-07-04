@@ -28,23 +28,28 @@ class TCNAutoencoder(nn.Module):
     def __init__(self, n_feat: int = 34):
         super().__init__()
         self.encoder = nn.Sequential(
-            nn.Conv1d(n_feat, 32, kernel_size=3, padding=1), nn.ReLU(),
-            nn.Conv1d(32, 16, kernel_size=3, stride=2, padding=1), nn.ReLU(),
-            nn.Conv1d(16, 8, kernel_size=3, stride=2, padding=1), nn.ReLU(),
+            nn.Conv1d(n_feat, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv1d(32, 16, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv1d(16, 8, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
         )
         self.decoder = nn.Sequential(
-            nn.ConvTranspose1d(8, 16, kernel_size=4, stride=2, padding=1), nn.ReLU(),
-            nn.ConvTranspose1d(16, 32, kernel_size=4, stride=2, padding=1), nn.ReLU(),
+            nn.ConvTranspose1d(8, 16, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.ConvTranspose1d(16, 32, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
             nn.Conv1d(32, n_feat, kernel_size=3, padding=1),
         )
 
-    def forward(self, x):              # x: (B, n_feat, time)
+    def forward(self, x):  # x: (B, n_feat, time)
         return self.decoder(self.encoder(x))
 
 
 def _standardize_fit(windows: np.ndarray):
     """Per-feature mean/std over all frames in all training windows."""
-    flat = windows.reshape(-1, windows.shape[-1])   # (N*window, 34)
+    flat = windows.reshape(-1, windows.shape[-1])  # (N*window, 34)
     mean = flat.mean(axis=0)
     std = flat.std(axis=0) + 1e-6
     return mean, std
@@ -52,8 +57,8 @@ def _standardize_fit(windows: np.ndarray):
 
 def _to_tensor(windows: np.ndarray, scaler):
     mean, std = scaler
-    x = (windows - mean) / std                      # (N, window, 34)
-    x = np.transpose(x, (0, 2, 1))                  # -> (N, 34, window) for Conv1d
+    x = (windows - mean) / std  # (N, window, 34)
+    x = np.transpose(x, (0, 2, 1))  # -> (N, 34, window) for Conv1d
     return torch.tensor(x, dtype=torch.float32)
 
 

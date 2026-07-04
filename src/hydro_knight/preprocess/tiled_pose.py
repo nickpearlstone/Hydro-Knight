@@ -60,9 +60,16 @@ def _nms_merge(dets: list, iou_thresh: float) -> list:
     return kept
 
 
-def detect_tiled(model, frame, tile: int = 480, overlap: float = 0.25,
-                 imgsz: int = 1280, conf: float = 0.25, iou_merge: float = 0.5,
-                 include_full: bool = True) -> list:
+def detect_tiled(
+    model,
+    frame,
+    tile: int = 480,
+    overlap: float = 0.25,
+    imgsz: int = 1280,
+    conf: float = 0.25,
+    iou_merge: float = 0.5,
+    include_full: bool = True,
+) -> list:
     """
     Run YOLO-pose over a tiled grid and return merged full-frame detections.
 
@@ -97,11 +104,11 @@ def detect_tiled(model, frame, tile: int = 480, overlap: float = 0.25,
         kpts = r.keypoints.data.cpu().numpy()  # (n, 17, 3)
         for i in range(len(boxes)):
             box = boxes[i].copy()
-            box[[0, 2]] += ox          # shift x by tile offset
-            box[[1, 3]] += oy          # shift y by tile offset
+            box[[0, 2]] += ox  # shift x by tile offset
+            box[[1, 3]] += oy  # shift y by tile offset
             k = kpts[i].copy()
-            k[:, 0] += ox              # shift keypoint x
-            k[:, 1] += oy              # shift keypoint y
+            k[:, 0] += ox  # shift keypoint x
+            k[:, 1] += oy  # shift keypoint y
             dets.append((box, float(confs[i]), k))
 
     return _nms_merge(dets, iou_merge)

@@ -16,11 +16,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import cv2
-import numpy as np
-from ultralytics import YOLO
 import mediapipe as mp
+import numpy as np
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
+from ultralytics import YOLO
 
 MP_MODEL = Path("raw_local/pose_landmarker.task")
 
@@ -45,7 +45,9 @@ def _resize_h(img, target_h):
 
 def _pixelate(img, blocks=48):
     h, w = img.shape[:2]
-    small = cv2.resize(img, (blocks, max(1, int(blocks * h / w))), interpolation=cv2.INTER_LINEAR)
+    small = cv2.resize(
+        img, (blocks, max(1, int(blocks * h / w))), interpolation=cv2.INTER_LINEAR
+    )
     return cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
 
 
@@ -79,9 +81,11 @@ def _make_runner(spec):
     if spec["kind"] == "mediapipe":
         base = mp_python.BaseOptions(model_asset_path=str(MP_MODEL))
         opts = vision.PoseLandmarkerOptions(
-            base_options=base, running_mode=vision.RunningMode.IMAGE,
+            base_options=base,
+            running_mode=vision.RunningMode.IMAGE,
             num_poses=spec.get("num_poses", 10),
-            min_pose_detection_confidence=spec.get("conf", 0.3))
+            min_pose_detection_confidence=spec.get("conf", 0.3),
+        )
         landmarker = vision.PoseLandmarker.create_from_options(opts)
         conns = vision.PoseLandmarksConnections.POSE_LANDMARKS
         label = spec.get("label", "MediaPipe")
@@ -98,8 +102,13 @@ def _make_runner(spec):
     raise ValueError(f"unknown backend kind: {spec['kind']}")
 
 
-def compare(video_path: Path, out_dir: Path, backends=None,
-            n_frames: int = 8, pixelate: bool = False) -> None:
+def compare(
+    video_path: Path,
+    out_dir: Path,
+    backends=None,
+    n_frames: int = 8,
+    pixelate: bool = False,
+) -> None:
     """
     Run every backend on n_frames sampled across the clip; save N-up PNGs.
 
@@ -137,7 +146,7 @@ def compare(video_path: Path, out_dir: Path, backends=None,
 
         out_path = out_dir / f"compare_{i:02d}_frame{int(idx)}.png"
         cv2.imwrite(str(out_path), combined)
-        print(f"[{i+1}/{len(frame_indices)}] frame {idx}: " + "  ".join(counts))
+        print(f"[{i + 1}/{len(frame_indices)}] frame {idx}: " + "  ".join(counts))
 
     cap.release()
     print(f"\nDone. Open the PNGs in {out_dir} to compare.")
@@ -145,6 +154,7 @@ def compare(video_path: Path, out_dir: Path, backends=None,
 
 if __name__ == "__main__":
     import sys
+
     video = Path(sys.argv[1])
     out = Path("raw_local/pose_spike_out") / video.stem
     compare(video, out, n_frames=8)

@@ -8,27 +8,30 @@ writes a ClipRecord for each result into the manifest JSONL file.
 
 from __future__ import annotations
 
-import subprocess
-import sys
 import json
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
 from .blocklist import Blocklist
 from .manifest import (
-    ClipRecord,
     CameraView,
+    ClipRecord,
+    Label,
+    Manifest,
     Setting,
     TimeOfDay,
     Weather,
-    Label,
-    Manifest,
     make_clip_id,
 )
 
 # Make Homebrew binaries (node, ffmpeg) visible to yt-dlp subprocesses.
-_ENV = {**os.environ, "PATH": f"/opt/homebrew/bin:/usr/local/bin:{os.environ.get('PATH', '')}"}
+_ENV = {
+    **os.environ,
+    "PATH": f"/opt/homebrew/bin:/usr/local/bin:{os.environ.get('PATH', '')}",
+}
 
 # Invoke yt-dlp via this interpreter's module so the venv's current version is
 # always used. The bare "yt-dlp" name can resolve to a stale system build that
@@ -46,8 +49,8 @@ QUERY_SLEEP_SEC = 3
 # Floor lowered to 20s so short surveillance/rescue clips (e.g. the Lifeguard
 # Rescue "Spot the Drowning" series, ~30s–3min) are not filtered out.
 # Ceiling rejects construction timelapses, livestream archives, music videos.
-MIN_DURATION_SEC = 20         # 20 seconds
-MAX_DURATION_SEC = 45 * 60    # 45 minutes
+MIN_DURATION_SEC = 20  # 20 seconds
+MAX_DURATION_SEC = 45 * 60  # 45 minutes
 
 # Keyword queries grouped by intent. Written to avoid YouTube's popularity bias
 # — specific descriptive phrases surface niche uploads rather than viral hits.
@@ -56,30 +59,25 @@ DEFAULT_QUERIES = [
     "swimming pool overhead view people swimming",
     "pool deck camera angle swimmers laps",
     "aquatic center wide angle swim practice",
-
     # Outdoor recreational — the primary training distribution
     "outdoor public pool swimmers summer",
     "community pool open swim session",
     "backyard pool party swimming people",
     "hotel pool guests swimming vacation",
-
     # Indoor recreational
     "indoor lap pool swimmers training session",
     "ymca pool open swim",
     "leisure centre pool swimming",
-
     # Competitive — different body positions, useful for stroke variety
     "swim meet 50m pool side view",
     "masters swimming competition pool",
     "age group swim meet outdoor pool",
-
     # Lifeguard / surveillance perspective — closest to a real safety camera.
     # "lifeguards view" is the term that surfaced the Lifeguard Rescue channel.
     "lifeguards view pool",
     "lifeguard stand view pool swimmers",
     "lifeguard pov pool surveillance",
     "pool safety swim lesson children",
-
     # Rescue / distress footage — the rare POSITIVE class. These queries target
     # real surveillance-angle rescue clips, our hardest-to-find training data.
     "spot the drowning lifeguard",
@@ -88,7 +86,6 @@ DEFAULT_QUERIES = [
     "pool rescue caught on camera",
     "drowning rescue pool surveillance",
     "lifeguard rescue compilation",
-
     # Varied conditions
     "outdoor pool cloudy day swimmers",
     "evening outdoor pool swimmers dusk",
@@ -103,6 +100,7 @@ DEFAULT_CHANNELS = [
 
 
 # --- yt-dlp metadata fetch ---------------------------------------------------
+
 
 def fetch_metadata(
     query: str,
@@ -135,7 +133,11 @@ def fetch_metadata(
     all_results = _parse_json_lines(result.stdout)
 
     if not all_results and result.returncode != 0:
-        first_err = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown error"
+        first_err = (
+            result.stderr.strip().splitlines()[-1]
+            if result.stderr.strip()
+            else "unknown error"
+        )
         print(f"  (query yielded nothing: {first_err})")
 
     filtered = []
@@ -173,7 +175,11 @@ def fetch_channel_videos(channel_url: str, limit: int | None = None) -> list[dic
     videos = _parse_json_lines(result.stdout)
 
     if not videos and result.returncode != 0:
-        first_err = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown error"
+        first_err = (
+            result.stderr.strip().splitlines()[-1]
+            if result.stderr.strip()
+            else "unknown error"
+        )
         print(f"  (channel yielded nothing: {first_err})")
 
     if limit is not None:
@@ -194,6 +200,7 @@ def _parse_json_lines(stdout: str) -> list[dict]:
 
 
 # --- Metadata → ClipRecord ---------------------------------------------------
+
 
 def metadata_to_record(
     meta: dict,
@@ -218,34 +225,41 @@ def metadata_to_record(
     platform = meta.get("extractor") or ("youtube" if "youtube" in url else "unknown")
 
     start_sec = 0.0
-    end_sec   = duration if duration > 0 else -1.0  # -1 = "to end"; annotator reads real length
+    end_sec = (
+        duration if duration > 0 else -1.0
+    )  # -1 = "to end"; annotator reads real length
 
     clip_id = make_clip_id(url, start_sec, end_sec)
 
     return ClipRecord(
-        clip_id     = clip_id,
-        source_url  = url,
-        platform    = platform,
-        start_sec   = start_sec,
-        end_sec     = end_sec,
-        camera_view = CameraView.UNKNOWN,
-        setting     = guess_setting,
-        time_of_day = guess_time_of_day,
-        weather     = guess_weather,
-        label       = Label.UNLABELED,
-        notes       = meta.get("title", ""),
+        clip_id=clip_id,
+        source_url=url,
+        platform=platform,
+        start_sec=start_sec,
+        end_sec=end_sec,
+        camera_view=CameraView.UNKNOWN,
+        setting=guess_setting,
+        time_of_day=guess_time_of_day,
+        weather=guess_weather,
+        label=Label.UNLABELED,
+        notes=meta.get("title", ""),
     )
 
 
-def _register(manifest: Manifest, blocklist: Blocklist, records: list[ClipRecord]) -> None:
+def _register(
+    manifest: Manifest, blocklist: Blocklist, records: list[ClipRecord]
+) -> None:
     """Append records to the manifest, skipping blocklisted URLs and dupes."""
     keep = [r for r in records if not blocklist.contains(r.source_url)]
     blocked = len(records) - len(keep)
     written, skipped = manifest.append_many(keep)
-    print(f"\nDone. {written} new clips registered, {skipped} duplicates skipped, {blocked} blocklisted.")
+    print(
+        f"\nDone. {written} new clips registered, {skipped} duplicates skipped, {blocked} blocklisted."
+    )
 
 
 # --- Collection entry points -------------------------------------------------
+
 
 def collect(
     manifest_path: Path,
@@ -259,7 +273,7 @@ def collect(
     if queries is None:
         queries = DEFAULT_QUERIES
 
-    manifest  = Manifest(manifest_path)
+    manifest = Manifest(manifest_path)
     blocklist = Blocklist()
     all_records: list[ClipRecord] = []
 
@@ -270,8 +284,11 @@ def collect(
         results = fetch_metadata(query, max_results=max_results_per_query)
         print(f"  Found {len(results)} results")
         for meta in results:
-            all_records.append(metadata_to_record(
-                meta, guess_setting, guess_time_of_day, guess_weather))
+            all_records.append(
+                metadata_to_record(
+                    meta, guess_setting, guess_time_of_day, guess_weather
+                )
+            )
 
     _register(manifest, blocklist, all_records)
     print(f"Manifest: {manifest_path}")
@@ -294,7 +311,7 @@ def collect_channels(
     if channels is None:
         channels = DEFAULT_CHANNELS
 
-    manifest  = Manifest(manifest_path)
+    manifest = Manifest(manifest_path)
     blocklist = Blocklist()
     all_records: list[ClipRecord] = []
 
@@ -305,8 +322,11 @@ def collect_channels(
         videos = fetch_channel_videos(channel, limit=limit_per_channel)
         print(f"  Found {len(videos)} videos")
         for meta in videos:
-            all_records.append(metadata_to_record(
-                meta, guess_setting, guess_time_of_day, guess_weather))
+            all_records.append(
+                metadata_to_record(
+                    meta, guess_setting, guess_time_of_day, guess_weather
+                )
+            )
 
     _register(manifest, blocklist, all_records)
     print(f"Manifest: {manifest_path}")
@@ -316,5 +336,5 @@ def collect_channels(
 
 if __name__ == "__main__":
     manifest = Path("data/manifests/pool_footage.jsonl")
-    collect(manifest)              # keyword searches
-    collect_channels(manifest)    # whole-channel pulls (Lifeguard Rescue, etc.)
+    collect(manifest)  # keyword searches
+    collect_channels(manifest)  # whole-channel pulls (Lifeguard Rescue, etc.)

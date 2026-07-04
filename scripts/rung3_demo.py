@@ -15,11 +15,12 @@ Run: PYTHONPATH=src .venv/bin/python scripts/rung3_demo.py <keypoints.parquet>
 """
 
 import sys
+
 import numpy as np
 import pandas as pd
 
 from hydro_knight.features.windows import make_windows
-from hydro_knight.models.tcn_autoencoder import train_tcn, reconstruction_error
+from hydro_knight.models.tcn_autoencoder import reconstruction_error, train_tcn
 
 WINDOW = 32
 
@@ -38,14 +39,18 @@ def main(parquet_path: str):
 
     shuffled = test.copy()
     for i in range(len(shuffled)):
-        shuffled[i] = shuffled[i][np.random.permutation(WINDOW)]   # scramble time order
+        shuffled[i] = shuffled[i][np.random.permutation(WINDOW)]  # scramble time order
     flipped = test.copy().reshape(len(test), WINDOW, 17, 2)
     flipped[..., 1] *= -1
     flipped = flipped.reshape(len(test), WINDOW, 34)
     rand = (np.random.randn(*test.shape) * test.std()).astype(np.float32)
 
-    for name, X in [("held-out REAL", test), ("time-shuffled", shuffled),
-                    ("vertically-flipped", flipped), ("randomized", rand)]:
+    for name, X in [
+        ("held-out REAL", test),
+        ("time-shuffled", shuffled),
+        ("vertically-flipped", flipped),
+        ("randomized", rand),
+    ]:
         e = reconstruction_error(model, X, scaler)
         print(f"  {name:20s}: mean recon-error = {e.mean():.3f}")
 

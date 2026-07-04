@@ -9,21 +9,24 @@ re-running this script skips already-downloaded clips.
 from __future__ import annotations
 
 import os
-import sys
 import subprocess
+import sys
 from pathlib import Path
+
+from .manifest import ClipRecord, Manifest
 
 # Ensure Homebrew binaries (ffmpeg, node) are visible to subprocesses even
 # when the shell PATH isn't inherited by the venv.
-_ENV = {**os.environ, "PATH": f"/opt/homebrew/bin:/usr/local/bin:{os.environ.get('PATH', '')}"}
+_ENV = {
+    **os.environ,
+    "PATH": f"/opt/homebrew/bin:/usr/local/bin:{os.environ.get('PATH', '')}",
+}
 
 # Invoke yt-dlp through THIS interpreter (the venv's python) rather than the
 # bare "yt-dlp" name. Several yt-dlp copies of different ages exist on this
 # machine; the bare name resolved to an old 2023 build without --js-runtimes.
 # "python -m yt_dlp" guarantees the venv's up-to-date version is used.
 _YTDLP = [sys.executable, "-m", "yt_dlp"]
-
-from .manifest import ClipRecord, Manifest
 
 
 # Where downloaded videos land. Gitignored.
@@ -56,7 +59,11 @@ def is_downloaded(record: ClipRecord) -> bool:
     return done_marker(record).exists()
 
 
-def download_clip(record: ClipRecord, cookies_file: Path | None = None, cookies_from_browser: str | None = None) -> bool:
+def download_clip(
+    record: ClipRecord,
+    cookies_file: Path | None = None,
+    cookies_from_browser: str | None = None,
+) -> bool:
     """
     Download one clip to raw_local/.
 
@@ -71,16 +78,21 @@ def download_clip(record: ClipRecord, cookies_file: Path | None = None, cookies_
     cmd = [
         *_YTDLP,
         record.source_url,
-        "--output", str(out_path),
-        "--format", "bestvideo[ext=mp4][height<=1080]/bestvideo[height<=1080]/136/135/134", # mp4 video-only up to 1080p
-        "--js-runtimes", "node",  # use installed Node to run YouTube's JS
+        "--output",
+        str(out_path),
+        "--format",
+        "bestvideo[ext=mp4][height<=1080]/bestvideo[height<=1080]/136/135/134",  # mp4 video-only up to 1080p
+        "--js-runtimes",
+        "node",  # use installed Node to run YouTube's JS
         # YouTube's upgraded "n challenge" now needs yt-dlp's remote EJS solver
         # script (fetched from its official GitHub) run via Node. Without this,
         # extraction yields "only images" -> "requested format is not available".
-        "--remote-components", "ejs:github",
+        "--remote-components",
+        "ejs:github",
         # Download DASH fragments in parallel to beat YouTube's per-connection
         # throttling (single connection was ~0.5 MB/s; this multiplies it).
-        "--concurrent-fragments", "5",
+        "--concurrent-fragments",
+        "5",
         "--quiet",
         "--no-playlist",
     ]
@@ -96,7 +108,12 @@ def download_clip(record: ClipRecord, cookies_file: Path | None = None, cookies_
     # re-based to 0, so the pose-extraction step maps file-time t to
     # source-time (start_sec + t); events (source timeline) map in the same way.
     # Clips with start_sec == 0 download whole (the common short-clip case).
-    if record.start_sec and record.start_sec > 0 and record.end_sec and record.end_sec > 0:
+    if (
+        record.start_sec
+        and record.start_sec > 0
+        and record.end_sec
+        and record.end_sec > 0
+    ):
         # Cut at nearest keyframes (no --force-keyframes-at-cuts): a stream copy
         # that's fast and avoids a multi-hour re-encode on long sections. Start/
         # end may be off by a few seconds, which is fine for our purposes.
@@ -105,7 +122,9 @@ def download_clip(record: ClipRecord, cookies_file: Path | None = None, cookies_
     result = subprocess.run(cmd, capture_output=True, text=True, env=_ENV)
 
     if result.returncode != 0:
-        print(f"  Failed ({record.clip_id}): {result.stderr.strip().splitlines()[-1] if result.stderr.strip() else 'unknown error'}")
+        print(
+            f"  Failed ({record.clip_id}): {result.stderr.strip().splitlines()[-1] if result.stderr.strip() else 'unknown error'}"
+        )
         return False
 
     # Write the sidecar marker so future runs skip this clip.
@@ -147,7 +166,9 @@ def download(
     for i, record in enumerate(pending, start=1):
         title = record.notes[:60] if record.notes else record.clip_id
         print(f"[{i}/{len(pending)}] {title}")
-        if download_clip(record, cookies_file=cookies_file, cookies_from_browser=cookies_from_browser):
+        if download_clip(
+            record, cookies_file=cookies_file, cookies_from_browser=cookies_from_browser
+        ):
             print(f"  OK → {local_path(record)}")
             succeeded += 1
         else:

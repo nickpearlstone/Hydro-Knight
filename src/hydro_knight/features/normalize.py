@@ -45,9 +45,9 @@ def normalize_pose(kpts: np.ndarray, min_ref_conf: float = 0.3) -> np.ndarray | 
     if torso < 1e-3:
         return None  # degenerate (points collapsed) — unreliable
 
-    xy = kpts[:, :2] - hip_center   # translate to hip-centered frame
-    xy = xy / torso                 # scale by torso length
-    return xy.flatten().astype(np.float32)   # (34,)
+    xy = kpts[:, :2] - hip_center  # translate to hip-centered frame
+    xy = xy / torso  # scale by torso length
+    return xy.flatten().astype(np.float32)  # (34,)
 
 
 def features_from_dataframe(df: pd.DataFrame, min_ref_conf: float = 0.3):
@@ -61,7 +61,7 @@ def features_from_dataframe(df: pd.DataFrame, min_ref_conf: float = 0.3):
     """
     xy = df[_XY_COLS].to_numpy(dtype=np.float32).reshape(len(df), 17, 2)
     conf = df[_C_COLS].to_numpy(dtype=np.float32).reshape(len(df), 17, 1)
-    kpts = np.concatenate([xy, conf], axis=2)   # (N, 17, 3)
+    kpts = np.concatenate([xy, conf], axis=2)  # (N, 17, 3)
 
     feats, keep_idx = [], []
     for i in range(len(df)):
@@ -70,6 +70,8 @@ def features_from_dataframe(df: pd.DataFrame, min_ref_conf: float = 0.3):
             feats.append(v)
             keep_idx.append(i)
 
-    features = np.array(feats, dtype=np.float32) if feats else np.empty((0, 34), np.float32)
+    features = (
+        np.array(feats, dtype=np.float32) if feats else np.empty((0, 34), np.float32)
+    )
     meta = df.iloc[keep_idx][["frame", "track_id"]].reset_index(drop=True)
     return features, meta

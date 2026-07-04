@@ -20,7 +20,9 @@ from hydro_knight.features.normalize import (
 from hydro_knight.features.windows import make_windows
 
 # Column layout the feature code expects: x0,y0,c0 ... x16,y16,c16
-_COLS = [f"{ax}{i}" for i in range(17) for ax in ("x", "y")] + [f"c{i}" for i in range(17)]
+_COLS = [f"{ax}{i}" for i in range(17) for ax in ("x", "y")] + [
+    f"c{i}" for i in range(17)
+]
 
 
 def _pose_row(frame: int, track_id: int) -> dict:

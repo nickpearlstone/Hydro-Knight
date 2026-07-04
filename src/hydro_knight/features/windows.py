@@ -43,10 +43,13 @@ def make_windows(df, window: int = 32, stride: int = 8, min_ref_conf: float = 0.
         rows = g["row"].to_numpy()
         frames = g["frame"].to_numpy()
         for s in range(0, len(rows) - window + 1, stride):
-            idx = rows[s:s + window]
+            idx = rows[s : s + window]
             windows.append(feats[idx])
             info.append((int(tid), int(frames[s])))
 
-    arr = (np.stack(windows).astype(np.float32)
-           if windows else np.empty((0, window, 34), np.float32))
+    arr = (
+        np.stack(windows).astype(np.float32)
+        if windows
+        else np.empty((0, window, 34), np.float32)
+    )
     return arr, info

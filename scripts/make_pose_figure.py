@@ -12,13 +12,13 @@ Run: PYTHONPATH=src .venv/bin/python scripts/make_pose_figure.py
 from pathlib import Path
 
 import cv2
-import numpy as np
-from ultralytics import YOLO
 import mediapipe as mp
+import numpy as np
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
+from ultralytics import YOLO
 
-CLIP = "raw_local/b4b2db5ffb48.mp4"   # a wavepool rescue clip (crowded normal lead-in)
+CLIP = "raw_local/b4b2db5ffb48.mp4"  # a wavepool rescue clip (crowded normal lead-in)
 FRAME = 1197
 OUT = Path("docs/images")
 MP_MODEL = "raw_local/pose_landmarker.task"
@@ -26,7 +26,9 @@ MP_MODEL = "raw_local/pose_landmarker.task"
 
 def pixelate(img, blocks=48):
     h, w = img.shape[:2]
-    small = cv2.resize(img, (blocks, max(1, int(blocks * h / w))), interpolation=cv2.INTER_LINEAR)
+    small = cv2.resize(
+        img, (blocks, max(1, int(blocks * h / w))), interpolation=cv2.INTER_LINEAR
+    )
     return cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
 
 
@@ -38,7 +40,7 @@ def label(img, text):
 def draw_mp(img, poses, conns):
     h, w = img.shape[:2]
     for lms in poses:
-        pts = [(int(l.x * w), int(l.y * h)) for l in lms]
+        pts = [(int(lm.x * w), int(lm.y * h)) for lm in lms]
         for c in conns:
             cv2.line(img, pts[c.start], pts[c.end], (0, 255, 0), 2)
         for p in pts:
@@ -62,9 +64,12 @@ def main():
     r1280 = yolo(frame, imgsz=1280, verbose=False)[0]
 
     base = mp_python.BaseOptions(model_asset_path=MP_MODEL)
-    opts = vision.PoseLandmarkerOptions(base_options=base,
-                                        running_mode=vision.RunningMode.IMAGE,
-                                        num_poses=10, min_pose_detection_confidence=0.3)
+    opts = vision.PoseLandmarkerOptions(
+        base_options=base,
+        running_mode=vision.RunningMode.IMAGE,
+        num_poses=10,
+        min_pose_detection_confidence=0.3,
+    )
     lm = vision.PoseLandmarker.create_from_options(opts)
     conns = vision.PoseLandmarksConnections.POSE_LANDMARKS
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -86,7 +91,7 @@ def main():
     label(d, f"MediaPipe: {len(mpres.pose_landmarks)} swimmers")
     cv2.imwrite(str(OUT / "pose_model.png"), np.hstack([c, d]))
 
-    print(f"wrote {OUT/'pose_resolution.png'} and {OUT/'pose_model.png'}")
+    print(f"wrote {OUT / 'pose_resolution.png'} and {OUT / 'pose_model.png'}")
 
 
 if __name__ == "__main__":
