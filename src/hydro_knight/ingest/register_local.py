@@ -15,11 +15,17 @@ from pathlib import Path
 
 import cv2
 
+from .download import RAW_LOCAL, done_marker, local_path
 from .manifest import (
-    ClipRecord, CameraView, Setting, TimeOfDay, Weather, Label,
-    Manifest, make_clip_id,
+    CameraView,
+    ClipRecord,
+    Label,
+    Manifest,
+    Setting,
+    TimeOfDay,
+    Weather,
+    make_clip_id,
 )
-from .download import RAW_LOCAL, local_path, done_marker
 
 
 def _video_duration_sec(path: Path) -> float:
@@ -127,6 +133,7 @@ def register_local(
 
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) < 2:
         print("usage: python -m hydro_knight.ingest.register_local <video_file>")
         raise SystemExit(1)
@@ -139,6 +146,6 @@ if __name__ == "__main__":
         setting=Setting.OUTDOOR,
         time_of_day=TimeOfDay.DAY,
         weather=Weather.CLEAR,
-        label=Label.UNLABELED,   # leave for your annotation pass
+        label=Label.UNLABELED,  # leave for your annotation pass
         notes="AMI Pool Cam (White Sands Beach Resort) screen recording",
     )

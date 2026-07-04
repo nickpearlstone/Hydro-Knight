@@ -259,7 +259,8 @@ The committed tree is clean (no video/weights/venv ever tracked — keep it that
 
 ## Collaboration rules (Claude must follow these)
 
-- **One file at a time.** Only modify a single file per response unless explicitly told otherwise. If a change naturally spans multiple files, stop and ask which to tackle first.
+- **Multi-file changes are fine.** Modify as many files in one response as the task needs. *(Relaxed 2026-07-04; was one-file-per-response.)*
+- **Ask clarifying questions before starting.** Keep asking until ~95% confident the request can be accomplished as actually intended. Don't guess at ambiguous intent — surface the ambiguity and ask.
 - **Explain every change in plain English.** After writing or editing any line of code, describe what it does as if the reader has never seen that line before — what problem it solves, what the individual pieces mean, and why it was written that way. No assumed context.
 
 ---

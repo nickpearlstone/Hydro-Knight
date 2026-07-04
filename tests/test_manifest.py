@@ -20,7 +20,9 @@ from hydro_knight.ingest.manifest import (
 )
 
 
-def _record(url: str = "https://example.com/v", start: float = 0.0, end: float = 10.0) -> ClipRecord:
+def _record(
+    url: str = "https://example.com/v", start: float = 0.0, end: float = 10.0
+) -> ClipRecord:
     """Build a minimal valid ClipRecord with a hashed clip_id."""
     return ClipRecord(
         clip_id=make_clip_id(url, start, end),

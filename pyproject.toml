@@ -32,13 +32,35 @@ dependencies = [
 spike = ["mediapipe>=0.10.0"]
 
 [dependency-groups]
-dev = ["pytest>=8.0.0"]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.9.0",   # linter + formatter (config in [tool.ruff] below)
+]
 
 [tool.pytest.ini_options]
 # Look for tests only under tests/, and treat plain `assert` as the assertion
 # mechanism (pytest rewrites them into rich failure messages).
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+# Formatter: all defaults (88-col lines, double quotes). The formatter is
+# deliberately near-unconfigurable — its value is ending style decisions,
+# not expressing them. Run: `uv run ruff format .`
+#
+# Linter rule families (run: `uv run ruff check .`):
+#   E4/E7/E9, F — pyflakes + core pycodestyle: real defects (undefined names,
+#                 unused imports/variables). Ruff's defaults; near-zero noise.
+#   I   — import sorting (auto-fixable, pure consistency)
+#   B   — bugbear: patterns that *work* but bite later (mutable default args,
+#         unused loop variables, blind excepts)
+#   UP  — modernize syntax to what requires-python (3.11) already allows
+#   SIM — flags needlessly convoluted constructs with simpler equivalents
+# Deliberately NOT enabled (revisit if the project grows contributors):
+#   D (docstring style), ANN (type-annotation coverage) — high-volume style
+#   opinions, low bug-catching value for a solo research repo.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM"]
 
 [build-system]
 requires = ["hatchling"]

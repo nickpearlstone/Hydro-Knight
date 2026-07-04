@@ -1,0 +1,39 @@
+# Continuous integration: run the test suite on every push to main and on
+# every pull request targeting main. To make this an actual merge gate,
+# enable branch protection on GitHub (Settings > Branches > require the
+# "test" check to pass) — the workflow alone only reports, it doesn't block.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # ultralytics pulls in torch (~2 GB); with the uv cache warm this is
+    # fast, but a cold install should never hang the runner forever.
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Install uv (with dependency caching)
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install Python + dependencies exactly as locked
+        # --frozen: install precisely what uv.lock pins and FAIL if
+        # pyproject.toml and uv.lock have drifted apart — catches
+        # "edited deps but forgot to re-lock" at PR time. The default
+        # dev group brings in pytest.
+        run: uv sync --frozen
+
+      - name: Run tests
+        # `python -m pytest`, not the `pytest` shim — same invocation the
+        # repo uses locally (see CLAUDE.md/PLAN.md).
+        run: uv run python -m pytest

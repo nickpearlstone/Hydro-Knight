@@ -14,66 +14,67 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 
-
 # --- Controlled vocabularies -------------------------------------------------
 # These Enums define the only legal values for categorical fields.
 # Using an Enum instead of a plain string means a typo ("outdooor") becomes
 # an immediate crash rather than silent bad data in the manifest.
 
+
 class CameraView(str, Enum):
-    OVERHEAD   = "overhead"    # camera mounted directly above the pool
-    ELEVATED   = "elevated"    # camera on a stand or high wall, angled down
+    OVERHEAD = "overhead"  # camera mounted directly above the pool
+    ELEVATED = "elevated"  # camera on a stand or high wall, angled down
     DECK_LEVEL = "deck_level"  # roughly eye-level with the water surface
     UNDERWATER = "underwater"  # below the surface
-    UNKNOWN    = "unknown"
+    UNKNOWN = "unknown"
 
 
 class Setting(str, Enum):
     OUTDOOR = "outdoor"
-    INDOOR  = "indoor"
+    INDOOR = "indoor"
     UNKNOWN = "unknown"
 
 
 class TimeOfDay(str, Enum):
-    DAY     = "day"
-    DUSK    = "dusk"
-    NIGHT   = "night"
+    DAY = "day"
+    DUSK = "dusk"
+    NIGHT = "night"
     UNKNOWN = "unknown"
 
 
 class Weather(str, Enum):
-    CLEAR    = "clear"
+    CLEAR = "clear"
     OVERCAST = "overcast"
-    RAIN     = "rain"
-    UNKNOWN  = "unknown"
+    RAIN = "rain"
+    UNKNOWN = "unknown"
 
 
 class Label(str, Enum):
-    NORMAL    = "normal"    # confirmed normal swimming activity
-    DISTRESS  = "distress"  # confirmed drowning / distress event
-    SUBMERGED = "submerged" # person submerged but outcome unknown
-    FACE_DOWN = "face_down" # prone face-down beyond normal duration
-    REVIEW    = "review"    # needs a human to watch before labeling
-    UNLABELED = "unlabeled" # not yet looked at
+    NORMAL = "normal"  # confirmed normal swimming activity
+    DISTRESS = "distress"  # confirmed drowning / distress event
+    SUBMERGED = "submerged"  # person submerged but outcome unknown
+    FACE_DOWN = "face_down"  # prone face-down beyond normal duration
+    REVIEW = "review"  # needs a human to watch before labeling
+    UNLABELED = "unlabeled"  # not yet looked at
 
 
 # --- Clip record -------------------------------------------------------------
+
 
 @dataclass
 class ClipRecord:
     """One row in the manifest — represents a single video clip."""
 
-    clip_id:      str        # deterministic hash, computed from source + timestamps
-    source_url:   str        # original URL the clip came from
-    platform:     str        # e.g. "youtube", "vimeo", "local"
-    start_sec:    float      # where in the source video this clip starts (seconds)
-    end_sec:      float      # where it ends; use -1.0 to mean "to the end"
-    camera_view:  CameraView
-    setting:      Setting
-    time_of_day:  TimeOfDay
-    weather:      Weather
-    label:        Label
-    notes:        str = ""   # free-text, optional
+    clip_id: str  # deterministic hash, computed from source + timestamps
+    source_url: str  # original URL the clip came from
+    platform: str  # e.g. "youtube", "vimeo", "local"
+    start_sec: float  # where in the source video this clip starts (seconds)
+    end_sec: float  # where it ends; use -1.0 to mean "to the end"
+    camera_view: CameraView
+    setting: Setting
+    time_of_day: TimeOfDay
+    weather: Weather
+    label: Label
+    notes: str = ""  # free-text, optional
 
     # Event windows: typed time spans (in the same source-video timeline as
     # start_sec/end_sec) marking WHERE a specific anomaly is visible.
@@ -91,7 +92,7 @@ class ClipRecord:
     #
     # default_factory=list gives each ClipRecord its own empty list rather
     # than sharing one mutable list across all instances (a classic bug).
-    events:       list[dict] = field(default_factory=list)
+    events: list[dict] = field(default_factory=list)
 
 
 def make_clip_id(source_url: str, start_sec: float, end_sec: float) -> str:
@@ -111,6 +112,7 @@ def make_clip_id(source_url: str, start_sec: float, end_sec: float) -> str:
 
 
 # --- Manifest reader / writer ------------------------------------------------
+
 
 class Manifest:
     """
@@ -147,22 +149,24 @@ class Manifest:
                 # Convert the raw string values back into their Enum types
                 # so callers always get ClipRecord objects with Enum fields,
                 # never bare strings.
-                records.append(ClipRecord(
-                    clip_id    = data["clip_id"],
-                    source_url = data["source_url"],
-                    platform   = data["platform"],
-                    start_sec  = data["start_sec"],
-                    end_sec    = data["end_sec"],
-                    camera_view = CameraView(data["camera_view"]),
-                    setting     = Setting(data["setting"]),
-                    time_of_day = TimeOfDay(data["time_of_day"]),
-                    weather     = Weather(data["weather"]),
-                    label       = Label(data["label"]),
-                    notes       = data.get("notes", ""),
-                    # .get with default keeps older manifests (written before
-                    # the events field existed) loading without error.
-                    events      = data.get("events", []),
-                ))
+                records.append(
+                    ClipRecord(
+                        clip_id=data["clip_id"],
+                        source_url=data["source_url"],
+                        platform=data["platform"],
+                        start_sec=data["start_sec"],
+                        end_sec=data["end_sec"],
+                        camera_view=CameraView(data["camera_view"]),
+                        setting=Setting(data["setting"]),
+                        time_of_day=TimeOfDay(data["time_of_day"]),
+                        weather=Weather(data["weather"]),
+                        label=Label(data["label"]),
+                        notes=data.get("notes", ""),
+                        # .get with default keeps older manifests (written before
+                        # the events field existed) loading without error.
+                        events=data.get("events", []),
+                    )
+                )
         return records
 
     def append(self, record: ClipRecord) -> bool:
@@ -187,10 +191,10 @@ class Manifest:
             # serialize it (JSON doesn't know what an Enum is).
             row = asdict(record)
             row["camera_view"] = record.camera_view.value
-            row["setting"]     = record.setting.value
+            row["setting"] = record.setting.value
             row["time_of_day"] = record.time_of_day.value
-            row["weather"]     = record.weather.value
-            row["label"]       = record.label.value
+            row["weather"] = record.weather.value
+            row["label"] = record.label.value
             f.write(json.dumps(row) + "\n")
 
         return True
@@ -230,10 +234,10 @@ class Manifest:
             for record in records:
                 row = asdict(record)
                 row["camera_view"] = record.camera_view.value
-                row["setting"]     = record.setting.value
+                row["setting"] = record.setting.value
                 row["time_of_day"] = record.time_of_day.value
-                row["weather"]     = record.weather.value
-                row["label"]       = record.label.value
+                row["weather"] = record.weather.value
+                row["label"] = record.label.value
                 f.write(json.dumps(row) + "\n")
 
         tmp.replace(self.path)
@@ -261,10 +265,10 @@ class Manifest:
             for record in filtered:
                 row = asdict(record)
                 row["camera_view"] = record.camera_view.value
-                row["setting"]     = record.setting.value
+                row["setting"] = record.setting.value
                 row["time_of_day"] = record.time_of_day.value
-                row["weather"]     = record.weather.value
-                row["label"]       = record.label.value
+                row["weather"] = record.weather.value
+                row["label"] = record.label.value
                 f.write(json.dumps(row) + "\n")
 
         tmp.replace(self.path)

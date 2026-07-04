@@ -38,7 +38,7 @@ class SimpleTracker:
     def __init__(self, iou_thresh: float = 0.3, max_age: int = 15):
         self.iou_thresh = iou_thresh
         self.max_age = max_age
-        self.tracks: dict[int, dict] = {}   # id -> {"box": xyxy, "age": int}
+        self.tracks: dict[int, dict] = {}  # id -> {"box": xyxy, "age": int}
         self._next_id = 1
 
     def update(self, boxes: list[np.ndarray]) -> list[int]:
@@ -60,7 +60,7 @@ class SimpleTracker:
         pairs.sort(reverse=True)
 
         used_tracks, used_dets = set(), set()
-        for iou, tid, di in pairs:
+        for _, tid, di in pairs:
             if tid in used_tracks or di in used_dets:
                 continue
             ids[di] = tid

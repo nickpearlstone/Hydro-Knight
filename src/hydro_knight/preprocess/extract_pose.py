@@ -18,17 +18,30 @@ import cv2
 import numpy as np
 import pandas as pd
 import supervision as sv
-from ultralytics import YOLO
 from trackers import ByteTrackTracker
+from ultralytics import YOLO
 
 from .tiled_pose import detect_tiled
 
 # 17 COCO keypoints, in the order YOLO returns them.
 KEYPOINT_NAMES = [
-    "nose", "l_eye", "r_eye", "l_ear", "r_ear",
-    "l_shoulder", "r_shoulder", "l_elbow", "r_elbow",
-    "l_wrist", "r_wrist", "l_hip", "r_hip",
-    "l_knee", "r_knee", "l_ankle", "r_ankle",
+    "nose",
+    "l_eye",
+    "r_eye",
+    "l_ear",
+    "r_ear",
+    "l_shoulder",
+    "r_shoulder",
+    "l_elbow",
+    "r_elbow",
+    "l_wrist",
+    "r_wrist",
+    "l_hip",
+    "r_hip",
+    "l_knee",
+    "r_knee",
+    "l_ankle",
+    "r_ankle",
 ]
 
 # Column layout of the output table: metadata first, then x/y/conf per keypoint.
@@ -97,9 +110,11 @@ def extract(
     df.to_parquet(out_path, index=False)
 
     n_tracks = df["track_id"].nunique() if len(df) else 0
-    print(f"{video_path.name}: {len(df)} detections across "
-          f"{df['frame'].nunique() if len(df) else 0} frames, "
-          f"{n_tracks} unique tracks -> {out_path}")
+    print(
+        f"{video_path.name}: {len(df)} detections across "
+        f"{df['frame'].nunique() if len(df) else 0} frames, "
+        f"{n_tracks} unique tracks -> {out_path}"
+    )
     return len(df)
 
 
@@ -128,8 +143,9 @@ def extract_tiled(
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     model = YOLO(model_name)
-    tracker = ByteTrackTracker(track_activation_threshold=0.3,
-                               minimum_consecutive_frames=2)
+    tracker = ByteTrackTracker(
+        track_activation_threshold=0.3, minimum_consecutive_frames=2
+    )
     cap = cv2.VideoCapture(str(video_path))
 
     rows: list[list[float]] = []
@@ -141,13 +157,15 @@ def extract_tiled(
         if not ok:
             break
 
-        dets = detect_tiled(model, frame, tile=tile, overlap=overlap,
-                            imgsz=imgsz, conf=conf)
+        dets = detect_tiled(
+            model, frame, tile=tile, overlap=overlap, imgsz=imgsz, conf=conf
+        )
         if dets:
             detections = sv.Detections(
                 xyxy=np.array([d[0] for d in dets], dtype=float),
                 confidence=np.array([d[1] for d in dets], dtype=float),
-                class_id=np.zeros(len(dets), dtype=int))
+                class_id=np.zeros(len(dets), dtype=int),
+            )
             detections.data["kp_idx"] = np.arange(len(dets))  # map tracked -> keypoints
         else:
             detections = sv.Detections.empty()
@@ -163,13 +181,16 @@ def extract_tiled(
     cap.release()
     df = pd.DataFrame(rows, columns=COLUMNS)
     df.to_parquet(out_path, index=False)
-    print(f"{video_path.name} (tiled): {len(df)} detections across {frame_idx} "
-          f"frames, {df['track_id'].nunique() if len(df) else 0} tracks -> {out_path}")
+    print(
+        f"{video_path.name} (tiled): {len(df)} detections across {frame_idx} "
+        f"frames, {df['track_id'].nunique() if len(df) else 0} tracks -> {out_path}"
+    )
     return len(df)
 
 
 if __name__ == "__main__":
     import sys
+
     video = Path(sys.argv[1])
     tiled = "--tiled" in sys.argv
     out = Path("data/keypoints") / f"{video.stem}.parquet"
