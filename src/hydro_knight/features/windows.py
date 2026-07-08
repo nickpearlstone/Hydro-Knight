@@ -1,9 +1,9 @@
 """
 Slice per-frame pose features into fixed-length temporal windows (sequences).
 
-The per-frame autoencoder (Rung 2) sees one pose at a time. To learn *motion*
-(Rung 3) the model needs short sequences. For each tracked swimmer we sort their
-poses by frame and slide a window over them.
+A single pose is one frame's snapshot. To learn *motion* (Rung 3) the model
+needs short sequences. For each tracked swimmer we sort their poses by frame
+and slide a window over them.
 
 Output windows have shape (N, window, 34): N sequences, each `window` frames of
 the 34-dim normalized pose vector. One window = "how this swimmer moved over ~W

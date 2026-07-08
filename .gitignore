@@ -12,6 +12,9 @@ CLAUDE.md
 # spike dumps). Keeps raw_local/ as source video only.
 scratch/
 
+# Eval-report run folders (PNGs + stats per run) — regenerable outputs
+runs/
+
 # Cookie files must never be committed
 *cookies*.txt
 

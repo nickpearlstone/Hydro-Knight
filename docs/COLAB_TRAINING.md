@@ -1,7 +1,7 @@
 # Training in Colab — dataset + notebook recipe
 
-GPU-side recipe: extract poses (slow, needs GPU), then train the Rung 2/3
-autoencoders and evaluate against the labeled distress clips. The repo clone
+GPU-side recipe: extract poses (slow, needs GPU), then train the Rung 3 TCN
+autoencoder and evaluate against the labeled distress clips. The repo clone
 brings the **code + manifest**; the **videos** come from your Google Drive
 (they're gitignored, never in the repo).
 
@@ -116,7 +116,7 @@ distress_win = np.array(distress_win, np.float32)
 print("normal windows:", len(normal_win), "| distress windows:", len(distress_win))
 ```
 
-### Cell 5 — train (Rung 3 TCN; Rung 2 is analogous)
+### Cell 5 — train (Rung 3 TCN)
 ```python
 from hydro_knight.models.tcn_autoencoder import train_tcn, reconstruction_error
 
