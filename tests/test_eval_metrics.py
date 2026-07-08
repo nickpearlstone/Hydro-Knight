@@ -131,6 +131,16 @@ def test_sweep_recall_endpoints():
     assert rec[2.0] == 0.0
 
 
+def test_split_scores_excludes_trained_on():
+    # Rows flagged trained_on must not leak into the ROC/percentile pools —
+    # scoring a model on its own training windows flatters the normal class.
+    clip = _clip([(1, 300, 0.9), (2, 1500, 0.1), (2, 1600, 0.2)])
+    clip.detections["trained_on"] = [False, True, False]
+    err_n, err_d = split_scores([clip])
+    assert sorted(err_n.tolist()) == [0.2, 0.9]  # the 0.1 trained-on row is gone
+    assert len(err_d) == 0
+
+
 def test_split_scores_and_perfect_roc():
     # Distress windows all score higher than normal -> ROC-AUC must be 1.0.
     clip = _clip(

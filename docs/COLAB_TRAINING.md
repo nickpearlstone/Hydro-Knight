@@ -28,29 +28,35 @@ give both normal and distress.
 
 ## 2. Notebook cells
 
-### Cell 1 — setup (GPU + repo + deps)
+The flow is: **setup → restore data → (extract only if needed) → one report
+command**. The old manual train/eval cells are gone — `scripts/eval_report.py`
+does windowing, training/loading, metrics, and figures in one call.
+
+### Cell 1 — setup (repo + deps + Drive), idempotent
 ```python
-import torch; print("GPU:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "NONE — set Runtime>GPU")
-!git clone https://github.com/DistancedTurtle/Hydro-Knight.git
+!git clone -q https://github.com/DistancedTurtle/Hydro-Knight.git 2>/dev/null || (cd Hydro-Knight && git pull -q)
 %cd Hydro-Knight
 # Colab ships a GPU build of torch; install the rest explicitly so it isn't clobbered.
-!pip -q install ultralytics trackers supervision opencv-python pandas pyarrow scikit-learn
-# editable-install just the local package (no deps -> leaves Colab's torch intact),
-# which makes `hydro_knight` importable without any sys.path hack.
+!pip -q install ultralytics trackers supervision opencv-python pandas pyarrow scikit-learn matplotlib
+# editable-install just the local package (no deps -> leaves Colab's torch intact)
 !pip -q install -e . --no-deps
-```
-
-### Cell 2 — mount videos from Drive
-```python
 from google.colab import drive; drive.mount("/content/drive")
-!mkdir -p raw_local
-!unzip -q -o /content/drive/MyDrive/hydroknight/videos.zip -d raw_local
-from pathlib import Path
-RAW = Path("raw_local")
-print("videos found:", len(list(RAW.glob("*.mp4"))))
+DRIVE = "/content/drive/MyDrive/hydroknight"
 ```
 
-### Cell 3 — extract poses (the slow GPU step)
+### Cell 2 — restore data from Drive
+```python
+from pathlib import Path
+# keypoints: skips re-extraction entirely if you saved them last session
+!mkdir -p data && cp -r {DRIVE}/keypoints data/ 2>/dev/null || echo "no saved keypoints -> run Cell 3"
+# videos: needed for extraction AND for true per-clip fps in the report
+!mkdir -p raw_local
+!unzip -q -n {DRIVE}/videos.zip -d raw_local
+RAW = Path("raw_local"); KP = Path("data/keypoints")
+print("videos:", len(list(RAW.glob("*.mp4"))), "| keypoint parquets:", len(list(KP.glob("*.parquet"))))
+```
+
+### Cell 3 — extract poses (SKIP if Cell 2 restored keypoints)
 ```python
 import warnings; warnings.simplefilter("ignore")
 import cv2
@@ -85,72 +91,54 @@ for i, r in enumerate(clips, 1):
 ```
 > `extract()` is the fast whole-frame path (~1 inference/frame); `extract_tiled()`
 > is SAHI (~7×, max recall) — use it only for a later recall run. The `_readable`
-> guard skips evicted/0-byte clips so the loop never stalls on them. Save
-> `data/keypoints/` back to Drive so you don't re-extract.
+> guard skips evicted/0-byte clips so the loop never stalls on them. **Save the
+> keypoints to Drive right after** so future sessions skip this cell:
+> ```python
+> !cp -r data/keypoints {DRIVE}/
+> ```
 
-### Cell 4 — build the labeled, windowed dataset
+### Cell 4 — the report (pick ONE mode)
+
+**Mode A — saved weights** (score the existing checkpoint, e.g. the 0.539 baseline):
 ```python
-import cv2, numpy as np, pandas as pd
-from hydro_knight.features.windows import make_windows
-
-WINDOW = 32
-def clip_fps(cid):
-    c = cv2.VideoCapture(str(RAW / f"{cid}.mp4")); f = c.get(cv2.CAP_PROP_FPS); c.release()
-    return f or 25.0
-
-normal_win, distress_win = [], []
-for r in clips:
-    pq = KP / f"{r.clip_id}.parquet"
-    if not pq.exists():
-        continue
-    fps = clip_fps(r.clip_id)
-    events = [(e["start"], e["end"]) for e in r.events]          # source seconds
-    W, info = make_windows(pd.read_parquet(pq), window=WINDOW, stride=8)
-    for win, (tid, start_frame) in zip(W, info):
-        t0, t1 = start_frame / fps, (start_frame + WINDOW) / fps  # window's time span
-        is_distress = any(s < t1 and e > t0 for s, e in events)   # overlaps an event?
-        (distress_win if is_distress else normal_win).append(win)
-
-normal_win = np.array(normal_win, np.float32)
-distress_win = np.array(distress_win, np.float32)
-print("normal windows:", len(normal_win), "| distress windows:", len(distress_win))
+!python scripts/eval_report.py \
+    --keypoints data/keypoints --manifest data/manifests/pool_footage.jsonl \
+    --videos raw_local --ckpt {DRIVE}/tcn_ae.pt --out runs/tcn_baseline
 ```
 
-### Cell 5 — train (Rung 3 TCN)
+**Mode B — fresh train** (new model; holds out 20% of normal windows; saves weights):
 ```python
-from hydro_knight.models.tcn_autoencoder import train_tcn, reconstruction_error
-
-# hold out 20% of NORMAL as the negative test set; train on the rest
-idx = np.random.RandomState(0).permutation(len(normal_win)); split = int(0.8 * len(normal_win))
-train_n, test_n = normal_win[idx[:split]], normal_win[idx[split:]]
-
-model, scaler = train_tcn(train_n, epochs=300)   # more epochs/data than the local demo
-print("trained on", len(train_n), "normal windows")
+!python scripts/eval_report.py \
+    --keypoints data/keypoints --manifest data/manifests/pool_footage.jsonl \
+    --videos raw_local --train-fresh --epochs 300 \
+    --save-ckpt {DRIVE}/tcn_fresh.pt --out runs/tcn_fresh
 ```
 
-### Cell 6 — evaluate (does error separate normal vs distress?)
+What one run produces in `runs/<name>/`: `summary.md` (headline numbers:
+**per-event recall**, ROC-AUC/PR-AUC, error percentiles), the figures
+(loss curve, normal-vs-distress error overlap, ROC/PR, **recall vs
+false-alarms-per-hour**, latency, per-event catch/miss board, pose coverage
+inside events, track lengths), plus `sweep.parquet` / `event_catches.parquet`.
+
+Notes that keep the numbers honest:
+- `--videos raw_local` reads each clip's **true fps** — event windows are in
+  seconds, so latency/overlap need it (a 60 fps clip at an assumed 30 would
+  double every latency).
+- In Mode B, window-level ROC/PR/percentiles use **only held-out** normals —
+  never windows the model trained on. Per-event recall uses everything.
+- Mode A's window metrics have no holdout information (the old checkpoint's
+  training split isn't recorded), so its ROC skews slightly optimistic — its
+  per-event recall/latency are the numbers to trust most.
+
+### Cell 5 — view results inline + save the run to Drive
 ```python
-from sklearn.metrics import roc_auc_score, average_precision_score
-
-err_normal = reconstruction_error(model, test_n, scaler)
-err_distress = reconstruction_error(model, distress_win, scaler)
-
-scores = np.concatenate([err_normal, err_distress])
-labels = np.concatenate([np.zeros(len(err_normal)), np.ones(len(err_distress))])
-print(f"normal mean err   : {err_normal.mean():.3f}")
-print(f"distress mean err : {err_distress.mean():.3f}")
-print(f"ROC-AUC           : {roc_auc_score(labels, scores):.3f}")   # 0.5 = chance, 1.0 = perfect
-print(f"PR-AUC            : {average_precision_score(labels, scores):.3f}")
-```
-> ROC-AUC is the headline number: can the reconstruction error tell distress
-> windows from normal ones? Recall-favoring threshold selection (drowning >
-> false alarm) is the next step from the PR curve.
-
-### Cell 7 — save the model back to Drive
-```python
-import torch
-torch.save({"model": model.state_dict(), "scaler": scaler},
-           "/content/drive/MyDrive/hydroknight/tcn_ae.pt")
+from IPython.display import Image, Markdown, display
+from pathlib import Path
+RUN = Path("runs/tcn_baseline")            # or runs/tcn_fresh
+display(Markdown((RUN / "summary.md").read_text()))
+for png in sorted(RUN.glob("*.png")):
+    display(Image(str(png)))
+!cp -r {RUN} {DRIVE}/{RUN.name}_$(date +%Y%m%d)   # archive the run to Drive
 ```
 
 ---

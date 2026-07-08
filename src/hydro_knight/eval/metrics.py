@@ -96,13 +96,25 @@ def label_detections(clip: ClipEval) -> np.ndarray:
 
 
 def split_scores(clips: list[ClipEval]) -> tuple[np.ndarray, np.ndarray]:
-    """All detection scores across clips, split into (normal, distress)."""
+    """
+    All detection scores across clips, split into (normal, distress).
+
+    If a detections table carries a boolean `trained_on` column (set by the
+    CLI's --train-fresh holdout), those rows are EXCLUDED here — scoring the
+    model on windows it trained on would flatter the normal-error distribution
+    and contaminate ROC/PR/percentiles. Event-level metrics deliberately keep
+    all detections (a real event caught by any window is still caught).
+    """
     normal, distress = [], []
     for c in clips:
-        if len(c.detections) == 0:
+        det = c.detections
+        if len(det) == 0:
             continue
         m = label_detections(c)
-        s = c.detections["score"].to_numpy(dtype=float)
+        s = det["score"].to_numpy(dtype=float)
+        if "trained_on" in det.columns:
+            keep = ~det["trained_on"].to_numpy(dtype=bool)
+            m, s = m[keep], s[keep]
         normal.append(s[~m])
         distress.append(s[m])
     cat = lambda parts: np.concatenate(parts) if parts else np.array([])  # noqa: E731
