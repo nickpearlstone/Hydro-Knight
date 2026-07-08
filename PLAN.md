@@ -13,12 +13,13 @@ A pose-based anomaly detection system for swimming pool safety. It watches pool 
 What is actually built in the repo (the rung markers further down describe the *design*; this is the *progress*):
 
 - **Rung 1 — done.** Pose extraction (`preprocess/extract_pose.py`), the YOLO-vs-MediaPipe spike (`pose_spike.py`), SAHI tiling (`tiled_pose.py`). Backend decision **banked: YOLO-pose @ ≥1280px** (see README for the empirical writeup).
-- **Rung 2 — done.** Pose normalization (`features/normalize.py`) + autoencoder (`models/autoencoder.py`), with `scripts/rung2_demo.py` sanity check.
+- **Rung 2 — done, then retired (2026-07-08).** Pose normalization (`features/normalize.py`) survives; the single-pose MLP autoencoder + `rung2_demo.py` were **removed post-pivot** — the AE's one real lane (flailing) is temporal, which a per-frame model can't see. The Rung 3 TCN is the only autoencoder now. (History in git if ever needed.)
 - **Rung 2.5 — done.** ByteTrack over SAHI-merged detections (`preprocess/tracking.py`); 15 stable tracks, 0 flicker on the test clip.
 - **Rung 3 — done.** TCN autoencoder over pose-sequence windows (`features/windows.py` + `models/tcn_autoencoder.py`), with `scripts/rung3_demo.py`.
 - **Annotation tooling — done** (`annotate/annotator.py`).
 - **Dataset:** 72 clips registered in `data/manifests/pool_footage.jsonl` (66 `distress`, 2 `normal`, 4 `unlabeled`); each distress clip has one time-window event, all generically tagged `distress` (no `submerged`/`face_down` sub-typing). Events are from "Spot the Drowning" wavepool-rescue footage; many occur >25 s in (so full-clip extraction is required — see the Colab `max_frames` lesson in `docs/COLAB_TRAINING.md`).
 - **First Colab TCN run — done, and it's the pivotal result.** ROC-AUC **0.539 ≈ chance.** Diagnosed (in code, not guessed) as a **representation problem, not tuning.** Full writeup in the next section. This redirected the project: the next build is **Plan A — the not-surfacing state machine (Rung 4)**, not more model tuning.
+- **Eval harness — built (2026-07-08, `eval/`).** Detector-agnostic: every detector (TCN now, Plan A state machine later) reduces to one neutral detections table, so both land on the same per-event recall/latency/false-alarm report and can be compared directly. Includes the data-health views (pose coverage inside events — the "did the filter eat the drowning?" number), recall-vs-FA/hour operating curve, and per-event catch board. Run: `scripts/eval_report.py`. Recall-first by design; accuracy appears nowhere.
 - **Not started:** Plan A (Rung 4 state machine, `detect/`) — the decided next step; the displacement-feature upgrade; the **partial-pose retention** fix in `normalize.py` (see Open questions). These three converge — all are "stop discarding signal in the feature layer."
 
 ---
@@ -124,8 +125,10 @@ Turn video into keypoint time series → per-frame keypoint Parquet files, one f
 
 *Annotation guidance until the cut detector exists:* annotate continuous-shot clips normally. For multi-angle clips, set `camera_view = unknown` and still mark events — events are timestamp-based so each will fall into the correct segment after the split. Per-segment `camera_view` gets assigned/verified in a quick re-review pass once splitting is in place. Don't delete multi-angle clips just for having cuts; the splitting is deferred, not the data.
 
-### Rung 2 — Simple autoencoder on keypoint sequences
+### Rung 2 — Simple autoencoder on keypoint sequences *(built, validated, then removed 2026-07-08)*
 Train to reconstruct normal swimming. High reconstruction error = anomaly. Get this working end-to-end before anything fancier. Validates the representation before adding temporal complexity.
+
+*Outcome:* it served exactly that purpose — proved the reconstruction-error mechanism end-to-end — and was then deleted once the TCN (Rung 3) superseded it. Post-pivot, the AE's only real lane is flailing, which is inherently temporal; a single-frame model can never see it, so keeping the MLP was dead weight.
 
 ### Rung 2.5 — Lightweight tracking *(done — ByteTrack, decoupled from YOLO)*
 **Resolution:** because tracking runs over *SAHI-merged* tiled detections, YOLO's built-in `model.track()` can't be used (it only tracks its own single-pass detections). Tracking is therefore decoupled: **ByteTrack** (model-agnostic, via the `trackers` package) runs over the merged detections — 15 stable tracks, 0 flicker on the test clip vs. 53 churning tracks from a naive IoU tracker. BoT-SORT/OC-SORT with re-ID is the future option if re-identifying a swimmer *after* a submersion gap becomes the bottleneck.
@@ -269,5 +272,5 @@ The committed tree is clean (no video/weights/venv ever tracked — keep it that
 
 - What submersion duration threshold triggers the not-surfacing alert? Needs empirical tuning against normal breath-hold behavior.
 - How to handle crowded pools where multiple swimmers overlap? Tracking identity across occlusion is unsolved.
-- What's the minimum normal-swim training data volume for a useful autoencoder? Unknown until Rung 2 is built.
+- What's the minimum normal-swim training data volume for a useful autoencoder? Still open — the first real run's failure was representational, not data-volume, so this can't be answered until the feature layer carries the signal (Plan B).
 - **Partial-pose retention — don't discard a whole pose on one weak reference joint.** `features/normalize.py` returns `None` (drops the entire pose) if *any* of the four reference joints (both hips + both shoulders) is below `min_ref_conf`, throwing away even the high-confidence keypoints on that pose. This is biased to delete exactly the drowning-relevant partial-visibility cases — e.g. shoulders out of the water while the hips are submerged, which is itself a vertical-sinking distress posture. It's the same information-loss mechanism as the submersion blindness (low-confidence frames dropped + windows stitched over the gap). Options to revisit: (a) keep partial poses + a per-keypoint confidence/visibility channel (the same fix as the submersion presence-channel — serves double duty); (b) a fallback reference-frame hierarchy (normalize against shoulder-center/width when the hips are unreliable); (c) bounding-box normalization (use the always-present detection box instead of body joints — more robust, less anatomically clean). Converges with the displacement / presence-channel work, so worth doing together.

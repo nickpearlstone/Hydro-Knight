@@ -1,7 +1,8 @@
 """
 Rung 3: a temporal-convolution autoencoder over pose-sequence windows.
 
-Where the Rung 2 MLP reconstructs a single pose, this reconstructs a whole
+Rather than reconstructing a single pose (the original Rung 2 MLP, since
+removed), this reconstructs a whole
 window of frames using 1-D convolutions across time. It therefore learns
 *motion* — normal swimming dynamics — and flags windows whose temporal pattern
 doesn't reconstruct well (erratic flailing, frozen/limp motion, etc.).
@@ -63,7 +64,14 @@ def _to_tensor(windows: np.ndarray, scaler):
 
 
 def train_tcn(windows: np.ndarray, epochs: int = 120, lr: float = 1e-3, seed: int = 0):
-    """Train on normal windows. Returns (model, scaler)."""
+    """
+    Train on normal windows. Returns (model, scaler).
+
+    The per-epoch training loss is recorded on the model as
+    `model.loss_history_` (sklearn-style trailing underscore = "learned during
+    fit"), so the eval report can plot convergence without changing this
+    function's return signature.
+    """
     torch.manual_seed(seed)
     scaler = _standardize_fit(windows)
     X = _to_tensor(windows, scaler)
@@ -72,6 +80,7 @@ def train_tcn(windows: np.ndarray, epochs: int = 120, lr: float = 1e-3, seed: in
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.MSELoss()
 
+    history: list[float] = []
     model.train()
     for _ in range(epochs):
         opt.zero_grad()
@@ -79,6 +88,8 @@ def train_tcn(windows: np.ndarray, epochs: int = 120, lr: float = 1e-3, seed: in
         loss = loss_fn(recon, X)
         loss.backward()
         opt.step()
+        history.append(float(loss.item()))
+    model.loss_history_ = history
     return model, scaler
 
 
