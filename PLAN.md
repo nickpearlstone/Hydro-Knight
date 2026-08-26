@@ -55,6 +55,33 @@ See [[distress-signal-taxonomy]]: **silent sink, passive face-down, flailing, bo
 - **Plan B (later) — add velocity/displacement to the AE features**, sharpening flailing and enabling #5.
 - **Labeling fix (for B, not A):** Cell 4 labels windows by *time* overlap, so during a rescue the **lifeguard's track** gets stamped distress → inflates the AE eval. Fix = **track-scoped (victim), not time-scoped** labeling. Do **not** trim the rescue period — real victim distress continues during the save. A is naturally robust (it keys on the victim submerging; the guard's track stays confident and moving), so A needs no re-annotation.
 
+### Model upgrade paths (aspirational — revisit only *after* the feature/data fixes)
+
+Both are **model-layer** reaches. Neither addresses the current bottleneck (dropped
+submersion frames + a thin, domain-matched normal set), so both are gated behind Plan B's
+feature work and a real normal corpus. Logged so they're captured without derailing the build.
+
+- **Transfer learning from a pretrained skeleton-action model** — the more
+  data-appropriate reach for our scale. Models like ST-GCN / PoseC3D pretrained on
+  NTU-RGB+D or Kinetics-skeleton already carry a generic human-motion prior, so finetuning
+  (or freezing them as a feature extractor + a one-class head) is far more data-efficient
+  than learning representations from scratch on ~4000 s of footage. Caveats: pretrained on
+  *land* actions (swimming/submerged poses are out of distribution); they're *classifiers*,
+  so anomaly detection needs a one-class head or a reconstruction/predict objective on top;
+  a COCO-17 ↔ NTU-25 joint mapping is required. **Orthogonal lever:** finetuning the *pose
+  backbone* (YOLO-pose) on aquatic frames would improve keypoint quality on submerged/prone
+  swimmers — attacks data *quality* rather than the anomaly model, but needs keypoint-labeled
+  swimmer frames.
+- **JEPA (V-JEPA-style joint-embedding prediction).** Predicts *masked* parts of the pose
+  window in **embedding space** instead of reconstructing raw coordinates — sidestepping
+  reconstruction's core flaw (burning capacity modeling unpredictable coordinate noise, and
+  rewarding low-magnitude passive poses like face-down with *low* error). Promising in
+  principle, but **data-hungry** (V-JEPA/I-JEPA earn their keep at ImageNet/large-video
+  scale); on ~74 clips it will most likely collapse or learn mush. The existing (34×32)
+  pose-window is already its input format, so the Plan B feature work *sets it up* — deferring
+  costs nothing. Same shelf as STG-NF: a scaling-up move for once the pipeline works and there
+  is data to feed it.
+
 ---
 
 ## Problem framing

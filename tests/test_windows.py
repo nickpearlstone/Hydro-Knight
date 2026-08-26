@@ -46,10 +46,10 @@ def _frames_df(track_id: int, n_frames: int) -> pd.DataFrame:
 
 def test_window_shape_and_count():
     # 40 frames, window=32, stride=8 -> windows start at 0 and 8 => 2 windows,
-    # each (32, 34). Count formula: (40 - 32) // 8 + 1 = 2.
+    # each (32, 70). Count formula: (40 - 32) // 8 + 1 = 2.
     df = _frames_df(track_id=1, n_frames=40)
     windows, info = make_windows(df, window=32, stride=8)
-    assert windows.shape == (2, 32, 34)
+    assert windows.shape == (2, 32, 70)
     assert len(info) == 2
     # info records (track_id, start_frame) for each window.
     assert info[0] == (1, 0)
@@ -60,7 +60,7 @@ def test_too_few_frames_yields_no_windows():
     # Fewer frames than the window length => nothing to emit.
     df = _frames_df(track_id=1, n_frames=10)
     windows, info = make_windows(df, window=32, stride=8)
-    assert windows.shape == (0, 32, 34)
+    assert windows.shape == (0, 32, 70)
     assert info == []
 
 

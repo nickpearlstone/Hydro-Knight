@@ -63,15 +63,18 @@ def features_from_dataframe(df: pd.DataFrame, min_ref_conf: float = 0.3):
     conf = df[_C_COLS].to_numpy(dtype=np.float32).reshape(len(df), 17, 1)
     kpts = np.concatenate([xy, conf], axis=2)  # (N, 17, 3)
 
-    feats, keep_idx = [], []
+    feats, keep_idx, centers = [], [], []
     for i in range(len(df)):
         v = normalize_pose(kpts[i], min_ref_conf=min_ref_conf)
         if v is not None:
             feats.append(v)
             keep_idx.append(i)
+            centers.append((kpts[i][11][:2] + kpts[i][12][:2]) / 2)
 
     features = (
         np.array(feats, dtype=np.float32) if feats else np.empty((0, 34), np.float32)
     )
     meta = df.iloc[keep_idx][["frame", "track_id"]].reset_index(drop=True)
+    meta["cx"] = [c[0] for c in centers]
+    meta["cy"] = [c[1] for c in centers]
     return features, meta

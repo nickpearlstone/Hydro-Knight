@@ -22,11 +22,12 @@ import torch.nn as nn
 class TCNAutoencoder(nn.Module):
     """
     Temporal-conv autoencoder. Encoder downsamples time by 4x (two stride-2
-    convs) into a compact code; decoder upsamples back. Channels are the 34
-    pose features. Designed for window lengths divisible by 4 (e.g. 32 -> 16 -> 8).
+    convs) into a compact code; decoder upsamples back. Channels are the 70
+    per-frame features (34 pose coords + 34 keypoint velocities + 2 centroid
+    velocities). Designed for window lengths divisible by 4 (e.g. 32 -> 16 -> 8).
     """
 
-    def __init__(self, n_feat: int = 34):
+    def __init__(self, n_feat: int = 70):
         super().__init__()
         self.encoder = nn.Sequential(
             nn.Conv1d(n_feat, 32, kernel_size=3, padding=1),
