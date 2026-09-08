@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 # --- Controlled vocabularies -------------------------------------------------
@@ -20,7 +20,7 @@ from pathlib import Path
 # an immediate crash rather than silent bad data in the manifest.
 
 
-class CameraView(str, Enum):
+class CameraView(StrEnum):
     OVERHEAD = "overhead"  # camera mounted directly above the pool
     ELEVATED = "elevated"  # camera on a stand or high wall, angled down
     DECK_LEVEL = "deck_level"  # roughly eye-level with the water surface
@@ -28,27 +28,27 @@ class CameraView(str, Enum):
     UNKNOWN = "unknown"
 
 
-class Setting(str, Enum):
+class Setting(StrEnum):
     OUTDOOR = "outdoor"
     INDOOR = "indoor"
     UNKNOWN = "unknown"
 
 
-class TimeOfDay(str, Enum):
+class TimeOfDay(StrEnum):
     DAY = "day"
     DUSK = "dusk"
     NIGHT = "night"
     UNKNOWN = "unknown"
 
 
-class Weather(str, Enum):
+class Weather(StrEnum):
     CLEAR = "clear"
     OVERCAST = "overcast"
     RAIN = "rain"
     UNKNOWN = "unknown"
 
 
-class Label(str, Enum):
+class Label(StrEnum):
     NORMAL = "normal"  # confirmed normal swimming activity
     DISTRESS = "distress"  # confirmed drowning / distress event
     SUBMERGED = "submerged"  # person submerged but outcome unknown
