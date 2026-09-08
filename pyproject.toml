@@ -30,6 +30,7 @@ dependencies = [
 # Alt pose backend, only needed to reproduce the YOLO-vs-MediaPipe spike.
 # The backend decision (YOLO) is made, so this is kept out of the default install.
 spike = ["mediapipe>=0.10.0"]
+tracking = ["mlflow>=2.9.0"]
 
 [dependency-groups]
 dev = [

@@ -11,6 +11,9 @@ Chart conventions (kept deliberately boring and consistent):
 - caught = green (#0ca30c) / missed = red (#d03b3b), always with a text label,
   never color alone
 - recall-first: accuracy appears nowhere in this report by design
+
+Each plot_* helper takes its data plus the run's out_dir and returns the written
+filename (or None when there's nothing to plot); generate_report runs them all.
 """
 
 from __future__ import annotations
@@ -274,9 +277,20 @@ def generate_report(
     census: dict | None = None,
     run_name: str = "run",
 ) -> Path:
-    """
-    Orchestrate: compute every metric from the neutral detections, write all
-    figures + stats.parquet + summary.md into `out_dir`. Returns summary path.
+    """Compute every metric from the neutral detections and write all figures + stats + summary.md.
+
+    Args:
+        out_dir: run folder to create and write into.
+        clips: per-clip evaluation bundles (detections + events).
+        threshold: operating alarm threshold for the per-event board and latencies.
+        loss_history: per-epoch training loss, if available (plots the convergence curve).
+        coverage_rows: pose-coverage-in-events rows for the representation-gap plot.
+        tracks: per-track stats for the fragmentation plot.
+        census: dataset census dict for the summary.
+        run_name: label used in summary.md's title.
+    Returns:
+        (summary_path, metrics): the written summary.md Path, and a dict of headline
+        metrics (roc_auc, pr_auc, event_recall, threshold, n_clips, n_events).
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -335,4 +349,12 @@ def generate_report(
 
     summary = out_dir / "summary.md"
     summary.write_text("\n".join(lines), encoding="utf-8")
-    return summary
+
+    # Headline metrics, also returned so callers (e.g. the --mlflow path) can log them.
+    metrics = {"threshold": threshold, "n_clips": len(clips), "n_events": len(catches)}
+    if curves:
+        metrics["roc_auc"] = curves["roc_auc"]
+        metrics["pr_auc"] = curves["pr_auc"]
+    if catches:
+        metrics["event_recall"] = caught / len(catches)
+    return summary, metrics

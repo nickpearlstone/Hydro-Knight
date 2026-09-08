@@ -41,6 +41,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from hydro_knight.eval import tracking
 from hydro_knight.eval.data_health import (
     dataset_census,
     frame_coverage_in_events,
@@ -95,6 +96,7 @@ def _window_is_normal(f0: int, window: int, fps: float, events: list[dict]) -> b
 
 
 def main() -> None:
+    """CLI entry: window a keypoint set, train or load a TCN, and write a full eval report."""
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--keypoints",
@@ -112,6 +114,11 @@ def main() -> None:
         "--train-fresh",
         action="store_true",
         help="train a TCN on this data's normal windows (see --holdout)",
+    )
+    ap.add_argument(
+        "--mlflow",
+        action="store_true",
+        help="log this run to MLflow (SQLite backend)",
     )
     ap.add_argument(
         "--save-ckpt",
@@ -150,6 +157,15 @@ def main() -> None:
     ap.add_argument("--window", type=int, default=32)
     ap.add_argument("--stride", type=int, default=8)
     args = ap.parse_args()
+
+    params = {
+        "window": args.window,
+        "stride": args.stride,
+        "epochs": args.epochs,
+        "holdout": args.holdout,
+        "mode": "ckpt" if args.ckpt else "train_fresh",
+    }
+
 
     kp = Path(args.keypoints)
     paths = sorted(kp.glob("*.parquet")) if kp.is_dir() else [kp]
@@ -226,7 +242,7 @@ def main() -> None:
         err_n, _ = split_scores(clips)  # trained-on windows already excluded
         threshold = float(np.percentile(err_n, 99)) if len(err_n) else 1.0
 
-    summary = generate_report(
+    summary, metrics = generate_report(
         Path(args.out),
         clips,
         threshold,
@@ -237,6 +253,12 @@ def main() -> None:
         run_name=Path(args.out).name,
     )
     print(f"report written: {summary}")
+
+    if args.mlflow:
+        with tracking.run(name=Path(args.out).name):
+            tracking.log_config(params)
+            tracking.log_metrics(metrics)
+            tracking.log_artifacts(args.out)
 
 
 if __name__ == "__main__":
