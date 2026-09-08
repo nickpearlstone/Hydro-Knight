@@ -16,13 +16,16 @@ import numpy as np
 
 
 def _tile_origins(length: int, tile: int, overlap: float) -> list[int]:
-    """
-    Start coordinates of tiles along one axis (width or height).
+    """Tile start offsets along one axis, overlapping and pinned to the far edge.
 
-    Step is the tile size minus the overlap, so neighbouring tiles share a
-    margin (a swimmer on a seam still appears whole in one of them). We also
-    force the last tile to touch the far edge so nothing past the final step
-    is missed.
+    Step = tile*(1-overlap) so neighbours share a margin (a swimmer on a seam stays whole in one
+    tile); the last origin is forced to length-tile so nothing past the final step is missed.
+    Args:
+        length: axis length in pixels (width or height).
+        tile: tile size in pixels.
+        overlap: fractional overlap between neighbouring tiles.
+    Returns:
+        List of start offsets; [0] when the axis fits within one tile.
     """
     if length <= tile:
         return [0]
@@ -46,12 +49,14 @@ def _iou(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def _nms_merge(dets: list, iou_thresh: float) -> list:
-    """
-    Greedy non-max-suppression: keep the highest-confidence detections, drop
-    any that overlap an already-kept one by more than iou_thresh. This removes
-    the duplicate of a swimmer seen in two overlapping tiles.
+    """Greedy NMS: keep highest-confidence detections, drop those overlapping a kept one.
 
-    dets: list of (box_xyxy, conf, keypoints). Returns the surviving subset.
+    Removes the duplicate of a swimmer seen in two overlapping tiles.
+    Args:
+        dets: list of (box_xyxy, conf, keypoints).
+        iou_thresh: drop a detection overlapping a kept box by more than this IoU.
+    Returns:
+        The surviving subset of `dets`.
     """
     kept: list = []
     for box, conf, kpts in sorted(dets, key=lambda d: d[1], reverse=True):
@@ -70,18 +75,23 @@ def detect_tiled(
     iou_merge: float = 0.5,
     include_full: bool = True,
 ) -> list:
-    """
-    Run YOLO-pose over a tiled grid and return merged full-frame detections.
+    """Run YOLO-pose over an overlapping tile grid and return merged full-frame detections.
 
-    Each detection is (box_xyxy, conf, keypoints[17,3]) in FULL-frame pixels.
-    include_full also runs one whole-frame pass to catch large/close swimmers
-    a tile might cut in half.
-
-    KEY: imgsz must exceed `tile` for SAHI to help — that upscales each tile so
-    distant swimmers reach the size YOLO was trained to detect. With imgsz==tile
-    there's no zoom and tiling only adds cost (and can lose detections to merge
-    seams). Here tile=480 run at imgsz=1280 = ~2.7x upscale. On our footage this
-    took recall from ~13 to ~50 swimmers/frame on a crowded clip.
+    KEY: imgsz must exceed `tile` for SAHI to help — it upscales each tile so distant swimmers
+    reach the size YOLO was trained on (imgsz==tile = no zoom, pure cost). tile=480 at imgsz=1280
+    (~2.7x) took recall from ~13 to ~50 swimmers/frame on a crowded clip. include_full adds one
+    whole-frame pass for large/close swimmers a tile might cut in half.
+    Args:
+        model: a YOLO-pose model.
+        frame: full BGR frame (H, W, 3).
+        tile: tile size in pixels.
+        overlap: fractional tile overlap.
+        imgsz: per-tile inference resolution (must exceed `tile`).
+        conf: detection confidence threshold.
+        iou_merge: IoU above which tile-overlap duplicates are merged.
+        include_full: also run one whole-frame pass.
+    Returns:
+        List of (box_xyxy, conf, keypoints[17,3]) in full-frame pixels, NMS-merged.
     """
     H, W = frame.shape[:2]
 

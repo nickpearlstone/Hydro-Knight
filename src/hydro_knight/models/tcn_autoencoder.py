@@ -51,27 +51,32 @@ class TCNAutoencoder(nn.Module):
 
 def _standardize_fit(windows: np.ndarray):
     """Per-feature mean/std over all frames in all training windows."""
-    flat = windows.reshape(-1, windows.shape[-1])  # (N*window, 34)
+    flat = windows.reshape(-1, windows.shape[-1])  # (N*window, n_feat)
     mean = flat.mean(axis=0)
     std = flat.std(axis=0) + 1e-6
     return mean, std
 
 
 def _to_tensor(windows: np.ndarray, scaler):
+    """Standardize with `scaler` and transpose to (N, n_feat, time) for Conv1d."""
     mean, std = scaler
-    x = (windows - mean) / std  # (N, window, 34)
-    x = np.transpose(x, (0, 2, 1))  # -> (N, 34, window) for Conv1d
+    x = (windows - mean) / std  # (N, window, n_feat)
+    x = np.transpose(x, (0, 2, 1))  # -> (N, n_feat, window) for Conv1d
     return torch.tensor(x, dtype=torch.float32)
 
 
 def train_tcn(windows: np.ndarray, epochs: int = 120, lr: float = 1e-3, seed: int = 0):
-    """
-    Train on normal windows. Returns (model, scaler).
+    """Train the TCN autoencoder on normal-only windows; returns the fitted model and scaler.
 
-    The per-epoch training loss is recorded on the model as
-    `model.loss_history_` (sklearn-style trailing underscore = "learned during
-    fit"), so the eval report can plot convergence without changing this
-    function's return signature.
+    Per-epoch loss is recorded on model.loss_history_ (sklearn-style trailing underscore),
+    so the eval report can plot convergence without changing the return signature.
+    Args:
+        windows: (N, window, n_feat) float32 normal-only training windows.
+        epochs: number of full-batch gradient steps.
+        lr: Adam learning rate.
+        seed: torch manual seed for reproducibility.
+    Returns:
+        (model, scaler): trained TCNAutoencoder and the (mean, std) standardization tuple.
     """
     torch.manual_seed(seed)
     scaler = _standardize_fit(windows)
@@ -95,7 +100,15 @@ def train_tcn(windows: np.ndarray, epochs: int = 120, lr: float = 1e-3, seed: in
 
 
 def reconstruction_error(model, windows: np.ndarray, scaler) -> np.ndarray:
-    """Per-window reconstruction MSE (mean over time and features) = anomaly score."""
+    """Per-window reconstruction MSE (mean over time and features) = the anomaly score.
+
+    Args:
+        model: a trained TCNAutoencoder.
+        windows: (N, window, n_feat) float32 windows to score.
+        scaler: the (mean, std) tuple returned by train_tcn.
+    Returns:
+        (N,) float array of per-window MSE; higher = more anomalous.
+    """
     X = _to_tensor(windows, scaler)
     model.eval()
     with torch.no_grad():

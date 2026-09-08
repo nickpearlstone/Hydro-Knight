@@ -26,12 +26,14 @@ _C_COLS = [f"c{i}" for i in range(17)]
 
 
 def normalize_pose(kpts: np.ndarray, min_ref_conf: float = 0.3) -> np.ndarray | None:
-    """
-    kpts: (17, 3) array of (x, y, confidence). Returns a 34-vector or None.
+    """Encode one pose as a hip-centered, torso-scaled (position/scale-invariant) vector.
 
-    None means the pose is unusable — the reference joints (both hips and both
-    shoulders) weren't confidently detected, so we can't define a reliable body
-    frame to normalize against.
+    Preconditions: both hips + both shoulders have confidence >= min_ref_conf, and torso length > 0.
+    Args:
+        kpts: (17, 3) array of per-keypoint (x, y, confidence), pixel space.
+        min_ref_conf: min confidence required of each of the 4 reference joints.
+    Returns:
+        (34,) float32 vector (17 keypoints x normalized x, y), or None if a precondition fails.
     """
     lhip, rhip = kpts[L_HIP], kpts[R_HIP]
     lsh, rsh = kpts[L_SHOULDER], kpts[R_SHOULDER]
@@ -51,13 +53,15 @@ def normalize_pose(kpts: np.ndarray, min_ref_conf: float = 0.3) -> np.ndarray | 
 
 
 def features_from_dataframe(df: pd.DataFrame, min_ref_conf: float = 0.3):
-    """
-    Convert a keypoint Parquet (loaded as a DataFrame) into a feature matrix.
+    """Convert a keypoint-Parquet DataFrame into normalized pose features plus per-row metadata.
 
-    Returns (features, meta):
-      features : (N_valid, 34) float32 — one row per usable pose
-      meta     : DataFrame with the frame/track_id of each kept row (so we can
-                 trace a feature back to which swimmer/frame it came from)
+    Poses failing normalize_pose's preconditions are dropped, so N_valid <= len(df).
+    Args:
+        df: keypoint rows with columns frame, track_id, x0,y0,c0 ... x16,y16,c16.
+        min_ref_conf: min reference-joint confidence, passed to normalize_pose.
+    Returns:
+        (features, meta): features is (N_valid, 34) float32; meta is a DataFrame with frame,
+        track_id, and cx, cy (raw hip-center), row-aligned to features.
     """
     xy = df[_XY_COLS].to_numpy(dtype=np.float32).reshape(len(df), 17, 2)
     conf = df[_C_COLS].to_numpy(dtype=np.float32).reshape(len(df), 17, 1)

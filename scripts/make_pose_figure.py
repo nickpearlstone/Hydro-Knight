@@ -25,6 +25,7 @@ MP_MODEL = "raw_local/pose_landmarker.task"
 
 
 def pixelate(img, blocks=48):
+    """Pixelate `img` by downscaling to `blocks` px wide then nearest-neighbor upscaling back."""
     h, w = img.shape[:2]
     small = cv2.resize(
         img, (blocks, max(1, int(blocks * h / w))), interpolation=cv2.INTER_LINEAR
@@ -33,11 +34,13 @@ def pixelate(img, blocks=48):
 
 
 def label(img, text):
+    """Draw a black title bar with `text` across the top of `img` (in place)."""
     cv2.rectangle(img, (0, 0), (img.shape[1], 40), (0, 0, 0), -1)
     cv2.putText(img, text, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
 
 def draw_mp(img, poses, conns):
+    """Draw MediaPipe skeletons (`poses` landmarks joined by `conns`) onto `img` in place."""
     h, w = img.shape[:2]
     for lms in poses:
         pts = [(int(lm.x * w), int(lm.y * h)) for lm in lms]
@@ -48,6 +51,7 @@ def draw_mp(img, poses, conns):
 
 
 def main():
+    """Render the two README figures (resolution and YOLO-vs-MediaPipe) to docs/images/."""
     OUT.mkdir(parents=True, exist_ok=True)
 
     cap = cv2.VideoCapture(CLIP)

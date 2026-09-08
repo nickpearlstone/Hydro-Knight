@@ -29,12 +29,14 @@ from .manifest import (
 
 
 def _video_duration_sec(path: Path) -> float:
-    """
-    Read a video's duration in seconds with OpenCV.
+    """Read a video's duration in seconds via OpenCV (frame count / fps).
 
-    We divide the total frame count by the frames-per-second. If OpenCV can't
-    read the metadata (some screen-recorders write odd headers) we return 0.0,
-    which the manifest treats as "unknown length" (end_sec = -1).
+    Returns 0.0 if OpenCV can't read the metadata (some screen-recorders write odd
+    headers), which the manifest treats as "unknown length" (end_sec = -1).
+    Args:
+        path: video file to inspect.
+    Returns:
+        Duration in seconds, or 0.0 if unreadable.
     """
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
@@ -57,26 +59,19 @@ def register_local(
     notes: str = "",
     move: bool = False,
 ) -> str | None:
-    """
-    Copy a local video into raw_local/ and register it in the manifest.
+    """Copy a local video into raw_local/ and register it in the manifest.
 
-    Parameters
-    ----------
-    video_path :
-        Path to the recorded file you already have on disk.
-    source_url :
-        Provenance string for the manifest — the cam/page URL the recording
-        came from (e.g. the AMI Pool Cam page). Also used to derive the clip_id,
-        so re-registering the same source+length is de-duplicated.
-    camera_view / setting / time_of_day / weather / label / notes :
-        Annotation metadata to store. You can set these now if you know them
-        (e.g. the AMI cam is outdoor/day/clear/elevated) or leave UNKNOWN and
-        fill them in via the annotator.
-    move :
-        If True, move the file instead of copying (saves disk if the recording
-        is large and you don't need the original elsewhere).
-
-    Returns the clip_id on success, or None if it was a duplicate / bad file.
+    source_url doubles as provenance and the clip_id seed, so re-registering the same
+    source+length is de-duplicated.
+    Args:
+        manifest_path: JSONL manifest to append to.
+        video_path: the recorded file already on disk.
+        source_url: provenance URL (e.g. the cam page); also seeds the clip_id.
+        camera_view, setting, time_of_day, weather, label, notes: annotation metadata to
+            store now if known, else left UNKNOWN for the annotation pass.
+        move: move the file instead of copying (saves disk for large recordings).
+    Returns:
+        The clip_id on success, or None if it was a duplicate or the file was missing.
     """
     video_path = Path(video_path)
     if not video_path.exists():

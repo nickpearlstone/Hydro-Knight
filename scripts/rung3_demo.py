@@ -26,6 +26,7 @@ WINDOW = 32
 
 
 def main(parquet_path: str):
+    """Train the TCN on a clip's windows, then print recon-error on real vs corrupted test sets."""
     np.random.seed(0)
     W, _ = make_windows(pd.read_parquet(parquet_path), window=WINDOW, stride=8)
     if len(W) < 20:
