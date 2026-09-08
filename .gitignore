@@ -8,6 +8,9 @@ DEV_WALKTHROUGH.md
 # Private session context for Claude-assisted work (PLAN.md is the public map)
 CLAUDE.md
 
+# Point-in-time session handoff notes — in-progress state, not the public story
+HANDOFF.md
+
 # Scratch space for throwaway experiment outputs (viz PNGs, test parquets,
 # spike dumps). Keeps raw_local/ as source video only.
 scratch/

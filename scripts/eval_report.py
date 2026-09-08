@@ -167,7 +167,6 @@ def main() -> None:
         "mode": "ckpt" if args.ckpt else "train_fresh",
     }
 
-
     kp = Path(args.keypoints)
     paths = sorted(kp.glob("*.parquet")) if kp.is_dir() else [kp]
     if not paths:
