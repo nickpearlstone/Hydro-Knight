@@ -37,3 +37,5 @@ jobs:
         # `python -m pytest`, not the `pytest` shim — same invocation the
         # repo uses locally (see CLAUDE.md/PLAN.md).
         run: uv run python -m pytest
+      - name: Ruff linting
+        run: ruff check --output-format=github . 
