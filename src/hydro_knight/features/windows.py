@@ -19,18 +19,18 @@ from .normalize import features_from_dataframe
 
 
 def make_windows(df, window: int = 32, stride: int = 8, min_ref_conf: float = 0.3):
-    """
-    Build temporal windows from a keypoint Parquet DataFrame.
+    """Slice each swimmer's normalized poses into overlapping fixed-length windows.
 
-    Windows are formed per track_id over that swimmer's usable poses in frame
-    order. Returns (windows, info):
-      windows : (N, window, 70) float32
-      info    : list of (track_id, start_frame) for each window
-
-    Note: windows span consecutive *usable* poses; if a track has dropped frames
-    (low-confidence gaps) those are skipped, so a window may cover slightly more
-    than `window` real frames. Fine for a first temporal model; a stricter
-    gap-aware version is a later refinement.
+    Per track (track_id < 0 skipped), poses are frame-sorted and windowed with a sliding
+    stride; each frame carries 70 features (pos + gap-normalized velocity + centroid velocity).
+    Args:
+        df: keypoint-Parquet DataFrame (see features_from_dataframe).
+        window: frames per window.
+        stride: step between window starts (overlap = window - stride).
+        min_ref_conf: min reference-joint confidence, passed through to feature extraction.
+    Returns:
+        (windows, info): windows is (N, window, 70) float32; info is a list of
+        (track_id, start_frame), one per window. Tracks with fewer than `window` usable poses yield none.
     """
     feats, meta = features_from_dataframe(df, min_ref_conf=min_ref_conf)
     meta = meta.copy()

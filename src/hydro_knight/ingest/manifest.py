@@ -96,16 +96,16 @@ class ClipRecord:
 
 
 def make_clip_id(source_url: str, start_sec: float, end_sec: float) -> str:
-    """
-    Produce a short, stable identifier for a clip.
+    """Deterministic short id for a clip, hashed from (source_url, start_sec, end_sec).
 
-    We hash the three fields that together uniquely identify a clip (the URL
-    it came from and the start/end timestamps). The hash is truncated to 12
-    hex characters — long enough to avoid accidental collisions in a dataset
-    of thousands of clips, short enough to be readable in filenames.
-
-    Hashing guarantees that running the collect script twice on the same
-    search results produces the same IDs, so de-duplication works correctly.
+    Same inputs always hash to the same id, so re-running collection de-duplicates correctly;
+    truncated to 12 hex chars — collision-safe for thousands of clips, readable in filenames.
+    Args:
+        source_url: the clip's source URL.
+        start_sec: clip start offset in the source (seconds).
+        end_sec: clip end offset (-1.0 = "to end").
+    Returns:
+        A 12-character hex id.
     """
     key = f"{source_url}|{start_sec}|{end_sec}"
     return hashlib.sha256(key.encode()).hexdigest()[:12]
@@ -130,11 +130,11 @@ class Manifest:
         self.path = Path(path)
 
     def load(self) -> list[ClipRecord]:
-        """
-        Read all records from the manifest file.
+        """Read all records from the manifest file (Enum fields restored).
 
-        Returns an empty list if the file does not yet exist — callers don't
-        need to check for the file's existence before calling this.
+        Returns:
+            List of ClipRecord; empty list if the file doesn't exist yet (callers need
+            not check for the file first).
         """
         if not self.path.exists():
             return []
@@ -170,14 +170,13 @@ class Manifest:
         return records
 
     def append(self, record: ClipRecord) -> bool:
-        """
-        Write one record to the manifest, skipping it if already present.
+        """Append one record, skipping it if its clip_id already exists.
 
-        Returns True if the record was written, False if it was a duplicate.
-
-        De-duplication is by clip_id. Because clip_id is a deterministic hash
-        of (url, start, end), running the same search twice won't add the same
-        clip twice.
+        De-dup is by clip_id (a deterministic hash), so re-running the same search won't double-add.
+        Args:
+            record: the ClipRecord to write.
+        Returns:
+            True if written, False if it was a duplicate.
         """
         existing_ids = {r.clip_id for r in self.load()}
         if record.clip_id in existing_ids:
@@ -200,17 +199,14 @@ class Manifest:
         return True
 
     def update(self, updated: ClipRecord) -> bool:
-        """
-        Replace an existing record in the manifest with an updated version.
+        """Replace an existing record (matched by clip_id) via an atomic full-file rewrite.
 
-        This rewrites the entire file with the updated record swapped in.
-        Rewriting the whole file is necessary because JSONL has no concept of
-        "edit line N" — you can only append or rewrite. For a manifest of
-        thousands of clips this is still fast (it's just text), and it's the
-        only safe way to guarantee the file stays valid after an edit.
-
-        Returns True if the record was found and updated, False if the
-        clip_id didn't exist in the manifest.
+        Writes to a temp file then renames, so an interrupted write can't corrupt the manifest
+        (JSONL has no "edit line N"; whole-file rewrite is the only safe edit, and stays fast).
+        Args:
+            updated: the replacement ClipRecord (matched on its clip_id).
+        Returns:
+            True if a matching record was found and replaced, False otherwise.
         """
         records = self.load()
         found = False
@@ -244,15 +240,13 @@ class Manifest:
         return True
 
     def delete(self, clip_id: str) -> bool:
-        """
-        Remove a record from the manifest by clip_id.
+        """Remove a record by clip_id via the same atomic temp-file rewrite as update().
 
-        Like update(), this rewrites the entire file with the matching
-        record omitted. The git history retains the record if it was
-        ever committed, so deletion is always recoverable.
-
-        Returns True if the record was found and removed, False if the
-        clip_id didn't exist.
+        Recoverable from git history if the record was ever committed.
+        Args:
+            clip_id: id of the record to remove.
+        Returns:
+            True if a matching record was removed, False otherwise.
         """
         records = self.load()
         filtered = [r for r in records if r.clip_id != clip_id]
@@ -275,10 +269,12 @@ class Manifest:
         return True
 
     def append_many(self, records: list[ClipRecord]) -> tuple[int, int]:
-        """
-        Write multiple records, skipping duplicates.
+        """Append multiple records, skipping duplicates.
 
-        Returns (written_count, skipped_count).
+        Args:
+            records: the ClipRecords to write.
+        Returns:
+            (written_count, skipped_count).
         """
         written = skipped = 0
         for record in records:

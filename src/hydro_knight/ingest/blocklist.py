@@ -17,6 +17,8 @@ BLOCKLIST_PATH = Path("data/blocklist.txt")
 
 
 class Blocklist:
+    """Reader/writer for the committed reject-list of source URLs (one per line)."""
+
     def __init__(self, path: Path = BLOCKLIST_PATH) -> None:
         self.path = Path(path)
 
@@ -37,4 +39,5 @@ class Blocklist:
             f.write(url + "\n")
 
     def contains(self, url: str) -> bool:
+        """True if `url` is on the blocklist."""
         return url in self.load()

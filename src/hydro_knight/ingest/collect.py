@@ -108,11 +108,16 @@ def fetch_metadata(
     min_duration: int = MIN_DURATION_SEC,
     max_duration: int = MAX_DURATION_SEC,
 ) -> list[dict]:
-    """
-    Search YouTube for a keyword query and return filtered video metadata.
+    """Search YouTube for a keyword query and return duration-filtered video metadata.
 
-    We over-fetch (3x) to absorb videos dropped by the duration filter, then
-    trim to max_results after filtering.
+    Over-fetches 3x to absorb videos dropped by the duration filter, then trims to max_results.
+    Args:
+        query: search text.
+        max_results: how many results to keep after filtering.
+        min_duration: reject videos shorter than this (seconds); 0-duration entries are kept.
+        max_duration: reject videos longer than this (seconds).
+    Returns:
+        List of raw yt-dlp metadata dicts (possibly empty).
     """
     fetch_n = max_results * 3
 
@@ -154,13 +159,14 @@ def fetch_metadata(
 
 
 def fetch_channel_videos(channel_url: str, limit: int | None = None) -> list[dict]:
-    """
-    List every video on a channel (or playlist) without downloading.
+    """List every video on a channel/playlist (metadata only, no download).
 
-    Uses --flat-playlist, which returns lightweight entries (id, title, url,
-    sometimes duration) for the whole channel in a single fast call rather
-    than fully extracting each video. No duration filter is applied — channel
-    ingest is opt-in and assumed relevant.
+    Uses --flat-playlist for one fast call; no duration filter (channel ingest is opt-in).
+    Args:
+        channel_url: channel or playlist URL.
+        limit: if set, keep at most this many entries.
+    Returns:
+        List of lightweight yt-dlp entry dicts (possibly empty).
     """
     cmd = [
         *_YTDLP,
@@ -208,10 +214,15 @@ def metadata_to_record(
     guess_time_of_day: TimeOfDay,
     guess_weather: Weather,
 ) -> ClipRecord:
-    """
-    Convert a raw yt-dlp metadata dict (from search OR flat-playlist) into a
-    ClipRecord. Condition fields are guesses based on source intent and are
-    marked UNLABELED so the annotation pass verifies them.
+    """Convert a raw yt-dlp metadata dict into a ClipRecord (label UNLABELED, conditions guessed).
+
+    Handles both search ("webpage_url") and flat-playlist ("url"/"id") metadata shapes.
+    Args:
+        meta: one yt-dlp metadata dict.
+        guess_setting, guess_time_of_day, guess_weather: condition guesses from source intent,
+            verified later in the annotation pass.
+    Returns:
+        A ClipRecord with a deterministic clip_id and label UNLABELED.
     """
     # Flat-playlist entries use "url"; full extractions use "webpage_url".
     url = meta.get("webpage_url") or meta.get("url") or ""
@@ -269,7 +280,16 @@ def collect(
     guess_time_of_day: TimeOfDay = TimeOfDay.DAY,
     guess_weather: Weather = Weather.UNKNOWN,
 ) -> None:
-    """Search for pool footage by keyword and register results in the manifest."""
+    """Search for pool footage by keyword and register the results in the manifest.
+
+    Args:
+        manifest_path: JSONL manifest to append to.
+        queries: keyword queries; defaults to DEFAULT_QUERIES.
+        max_results_per_query: cap on kept results per query.
+        guess_setting, guess_time_of_day, guess_weather: condition guesses for each record.
+    Returns:
+        None (prints a registration summary).
+    """
     if queries is None:
         queries = DEFAULT_QUERIES
 
@@ -302,11 +322,16 @@ def collect_channels(
     guess_time_of_day: TimeOfDay = TimeOfDay.UNKNOWN,
     guess_weather: Weather = Weather.UNKNOWN,
 ) -> None:
-    """
-    Pull whole channels and register every video in the manifest.
+    """Pull whole channels and register every video in the manifest.
 
-    Condition guesses default to UNKNOWN here because a single channel often
-    mixes indoor/outdoor and varied conditions — the annotation pass sets them.
+    Condition guesses default to UNKNOWN — a channel often mixes conditions; the annotation pass sets them.
+    Args:
+        manifest_path: JSONL manifest to append to.
+        channels: channel URLs; defaults to DEFAULT_CHANNELS.
+        limit_per_channel: if set, cap videos taken per channel.
+        guess_setting, guess_time_of_day, guess_weather: condition guesses for each record.
+    Returns:
+        None (prints a registration summary).
     """
     if channels is None:
         channels = DEFAULT_CHANNELS

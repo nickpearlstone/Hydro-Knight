@@ -649,14 +649,15 @@ def annotate(
     include_review: bool = False,
     review_only: bool = False,
 ) -> None:
-    """
-    Run an annotation session over downloaded clips.
+    """Run an annotation session over downloaded clips (one tkinter window per clip).
 
-    By default only UNLABELED clips are queued — clips you left as REVIEW are
-    skipped so you don't re-see them every session.
-
-    - include_review=True : also queue REVIEW clips alongside unlabeled
-    - review_only=True     : queue ONLY the REVIEW clips (a dedicated review pass)
+    By default only UNLABELED clips are queued; REVIEW clips are skipped so you don't re-see them.
+    Args:
+        manifest_path: JSONL manifest of clips to annotate.
+        include_review: also queue REVIEW clips alongside UNLABELED.
+        review_only: queue ONLY REVIEW clips (a dedicated review pass).
+    Returns:
+        None (writes label/metadata/event updates back to the manifest as you go).
     """
     manifest = Manifest(manifest_path)
     blocklist = Blocklist()

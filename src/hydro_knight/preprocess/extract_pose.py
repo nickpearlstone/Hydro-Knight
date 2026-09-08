@@ -60,10 +60,19 @@ def extract(
     device: str | None = None,
     max_frames: int | None = None,
 ) -> int:
-    """
-    Extract pose keypoints from one clip into a Parquet file.
+    """Extract pose keypoints from one clip into a Parquet file (whole-frame YOLO + tracking).
 
-    Returns the number of rows (swimmer-detections) written.
+    Args:
+        video_path: input clip.
+        out_path: destination .parquet (parent dirs created).
+        model_name: YOLO-pose weights (version/size is swappable).
+        imgsz: inference resolution (>=1280 was the biggest recall lever).
+        conf: detection confidence threshold.
+        tracker: Ultralytics tracker config (e.g. bytetrack.yaml).
+        device: torch device, or None to let Ultralytics choose.
+        max_frames: stop after this many frames (None = whole clip; never cap for real runs).
+    Returns:
+        Number of rows (swimmer-detections) written.
     """
     video_path = Path(video_path)
     out_path = Path(out_path)
@@ -128,15 +137,23 @@ def extract_tiled(
     conf: float = 0.25,
     max_frames: int | None = None,
 ) -> int:
-    """
-    SAHI extraction: tiled detection + ByteTrack -> Parquet.
+    """SAHI extraction: tiled detection + ByteTrack -> Parquet (same schema as extract()).
 
-    Same output schema as extract(), but recovers far more distant swimmers
-    via tiling. Much slower (many inferences per frame) — GPU territory for
-    full clips. Tracking is ByteTrack (from the `trackers` package), run on
-    the merged tiled detections since YOLO's built-in tracker can't.
-    A keypoint index is carried through the tracker so tracked boxes map back
-    to their keypoints. track_id -1 = a detection not yet confirmed as a track.
+    Recovers far more distant swimmers via tiling, but much slower (many inferences per frame) —
+    GPU territory for full clips. ByteTrack runs on the merged tiled detections (YOLO's built-in
+    tracker can't); a keypoint index is carried through so tracked boxes map back to keypoints
+    (track_id -1 = not yet confirmed).
+    Args:
+        video_path: input clip.
+        out_path: destination .parquet.
+        model_name: YOLO-pose weights.
+        tile: tile size in pixels.
+        imgsz: per-tile inference resolution (must exceed `tile` for SAHI to help).
+        overlap: fractional tile overlap.
+        conf: detection confidence threshold.
+        max_frames: stop after this many frames (None = whole clip).
+    Returns:
+        Number of rows (swimmer-detections) written.
     """
     video_path = Path(video_path)
     out_path = Path(out_path)

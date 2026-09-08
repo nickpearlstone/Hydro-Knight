@@ -23,14 +23,15 @@ REF_CONF_COLS = ["c5", "c6", "c11", "c12"]  # L/R shoulder, L/R hip
 
 
 def usable_pose_mask(df: pd.DataFrame, min_ref_conf: float = 0.3) -> np.ndarray:
-    """
-    Per-row: would normalize.py keep this pose?
+    """Per-row bool: would normalize.py keep this pose (all 4 reference joints >= min_ref_conf)?
 
-    Mirrors the gate in features/normalize.py (all four reference joints must
-    clear min_ref_conf) WITHOUT importing it, so this stays a pure data view
-    even if the normalization fix changes the gate later — at which point this
-    function should be updated to match, making the "before vs after" coverage
-    comparison explicit.
+    Mirrors the normalize.py gate WITHOUT importing it, so this stays a pure data view; update
+    it here too if that gate changes, to keep the before/after coverage comparison honest.
+    Args:
+        df: keypoint rows with reference-joint confidence columns c5, c6, c11, c12.
+        min_ref_conf: minimum confidence required of each reference joint.
+    Returns:
+        (len(df),) bool array — True where the pose would be kept.
     """
     conf = df[REF_CONF_COLS].to_numpy(dtype=float)
     return conf.min(axis=1) >= min_ref_conf
@@ -42,14 +43,18 @@ def frame_coverage_in_events(
     fps: float,
     min_ref_conf: float = 0.3,
 ) -> list[dict]:
-    """
-    Per event: what fraction of its frames have >= 1 usable pose?
+    """Per event: fraction of its frames with >= 1 usable pose ("did the filter eat the drowning?").
 
-    This is "did the confidence filter eat the drowning?" as a number. A
-    coverage of 0.35 means 65% of the annotated distress span produced no
-    usable pose — invisible to any pose-based model. (v1 is any-swimmer
-    coverage; victim-track coverage needs track-scoped labels, tracked in
-    PLAN.)
+    Coverage 0.35 means 65% of the annotated span produced no usable pose — invisible to any
+    pose-based model. (v1 is any-swimmer coverage; victim-track coverage needs track-scoped labels.)
+    Args:
+        df: keypoint-Parquet DataFrame for the clip.
+        events: list of {"start","end","label"} windows in seconds.
+        fps: clip frame rate, for the seconds<->frame conversion.
+        min_ref_conf: reference-joint confidence gate for "usable".
+    Returns:
+        One dict per event: event_start, event_end, event_label, frames_in_event,
+        frames_covered, coverage.
     """
     usable_frames = set(df.loc[usable_pose_mask(df, min_ref_conf), "frame"].unique())
     out = []
@@ -71,13 +76,15 @@ def frame_coverage_in_events(
 
 
 def track_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Per-track continuity: length, span, and gaps.
+    """Per-track continuity: frame count, span, and gaps (breaks in consecutive frame numbers).
 
-    A "gap" is any break in consecutive frame numbers within one track —
-    submersion, occlusion, or detector flicker. Gap structure is exactly what
-    Plan A's re-association timer has to reason about, so we surface it here
-    first.
+    A gap is submersion, occlusion, or detector flicker — exactly what Plan A's re-association
+    timer must reason about, so it's surfaced here.
+    Args:
+        df: keypoint-Parquet DataFrame (needs track_id, frame).
+    Returns:
+        DataFrame (one row per track) with track_id, n_frames, first_frame, last_frame,
+        span_frames, n_gaps, longest_gap; sorted by n_frames descending.
     """
     rows = []
     for tid, g in df.groupby("track_id"):
@@ -99,7 +106,14 @@ def track_stats(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def dataset_census(records) -> dict:
-    """Manifest at a glance: labels, events, durations. `records` = ClipRecords."""
+    """Manifest at a glance: label counts, event counts/durations, HOLD count.
+
+    Args:
+        records: an iterable of ClipRecord objects.
+    Returns:
+        Dict with n_clips, label_counts, n_events, event_label_counts,
+        event_duration_mean_s, event_duration_median_s, clips_with_hold.
+    """
     label_counts: dict[str, int] = {}
     event_durs, event_labels = [], {}
     for r in records:

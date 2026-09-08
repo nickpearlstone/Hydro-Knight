@@ -34,28 +34,32 @@ RAW_LOCAL = Path("raw_local")
 
 
 def local_path(record: ClipRecord) -> Path:
-    """
-    Return the expected local file path for a clip.
+    """Expected local video path for a clip (raw_local/<clip_id>.mp4).
 
-    We name the file by clip_id so the filename is stable and unique
-    regardless of what the original video was called on YouTube.
-    The extension is .mp4 — yt-dlp will convert to this format on download.
+    Named by clip_id so the filename is stable and unique regardless of the original title.
+    Args:
+        record: the clip whose path to compute.
+    Returns:
+        Path to raw_local/<clip_id>.mp4 (the file may not exist yet).
     """
     return RAW_LOCAL / f"{record.clip_id}.mp4"
 
 
 def done_marker(record: ClipRecord) -> Path:
-    """
-    Return the path to the sidecar file that marks a clip as downloaded.
+    """Path to the sidecar marking a clip as fully downloaded (raw_local/<clip_id>.done).
 
-    We use a separate .done file rather than checking whether the .mp4 exists
-    because a partial download leaves a real (but broken) .mp4 behind.
-    The .done file is only written after yt-dlp exits successfully.
+    A separate .done file is used instead of checking the .mp4, because a partial download
+    leaves a real-but-broken .mp4; .done is written only on success.
+    Args:
+        record: the clip whose marker to compute.
+    Returns:
+        Path to the .done sidecar (may not exist).
     """
     return RAW_LOCAL / f"{record.clip_id}.done"
 
 
 def is_downloaded(record: ClipRecord) -> bool:
+    """True if the clip's .done marker exists (i.e. it downloaded successfully)."""
     return done_marker(record).exists()
 
 
@@ -64,13 +68,16 @@ def download_clip(
     cookies_file: Path | None = None,
     cookies_from_browser: str | None = None,
 ) -> bool:
-    """
-    Download one clip to raw_local/.
+    """Download one clip's video to raw_local/, optionally just its [start,end] section.
 
-    If start_sec and end_sec are set, yt-dlp downloads only that segment
-    rather than the full video — saves disk space for long source videos.
-
-    Returns True on success, False on failure.
+    A clip with start_sec/end_sec > 0 downloads only that source section (re-based to 0);
+    clips starting at 0 download whole. Writes a .done marker on success.
+    Args:
+        record: the clip to download.
+        cookies_file: optional cookies.txt for age/region-gated videos.
+        cookies_from_browser: optional browser name to pull cookies from instead.
+    Returns:
+        True on success, False on failure.
     """
     RAW_LOCAL.mkdir(parents=True, exist_ok=True)
     out_path = local_path(record)
@@ -138,15 +145,15 @@ def download(
     cookies_file: Path | None = None,
     cookies_from_browser: str | None = None,
 ) -> None:
-    """
-    Download all undownloaded clips in the manifest.
+    """Download every not-yet-downloaded clip in the manifest.
 
-    Parameters
-    ----------
-    manifest_path :
-        Path to the JSONL manifest file to read from.
-    limit :
-        If set, download at most this many clips. Useful for test runs.
+    Args:
+        manifest_path: JSONL manifest to read.
+        limit: if set, download at most this many clips (handy for test runs).
+        cookies_file: optional cookies.txt passed to each download.
+        cookies_from_browser: optional browser name to pull cookies from instead.
+    Returns:
+        None (prints a per-clip progress summary).
     """
     manifest = Manifest(manifest_path)
     records = manifest.load()
@@ -178,14 +185,14 @@ def download(
 
 
 def cleanup_orphans(manifest_path: Path) -> None:
-    """
-    Delete any files in raw_local/ whose clip_id has no matching record
-    in the manifest.
+    """Delete raw_local/ files whose clip_id no longer appears in the manifest.
 
-    This fixes the case where the manifest was regenerated (new clip IDs)
-    while old downloaded files were still sitting on disk. Without cleanup,
-    those orphaned files waste disk space and can never be opened by the
-    annotator since nothing in the manifest points to them.
+    Guards against a regenerated manifest (new ids) leaving old downloads orphaned — they'd
+    waste disk and be unreachable by the annotator/extractor.
+    Args:
+        manifest_path: JSONL manifest defining the known clip_ids.
+    Returns:
+        None (prints how many files were removed).
     """
     if not RAW_LOCAL.exists():
         print("raw_local/ does not exist — nothing to clean.")

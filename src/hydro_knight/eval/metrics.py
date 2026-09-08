@@ -50,12 +50,15 @@ class ClipEval:
 def detections_from_windows(
     info: list[tuple[int, int]], errors: np.ndarray, span: int = 32
 ) -> pd.DataFrame:
-    """
-    Adapter: TCN output -> neutral detections.
+    """Adapter: turn TCN window output into the neutral detections table.
 
-    `info` is make_windows' bookkeeping list of (track_id, start_frame) and
-    `errors` the matching reconstruction-error array. Each window becomes one
-    detection covering `span` frames.
+    Args:
+        info: make_windows' list of (track_id, start_frame), one per window.
+        errors: matching per-window reconstruction errors.
+        span: frames each window covers.
+    Returns:
+        DataFrame with columns track_id, frame, score, span (one row per window;
+        empty with those columns if info is empty).
     """
     if len(info) == 0:
         return pd.DataFrame(columns=DET_COLUMNS)
@@ -79,11 +82,13 @@ def _det_intervals(det: pd.DataFrame, fps: float) -> tuple[np.ndarray, np.ndarra
 
 
 def label_detections(clip: ClipEval) -> np.ndarray:
-    """
-    Boolean mask: True where a detection's time span overlaps ANY event window.
+    """Boolean mask: True where a detection's time span overlaps ANY event window.
 
-    This is the window-labeling rule the Colab eval used (time overlap), kept
-    identical so numbers are comparable with the first run.
+    Uses the time-overlap rule from the Colab eval, kept identical for comparability.
+    Args:
+        clip: the ClipEval whose detections and events are compared.
+    Returns:
+        (len(detections),) bool array; a length-0 array if there are no detections.
     """
     det = clip.detections
     if len(det) == 0:
@@ -96,14 +101,14 @@ def label_detections(clip: ClipEval) -> np.ndarray:
 
 
 def split_scores(clips: list[ClipEval]) -> tuple[np.ndarray, np.ndarray]:
-    """
-    All detection scores across clips, split into (normal, distress).
+    """Split all detection scores across clips into (normal, distress) by event overlap.
 
-    If a detections table carries a boolean `trained_on` column (set by the
-    CLI's --train-fresh holdout), those rows are EXCLUDED here — scoring the
-    model on windows it trained on would flatter the normal-error distribution
-    and contaminate ROC/PR/percentiles. Event-level metrics deliberately keep
-    all detections (a real event caught by any window is still caught).
+    Rows flagged `trained_on` (the --train-fresh holdout) are excluded: scoring the model on
+    windows it trained on would flatter the normal distribution and contaminate ROC/PR/percentiles.
+    Args:
+        clips: the per-clip evaluation bundles.
+    Returns:
+        (normal_scores, distress_scores): 1-D float arrays, each empty if that class has none.
     """
     normal, distress = [], []
     for c in clips:
@@ -122,13 +127,16 @@ def split_scores(clips: list[ClipEval]) -> tuple[np.ndarray, np.ndarray]:
 
 
 def event_catches(clip: ClipEval, threshold: float) -> list[dict]:
-    """
-    Per-event verdicts at a given alarm threshold.
+    """Per-event verdicts at a given alarm threshold: caught? and latency-to-first-catch.
 
-    An event is *caught* if any detection scoring >= threshold overlaps its
-    window. Latency = (first such detection's start time - event onset),
-    clipped at 0 (a window that started before onset still only "sees" the
-    event from onset — earlier isn't a prediction, it's overlap).
+    Caught if any detection scoring >= threshold overlaps the event; latency is that first
+    detection's start minus event onset, clipped at 0 (overlap before onset isn't a prediction).
+    Args:
+        clip: the ClipEval to score.
+        threshold: alarm threshold applied to detection scores.
+    Returns:
+        One dict per event: clip_id, event_label, event_start, event_end, caught (bool),
+        latency_s (seconds, NaN if uncaught).
     """
     det = clip.detections
     out = []
@@ -188,7 +196,15 @@ def _episodes(times_s: np.ndarray, merge_gap_s: float) -> list[tuple[float, floa
 def false_alarm_episodes(
     clip: ClipEval, threshold: float, merge_gap_s: float = 2.0
 ) -> int:
-    """Alarm episodes that overlap NO event window = false alarms."""
+    """Count alarm episodes that overlap no event window (= false alarms).
+
+    Args:
+        clip: the ClipEval to score.
+        threshold: alarm threshold applied to detection scores.
+        merge_gap_s: firings closer than this merge into one episode.
+    Returns:
+        Number of false-alarm episodes on this clip.
+    """
     det = clip.detections
     if len(det) == 0:
         return 0
@@ -205,7 +221,13 @@ def false_alarm_episodes(
 
 
 def normal_hours(clips: list[ClipEval]) -> float:
-    """Total footage hours OUTSIDE event windows (the false-alarm exposure)."""
+    """Total footage hours OUTSIDE event windows across clips (the false-alarm exposure).
+
+    Args:
+        clips: the per-clip evaluation bundles.
+    Returns:
+        Hours of non-event footage (float).
+    """
     total = 0.0
     for c in clips:
         ev_time = sum(max(ev["end"] - ev["start"], 0.0) for ev in c.events)
@@ -218,10 +240,16 @@ def sweep_recall_fa(
     thresholds: np.ndarray | None = None,
     merge_gap_s: float = 2.0,
 ) -> pd.DataFrame:
-    """
-    The operating-point curve: for each threshold, event recall vs. false
-    alarms per hour of normal footage. This is the plot the alarm threshold
-    gets chosen from — recall bought at the price of alarm fatigue.
+    """Operating-point curve: event recall vs. false alarms/hour, swept over thresholds.
+
+    This is the plot the alarm threshold gets chosen from — recall bought at the price of
+    alarm fatigue.
+    Args:
+        clips: the per-clip evaluation bundles.
+        thresholds: thresholds to sweep; default = 61 score quantiles.
+        merge_gap_s: firing-merge gap for false-alarm counting.
+    Returns:
+        DataFrame with threshold, recall, events_caught, false_alarms, fa_per_hour per row.
     """
     all_scores = np.concatenate(
         [
@@ -253,7 +281,14 @@ def sweep_recall_fa(
 
 
 def roc_pr(err_normal: np.ndarray, err_distress: np.ndarray) -> dict | None:
-    """Window-level ROC and PR curves + AUCs. None if either class is empty."""
+    """Window-level ROC and PR curves + AUCs from per-class error arrays.
+
+    Args:
+        err_normal: reconstruction errors of normal windows.
+        err_distress: reconstruction errors of distress windows.
+    Returns:
+        Dict with fpr, tpr, roc_auc, precision, recall, pr_auc; None if either class is empty.
+    """
     if len(err_normal) == 0 or len(err_distress) == 0:
         return None
     y = np.concatenate([np.zeros(len(err_normal)), np.ones(len(err_distress))])
@@ -271,7 +306,14 @@ def roc_pr(err_normal: np.ndarray, err_distress: np.ndarray) -> dict | None:
 
 
 def percentile_table(err_normal: np.ndarray, err_distress: np.ndarray) -> pd.DataFrame:
-    """The 0.539 storyteller: side-by-side error percentiles per class."""
+    """Side-by-side error percentiles (p10/50/90/99) per class — the 0.539 storyteller.
+
+    Args:
+        err_normal: reconstruction errors of normal windows.
+        err_distress: reconstruction errors of distress windows.
+    Returns:
+        DataFrame with one row per non-empty class (class, n, p10, p50, p90, p99).
+    """
     pcts = [10, 50, 90, 99]
     rows = []
     for name, e in [("normal", err_normal), ("distress", err_distress)]:
