@@ -17,6 +17,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 import torch.nn as nn
+from tqdm import tqdm
 
 
 class TCNAutoencoder(nn.Module):
@@ -86,15 +87,18 @@ def train_tcn(windows: np.ndarray, epochs: int = 120, lr: float = 1e-3, seed: in
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.MSELoss()
 
+    pbar = tqdm(range(epochs), "training")
+
     history: list[float] = []
     model.train()
-    for _ in range(epochs):
+    for _ in pbar:
         opt.zero_grad()
         recon = model(X)
         loss = loss_fn(recon, X)
         loss.backward()
         opt.step()
         history.append(float(loss.item()))
+        pbar.set_postfix(loss=f"{history[-1]:.4f}")
     model.loss_history_ = history
     return model, scaler
 
