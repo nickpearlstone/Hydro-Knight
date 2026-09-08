@@ -14,6 +14,9 @@ scratch/
 
 # Eval-report run folders (PNGs + stats per run) — regenerable outputs
 runs/
+mlruns/
+mlflow.db
+mlartifacts/
 
 # Cookie files must never be committed
 *cookies*.txt
