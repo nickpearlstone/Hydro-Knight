@@ -18,6 +18,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import supervision as sv
+from tqdm import tqdm
 from trackers import ByteTrackTracker
 from ultralytics import YOLO
 
@@ -78,6 +79,10 @@ def extract(
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    cap = cv2.VideoCapture(str(video_path))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or None
+    cap.release()
+
     model = YOLO(model_name)
 
     # model.track(... stream=True) yields one Results object per frame, while
@@ -94,7 +99,7 @@ def extract(
     )
 
     rows: list[list[float]] = []
-    for frame_idx, result in enumerate(results):
+    for frame_idx, result in enumerate(tqdm(results, total=total_frames, desc="pose")):
         if max_frames is not None and frame_idx >= max_frames:
             break
 

@@ -24,6 +24,7 @@ dependencies = [
     "pandas>=2.2.0",           # assemble keypoint tables
     "pyarrow>=15.0.0",         # Parquet file format for keypoint storage
     "scikit-learn>=1.4.0",     # ROC-AUC / PR-AUC evaluation metrics
+    "tqdm>=4.66.0",            # progress bars for training + eval loops
 ]
 
 [project.optional-dependencies]

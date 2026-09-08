@@ -40,6 +40,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from hydro_knight.eval import tracking
 from hydro_knight.eval.data_health import (
@@ -182,7 +183,7 @@ def main() -> None:
 
     # Pass 1 — windows per clip (shared by training and scoring).
     per_clip = []  # (clip_id, df, windows, info, events, fps, duration_s)
-    for p in paths:
+    for p in tqdm(paths, desc="window"):
         df = pd.read_parquet(p)
         if df.empty:
             continue
@@ -227,7 +228,9 @@ def main() -> None:
 
     # Pass 2 — score every clip, build the neutral detections + health views.
     clips, coverage_rows, track_frames = [], [], []
-    for ci, (cid, df, w, info, events, fps, duration) in enumerate(per_clip):
+    for ci, (cid, df, w, info, events, fps, duration) in enumerate(
+        tqdm(per_clip, desc="scoring")
+    ):
         errors = reconstruction_error(model, w, scaler) if len(w) else np.array([])
         det = detections_from_windows(info, errors, span=args.window)
         if trained_sel and len(det):
