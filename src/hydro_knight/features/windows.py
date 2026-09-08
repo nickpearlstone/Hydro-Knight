@@ -43,13 +43,15 @@ def make_windows(df, window: int = 32, stride: int = 8, min_ref_conf: float = 0.
         rows = g["row"].to_numpy()
         frames = g["frame"].to_numpy()
         pos = feats[rows]
-        cen = g[["cx","cy"]].to_numpy()
+        cen = g[["cx", "cy"]].to_numpy()
         gaps = np.diff(frames)[:, None]
         vel = np.vstack([np.zeros((1, 34)), np.diff(pos, axis=0) / gaps])
         cvel = np.vstack([np.zeros((1, 2)), np.diff(cen, axis=0) / gaps])
-        track_feats = np.hstack([pos, vel, cvel])  # (T, 70): 34 pos + 34 kp-vel + 2 centroid-vel
+        track_feats = np.hstack(
+            [pos, vel, cvel]
+        )  # (T, 70): 34 pos + 34 kp-vel + 2 centroid-vel
         for s in range(0, len(rows) - window + 1, stride):
-            windows.append(track_feats[s: s+window])
+            windows.append(track_feats[s : s + window])
             info.append((int(tid), int(frames[s])))
 
     arr = (
