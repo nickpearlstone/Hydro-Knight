@@ -53,8 +53,8 @@ use the merged tile output. Tracking runs as a separate step instead:
 Stable IDs matter because the planned "didn't resurface" rule needs to know that the
 swimmer who went under is the same person across frames.
 
-Code: [`extract_pose.py`](../src/hydro_knight/preprocess/extract_pose.py)
-(`extract_tiled`) and [`tiled_pose.py`](../src/hydro_knight/preprocess/tiled_pose.py).
+Code: [`tiled_pose.py`](../src/hydro_knight/preprocess/tiled_pose.py) (tiling and merge)
+and [`build_tracks.py`](../src/hydro_knight/preprocess/build_tracks.py) (tracking).
 
 ## 3. First training run: ROC-AUC 0.539
 

@@ -1,164 +1,172 @@
 """
-Tests for extract() in preprocess/extract_pose.py, using a fake YOLO stream.
+Tests for extract_raw() in preprocess/extract_pose.py, with a fake YOLO and a fake video.
 
-extract() is Colab-GPU code: it needs real video and real weights, so it never
-runs locally and its failure mode is the worst kind — a valid-looking Parquet
-with zero rows. That is indistinguishable from "the footage had no swimmers",
-which is a real condition in this dataset (10 clips already extracted empty).
+extract_raw is Colab-GPU code: it needs real video and weights, so it never runs
+locally, and its worst failure is silent — output that looks valid but is empty
+or incomplete. 10 clips from the first extraction came back as empty keypoint
+files, and nothing on disk could say whether that meant "no swimmers" or "the
+run broke". These tests pin the guarantees that make that distinguishable:
+a frame row for every frame read (even with zero detections), a completion flag,
+and resume without gaps or duplicates.
 
-The specific trap: model.track(..., stream=True) returns a *generator*, which
-yields each frame once and remembers nothing. Anything that walks it before the
-extraction loop (a progress-bar pre-pass, a frame count, a peek at the first
-result) silently drains it, and the real loop then iterates an empty stream and
-writes nothing. No exception, no warning.
-
-These tests stand in a fake YOLO whose track() returns a genuine generator, so
-that one-shot behavior is reproduced rather than imitated. Row counts are the
-assertion that matters: a drained stream shows up as 0 rows and nothing else.
-
-Uses pytest's built-in monkeypatch/tmp_path fixtures — requested by parameter
-name, so no import is needed.
+Uses pytest's built-in monkeypatch/tmp_path fixtures.
 """
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
+import pytest
+from yolo_fakes import Result as _Result
 
 from hydro_knight.preprocess import extract_pose
-from hydro_knight.preprocess.extract_pose import COLUMNS, extract
+from hydro_knight.preprocess.extract_pose import (
+    DET_COLUMNS,
+    FRAME_COLUMNS,
+    extract_raw,
+    load_detections,
+)
 
 
-class _FakeTensor:
+def _install_fakes(monkeypatch, n_frames: int, people_per_frame=None, crash_at=None):
+    """Fake cv2.VideoCapture (n_frames 720p frames) and a YOLO that finds people_per_frame[i]
+    swimmers in the whole-frame pass of frame i (tiles find nothing). crash_at raises on that frame.
+    Returns a dict counting YOLO constructions.
     """
-    Stands in for the torch tensors YOLO hangs off a Results object. extract()
-    reaches through .int()/.cpu() before .tolist()/.numpy(), so those are no-ops
-    that return self.
-    """
-
-    def __init__(self, values):
-        self._values = values
-
-    def int(self):
-        return self
-
-    def cpu(self):
-        return self
-
-    def tolist(self):
-        return list(self._values)
-
-    def numpy(self):
-        return np.asarray(self._values, dtype=float)
-
-
-class _FakeBoxes:
-    def __init__(self, n_people: int):
-        self.id = _FakeTensor(list(range(1, n_people + 1)))
-        self.conf = _FakeTensor([0.9] * n_people)
-        self._n = n_people
-
-    def __len__(self):
-        return self._n
-
-
-class _FakeKeypoints:
-    def __init__(self, n_people: int, seed: int):
-        rng = np.random.RandomState(seed)
-        self.data = _FakeTensor(rng.rand(n_people, 17, 3))
-
-
-class _FakeResult:
-    """One frame's worth of detections, shaped like an Ultralytics Results."""
-
-    def __init__(self, n_people: int, seed: int):
-        self.boxes = _FakeBoxes(n_people)
-        self.keypoints = _FakeKeypoints(n_people, seed)
-
-
-def _install_fake_yolo(monkeypatch, people_per_frame: list[int]) -> None:
-    """
-    Replace YOLO and cv2.VideoCapture inside extract_pose so extract() runs with
-    no weights and no video. track() hands back a real generator expression, so
-    the stream is genuinely one-shot exactly like stream=True.
-    """
-
-    class _FakeYOLO:
-        def __init__(self, model_name):
-            self.model_name = model_name
-
-        def track(self, **kwargs):
-            return (_FakeResult(n, seed=i) for i, n in enumerate(people_per_frame))
+    people = people_per_frame or [1] * n_frames
+    state = {"frame": -1, "models": 0}
 
     class _FakeCapture:
         def __init__(self, path):
-            pass
+            self.i = 0
+
+        def isOpened(self):
+            return True
 
         def get(self, prop):
-            return float(len(people_per_frame))
+            return {
+                extract_pose.cv2.CAP_PROP_FRAME_WIDTH: 1280,
+                extract_pose.cv2.CAP_PROP_FRAME_HEIGHT: 720,
+                extract_pose.cv2.CAP_PROP_FPS: 60.0,
+                extract_pose.cv2.CAP_PROP_FRAME_COUNT: n_frames,
+            }[prop]
+
+        def _next(self):
+            if self.i >= n_frames:
+                return False, None
+            state["frame"] = self.i
+            img = np.full((720, 1280, 3), self.i % 255, np.uint8)
+            self.i += 1
+            return True, img
+
+        def read(self):
+            return self._next()
+
+        def grab(self):
+            return self._next()[0]
+
+        def retrieve(self):
+            return True, np.full((720, 1280, 3), (self.i - 1) % 255, np.uint8)
 
         def release(self):
             pass
 
-    monkeypatch.setattr(extract_pose, "YOLO", _FakeYOLO)
+    class _FakeYOLO:
+        def __init__(self, name):
+            state["models"] += 1
+
+        def __call__(self, source, **kw):
+            if isinstance(source, list):  # tiles: nothing
+                return [_Result(np.empty((0, 4)), []) for _ in source]
+            f = state["frame"]
+            if crash_at is not None and f == crash_at:
+                raise RuntimeError("simulated Colab disconnect")
+            n = people[f]
+            boxes = [[100.0 * k, 100.0, 100.0 * k + 40, 200.0] for k in range(n)]
+            return [_Result(np.array(boxes).reshape(n, 4), [0.9] * n)]
+
     monkeypatch.setattr(extract_pose.cv2, "VideoCapture", _FakeCapture)
+    monkeypatch.setattr(extract_pose, "YOLO", _FakeYOLO)
+    monkeypatch.setattr(extract_pose, "_versions", lambda: {})
+    return state
 
 
-def test_extract_writes_one_row_per_detection(monkeypatch, tmp_path):
-    # The regression guard. 5 frames x 2 swimmers = 10 rows. If anything walks
-    # the results generator before the extraction loop, this drops to 0 — which
-    # is precisely the bug that a progress-bar pre-pass introduced.
-    _install_fake_yolo(monkeypatch, [2] * 5)
-    out = tmp_path / "clip.parquet"
+def test_every_frame_gets_a_row_even_with_no_detections(monkeypatch, tmp_path):
+    _install_fakes(monkeypatch, 5, people_per_frame=[2, 0, 1, 0, 3])
 
-    n_rows = extract(tmp_path / "clip.mp4", out)
+    meta = extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=2)
 
-    assert n_rows == 10, "0 rows means the result stream was drained before the loop"
-    df = pd.read_parquet(out)
-    assert len(df) == 10
-    assert list(df.columns) == COLUMNS  # 54 cols: 3 meta + 17*(x,y,c)
+    meta, dets, frames = load_detections(tmp_path / "clip")
+    assert meta["complete"] and meta["frames_processed"] == 5
+    assert frames["frame"].tolist() == [0, 1, 2, 3, 4]
+    assert frames["n_dets"].tolist() == [2, 0, 1, 0, 3]
+    assert len(dets) == 6 and list(dets.columns) == DET_COLUMNS
+    assert list(frames.columns) == FRAME_COLUMNS
+    assert meta["chunks_done"] == 3  # chunks of 2, 2, 1
 
 
-def test_empty_frames_are_skipped_but_still_advance_the_frame_index(
+def test_detections_keep_crop_ids_and_storage_dtypes(monkeypatch, tmp_path):
+    _install_fakes(monkeypatch, 1, people_per_frame=[1])
+    extract_raw(tmp_path / "clip.mp4", tmp_path / "clip")
+
+    raw = pd.read_parquet(tmp_path / "clip" / "det-00000.parquet")
+    assert raw["crop"].tolist() == [-1]  # found by the whole-frame pass
+    assert raw["bx1"].dtype == np.float32 and raw["x0"].dtype == np.float16
+    assert raw[["bx1", "by1", "bx2", "by2"]].iloc[0].tolist() == [0, 100, 40, 200]
+
+
+def test_scene_diff_is_nan_on_first_frame_then_measured(monkeypatch, tmp_path):
+    _install_fakes(monkeypatch, 3)
+    extract_raw(tmp_path / "clip.mp4", tmp_path / "clip")
+    _, _, frames = load_detections(tmp_path / "clip")
+    assert np.isnan(frames["scene_diff"].iloc[0])
+    assert frames["scene_diff"].iloc[1:].notna().all()
+
+
+def test_crash_then_rerun_resumes_without_gaps_or_duplicates(monkeypatch, tmp_path):
+    _install_fakes(monkeypatch, 7, crash_at=5)
+    with pytest.raises(RuntimeError):
+        extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=2)
+    meta = json.loads((tmp_path / "clip" / "meta.json").read_text())
+    assert (
+        not meta["complete"] and meta["frames_processed"] == 4
+    )  # frame 4 was in the lost chunk
+
+    _install_fakes(monkeypatch, 7)
+    extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=2)
+
+    meta, dets, frames = load_detections(tmp_path / "clip")
+    assert meta["complete"]
+    assert frames["frame"].tolist() == list(range(7))
+    assert sorted(dets["frame"].tolist()) == list(range(7))
+    assert (
+        frames["scene_diff"].iloc[1:].notna().all()
+    )  # resume recovered the previous frame
+
+
+def test_complete_folder_is_skipped_without_loading_the_model(monkeypatch, tmp_path):
+    _install_fakes(monkeypatch, 3)
+    extract_raw(tmp_path / "clip.mp4", tmp_path / "clip")
+
+    state = _install_fakes(monkeypatch, 3)
+    extract_raw(tmp_path / "clip.mp4", tmp_path / "clip")
+    assert state["models"] == 0
+
+
+def test_different_settings_refuse_to_mix_into_an_existing_folder(
     monkeypatch, tmp_path
 ):
-    # frame_idx comes from enumerate over *every* result, so a frame with no
-    # swimmers writes no rows yet still consumes an index. Frame numbers must
-    # stay aligned to the video's timeline — event windows are in seconds, and
-    # renumbering would silently shift every label.
-    _install_fake_yolo(monkeypatch, [2, 0, 1, 0, 3])
-    out = tmp_path / "clip.parquet"
-
-    n_rows = extract(tmp_path / "clip.mp4", out)
-
-    assert n_rows == 6  # 2 + 0 + 1 + 0 + 3
-    df = pd.read_parquet(out)
-    assert sorted(df["frame"].unique().tolist()) == [0, 2, 4]
+    _install_fakes(monkeypatch, 3)
+    extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", conf=0.25)
+    with pytest.raises(ValueError, match="different settings"):
+        extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", conf=0.10)
 
 
-def test_max_frames_stops_early(monkeypatch, tmp_path):
-    # max_frames is a debugging convenience, never used for real runs (events
-    # often start >25s in). Pin it anyway so the break stays an early exit and
-    # does not become an off-by-one.
-    _install_fake_yolo(monkeypatch, [2] * 10)
-    out = tmp_path / "clip.parquet"
-
-    n_rows = extract(tmp_path / "clip.mp4", out, max_frames=3)
-
-    assert n_rows == 6  # frames 0,1,2 only
-    df = pd.read_parquet(out)
-    assert df["frame"].max() == 2
-
-
-def test_track_ids_and_confidences_are_carried_through(monkeypatch, tmp_path):
-    # track_id is the spine of everything downstream — windows.py groups by it,
-    # and box_conf carries the submersion signal. Pin that both survive the trip
-    # from the Results object into the Parquet.
-    _install_fake_yolo(monkeypatch, [3])
-    out = tmp_path / "clip.parquet"
-
-    extract(tmp_path / "clip.mp4", out)
-
-    df = pd.read_parquet(out)
-    assert sorted(df["track_id"].tolist()) == [1, 2, 3]
-    assert np.allclose(df["box_conf"], 0.9)
+def test_incomplete_folder_is_rejected_by_default(monkeypatch, tmp_path):
+    _install_fakes(monkeypatch, 4, crash_at=3)
+    with pytest.raises(RuntimeError):
+        extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=2)
+    with pytest.raises(RuntimeError, match="not complete"):
+        load_detections(tmp_path / "clip")
