@@ -18,20 +18,32 @@ import numpy as np
 from .normalize import features_from_dataframe
 
 
-def make_windows(df, window: int = 32, stride: int = 8, min_ref_conf: float = 0.3):
+def make_windows(
+    df,
+    window: int = 32,
+    stride: int = 8,
+    min_ref_conf: float = 0.3,
+    velocity: bool = True,
+):
     """Slice each swimmer's normalized poses into overlapping fixed-length windows.
 
     Per track (track_id < 0 skipped), poses are frame-sorted and windowed with a sliding
-    stride; each frame carries 70 features (pos + gap-normalized velocity + centroid velocity).
+    stride; each frame carries 70 features (pos + gap-normalized velocity + centroid velocity),
+    or 34 (pose only) when `velocity=False`.
     Args:
         df: keypoint-Parquet DataFrame (see features_from_dataframe).
         window: frames per window.
         stride: step between window starts (overlap = window - stride).
         min_ref_conf: min reference-joint confidence, passed through to feature extraction.
+        velocity: append the velocity blocks. False gives the 34-dim pose-only
+            baseline, so a velocity-on/velocity-off A/B differs in the feature
+            width and nothing else — same clips, windows, and window boundaries.
     Returns:
-        (windows, info): windows is (N, window, 70) float32; info is a list of
+        (windows, info): windows is (N, window, 70) float32 — or (N, window, 34) when
+        `velocity=False`; info is a list of
         (track_id, start_frame), one per window. Tracks with fewer than `window` usable poses yield none.
     """
+    n_feat = 70 if velocity else 34
     feats, meta = features_from_dataframe(df, min_ref_conf=min_ref_conf)
     meta = meta.copy()
     meta["row"] = np.arange(len(meta))
@@ -43,13 +55,16 @@ def make_windows(df, window: int = 32, stride: int = 8, min_ref_conf: float = 0.
         rows = g["row"].to_numpy()
         frames = g["frame"].to_numpy()
         pos = feats[rows]
-        cen = g[["cx", "cy"]].to_numpy()
-        gaps = np.diff(frames)[:, None]
-        vel = np.vstack([np.zeros((1, 34)), np.diff(pos, axis=0) / gaps])
-        cvel = np.vstack([np.zeros((1, 2)), np.diff(cen, axis=0) / gaps])
-        track_feats = np.hstack(
-            [pos, vel, cvel]
-        )  # (T, 70): 34 pos + 34 kp-vel + 2 centroid-vel
+        if velocity:
+            cen = g[["cx", "cy"]].to_numpy()
+            gaps = np.diff(frames)[:, None]
+            vel = np.vstack([np.zeros((1, 34)), np.diff(pos, axis=0) / gaps])
+            cvel = np.vstack([np.zeros((1, 2)), np.diff(cen, axis=0) / gaps])
+            track_feats = np.hstack(
+                [pos, vel, cvel]
+            )  # (T, 70): 34 pos + 34 kp-vel + 2 centroid-vel
+        else:
+            track_feats = pos  # (T, 34): pose only — the A/B baseline
         for s in range(0, len(rows) - window + 1, stride):
             windows.append(track_feats[s : s + window])
             info.append((int(tid), int(frames[s])))
@@ -57,6 +72,6 @@ def make_windows(df, window: int = 32, stride: int = 8, min_ref_conf: float = 0.
     arr = (
         np.stack(windows).astype(np.float32)
         if windows
-        else np.empty((0, window, 70), np.float32)
+        else np.empty((0, window, n_feat), np.float32)
     )
     return arr, info

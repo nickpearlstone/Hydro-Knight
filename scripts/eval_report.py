@@ -76,8 +76,25 @@ def _save_model(model, scaler, path: str) -> None:
     torch.save({"model": model.state_dict(), "scaler": scaler}, path)
 
 
-def _clip_fps(clip_id: str, videos_dir: Path | None, default: float) -> float:
-    """True per-clip fps from the video when available, else the default."""
+def _clip_fps(
+    clip_id: str, videos_dir: Path | None, default: float, record=None
+) -> float:
+    """Per-clip fps: the manifest first, then the video file, then the default.
+
+    The manifest is preferred because it is populated from source metadata
+    (scripts/backfill_fps.py) and is present even when the videos are not — which
+    is the normal local case. Falling through to `default` means every frame<->time
+    conversion for that clip is a guess, so the caller warns when it happens.
+    Args:
+        clip_id: the clip's id (Parquet stem).
+        videos_dir: directory holding <clip_id>.mp4, or None.
+        default: last-resort fps if nothing else is known.
+        record: the clip's ClipRecord, when the manifest was loaded.
+    Returns:
+        Frames per second for this clip.
+    """
+    if record is not None and record.fps > 0:
+        return float(record.fps)
     if videos_dir is None:
         return default
     video = videos_dir / f"{clip_id}.mp4"
@@ -157,14 +174,24 @@ def main() -> None:
     )
     ap.add_argument("--window", type=int, default=32)
     ap.add_argument("--stride", type=int, default=8)
+    ap.add_argument(
+        "--no-velocity",
+        action="store_true",
+        help="pose-only 34-dim features (the A/B baseline); default is 70-dim",
+    )
     args = ap.parse_args()
 
+    use_velocity = not args.no_velocity
     params = {
         "window": args.window,
         "stride": args.stride,
         "epochs": args.epochs,
         "holdout": args.holdout,
         "mode": "ckpt" if args.ckpt else "train_fresh",
+        # The A/B variable. Logged so two MLflow runs are directly comparable
+        # and it is unambiguous which arm produced which numbers.
+        "velocity": use_velocity,
+        "n_feat": 70 if use_velocity else 34,
     }
 
     kp = Path(args.keypoints)
@@ -182,18 +209,33 @@ def main() -> None:
 
     # Pass 1 — windows per clip (shared by training and scoring).
     per_clip = []  # (clip_id, df, windows, info, events, fps, duration_s)
+    guessed_fps = []  # clips with no known fps — their event labels are unreliable
     for p in tqdm(paths, desc="window"):
         df = pd.read_parquet(p)
         if df.empty:
             continue
-        w, info = make_windows(df, window=args.window, stride=args.stride)
+        w, info = make_windows(
+            df, window=args.window, stride=args.stride, velocity=use_velocity
+        )
         rec = records.get(p.stem)
         events = rec.events if rec else []
-        fps = _clip_fps(p.stem, videos_dir, args.fps)
+        fps = _clip_fps(p.stem, videos_dir, args.fps, record=rec)
+        if rec is None or not rec.fps:
+            guessed_fps.append(p.stem)
         duration = float(df["frame"].max() + 1) / fps
         per_clip.append((p.stem, df, w, info, events, fps, duration))
     if not per_clip:
         raise SystemExit("no usable clips (all parquets empty)")
+    if guessed_fps:
+        # A guessed fps silently shifts every event label for that clip, so say so
+        # loudly rather than letting it look like a normal run.
+        print(
+            f"WARNING: {len(guessed_fps)} clip(s) fell back to fps={args.fps} "
+            f"(no manifest fps): {', '.join(guessed_fps[:5])}"
+            f"{' ...' if len(guessed_fps) > 5 else ''}\n"
+            "  Event labels for these clips are unreliable. "
+            "Fix with: uv run python scripts/backfill_fps.py"
+        )
 
     # Model + (for fresh training) which windows were trained on.
     loss_history = None

@@ -100,6 +100,27 @@ def test_shape_change_produces_nonzero_keypoint_velocity():
     assert np.any(np.abs(w[1:, lwrist_x_vel]) > 1e-6)
 
 
+def test_velocity_off_gives_pose_only_windows():
+    # The A/B baseline: velocity=False returns 34-dim frames instead of 70.
+    rows = [_pose_row(f, 1, tx=5.0 * f, ty=3.0 * f) for f in range(40)]
+    windows, _ = make_windows(_df(rows), window=32, stride=8, velocity=False)
+    assert windows.shape[-1] == 34
+
+
+def test_velocity_off_matches_the_position_block_exactly():
+    # The two arms must differ ONLY in width. If the pose block were computed
+    # differently with velocity off, the A/B would be measuring plumbing rather
+    # than features — so pin that the 34 dims are byte-identical to the first 34
+    # of the 70-dim run, and that the windows line up one-for-one.
+    rows = [_pose_row(f, 1, lw=[90.0 + 2.0 * f, 80.0]) for f in range(40)]
+    full, info_full = make_windows(_df(rows), window=32, stride=8, velocity=True)
+    pose, info_pose = make_windows(_df(rows), window=32, stride=8, velocity=False)
+
+    assert info_full == info_pose  # same tracks, same window start frames
+    assert full.shape[:2] == pose.shape[:2]  # same count and length
+    assert np.array_equal(full[:, :, POS], pose)
+
+
 def test_gap_normalization_divides_by_frame_gap():
     # Frame 2 is dropped (low-confidence reference joints), so usable frames are
     # 0,1,3,4. The 1->3 step spans a 2-frame gap; with tx=6/frame the centroid

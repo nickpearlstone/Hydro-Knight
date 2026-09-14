@@ -76,6 +76,14 @@ class ClipRecord:
     label: Label
     notes: str = ""  # free-text, optional
 
+    # Source frame rate, recorded once at collection time so nothing downstream
+    # has to guess it. Events are stored in SECONDS but keypoint Parquets index
+    # by FRAME, so every frame<->time conversion needs this number; a wrong fps
+    # silently shifts every event label (a flat fps=30 assumption on 60fps
+    # footage puts the drowning at twice its real timestamp).
+    # 0.0 = unknown / not yet fetched — callers must fall back, never assume.
+    fps: float = 0.0
+
     # Event windows: typed time spans (in the same source-video timeline as
     # start_sec/end_sec) marking WHERE a specific anomaly is visible.
     # Each element is a dict: {"start": float, "end": float, "label": str}.
@@ -163,7 +171,8 @@ class Manifest:
                         label=Label(data["label"]),
                         notes=data.get("notes", ""),
                         # .get with default keeps older manifests (written before
-                        # the events field existed) loading without error.
+                        # the events / fps fields existed) loading without error.
+                        fps=data.get("fps", 0.0),
                         events=data.get("events", []),
                     )
                 )

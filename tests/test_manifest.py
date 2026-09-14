@@ -8,6 +8,9 @@ These pin down the two properties the whole reproducibility story depends on:
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
+
 from hydro_knight.ingest.manifest import (
     CameraView,
     ClipRecord,
@@ -85,6 +88,32 @@ def test_load_roundtrips_enums_and_events(tmp_path):
     assert loaded.label is Label.NORMAL
     # Event windows survive the JSON round-trip intact.
     assert loaded.events == [{"start": 3.0, "end": 5.0, "label": "distress"}]
+
+
+def test_fps_roundtrips(tmp_path):
+    # fps drives every frame<->time conversion downstream, so it has to survive
+    # the JSON trip as a number, not a string.
+    m = Manifest(tmp_path / "manifest.jsonl")
+    rec = _record()
+    rec.fps = 59.94
+    m.append(rec)
+
+    (loaded,) = m.load()
+    assert loaded.fps == 59.94
+    assert isinstance(loaded.fps, float)
+
+
+def test_manifest_without_fps_field_still_loads(tmp_path):
+    # Rows written before fps existed must keep loading — the whole committed
+    # manifest predates the field. Missing fps reads as 0.0, meaning "unknown",
+    # which callers treat as "fall back and warn", never as a real frame rate.
+    path = tmp_path / "manifest.jsonl"
+    row = json.loads(json.dumps(asdict(_record())))
+    del row["fps"]
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    (loaded,) = Manifest(path).load()
+    assert loaded.fps == 0.0
 
 
 def test_load_missing_file_returns_empty(tmp_path):
