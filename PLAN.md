@@ -10,8 +10,11 @@ The roadmap and decisions of record. For the project overview see the
 **Built**
 - **Data:** JSONL manifest of source clips, metadata-only collection, local download,
   and a tkinter annotation app for marking distress events by time.
-- **Pose extraction:** YOLO11n-pose. Two paths: `extract()` (whole frame, fast) and
-  `extract_tiled()` (SAHI-style tiling + ByteTrack, higher recall, about 7x slower).
+- **Pose extraction, two steps.** `scripts/extract_dataset.py` (GPU) runs YOLO11n-pose
+  over 480px tiles at imgsz 1280 plus a whole-frame pass and saves every raw detection,
+  un-merged and un-tracked, in resumable chunks with per-frame records and provenance.
+  `scripts/build_tracks.py` (CPU) merges tile duplicates and runs ByteTrack into the
+  keypoint files. Merge and tracker changes never need another GPU pass.
 - **Features:** hip-centered, torso-scaled poses (34 values) plus keypoint and body
   velocity, for 70 values per frame, in 32-frame sliding windows per track.
 - **Model:** TCN autoencoder over the windows.
@@ -20,7 +23,7 @@ The roadmap and decisions of record. For the project overview see the
   hour, ROC/PR, and pose coverage inside each event.
 - **Tooling:** MLflow tracking (SQLite), CI running pytest, ruff lint, and ruff format.
 
-**Dataset:** 72 clips (66 rescue, 2 normal, 4 unlabeled). Each rescue clip has one
+**Dataset:** 74 clips (66 rescue, 4 normal, 4 unlabeled). Each rescue clip has one
 labeled event window. Many events start more than 25 seconds in, so clips are always
 extracted in full. Clips marked `[HOLD` in their notes are excluded from training.
 
@@ -67,33 +70,35 @@ new ID after a short submersion (see Known issues).
 
 ## Next steps
 
-1. **Clean velocity A/B.** A `--no-velocity` switch so a 34-value baseline runs under
-   the same conditions as the 70-value model. *(In progress.)*
-2. **Correct frame rates.** Store each clip's fps in the manifest so event times map to
-   the right frames. Without it, eval assumes 30 fps, but 53 clips are 60 fps.
-   *(In progress.)*
+1. **Re-extract the dataset** with the new tiled pipeline: a pilot on about 5 clips
+   (including one that came back empty), then all clips, labeled first.
+2. **Clean velocity A/B.** The `--no-velocity` switch and per-clip manifest fps are in
+   place; the matched 34 vs 70 value run on the new keypoints is next.
 3. **Plan A, Rule 1.**
-4. **Re-extract the dataset** at imgsz 1280 or with tiling, starting with the 10 rescue
-   clips that came back empty.
+4. **Tune tracking** on the re-extracted data (start threshold, lost-track seconds).
 5. **Feature fixes:** keep partial poses (below) and label windows by the victim's
    track instead of by time.
 
 ## Known issues
 
-- **Dataset quality.** The current keypoints were extracted with `extract()` at
-  imgsz 640, the setting the resolution test showed finds far fewer swimmers. 10 rescue
-  clips have no keypoints, and about 10 of 56 measurable events have under 50% pose
-  coverage. Roughly 30% of positives are compromised.
-- **Track IDs die after 30 frames.** Both trackers delete a lost track after 30 frames
-  and neither uses the clip's fps. At 60 fps, a swimmer under water for more than
-  0.5 s comes back with a new ID.
-- **Activation threshold has no effect in `extract_tiled()`.** New tracks only start
-  from detections at or above `high_conf_det_threshold` (default 0.6), so
-  `track_activation_threshold=0.3` never applies. Detections between 0.25 and 0.6 can
-  extend a track but never start one.
-- **Seam duplicates in the tile merge.** A swimmer cut by a tile edge yields a partial
-  box. IoU against the full box stays under 0.5, so both survive and can spawn an extra
-  track. Fix: merge on intersection over the smaller box.
+- **Dataset quality.** The current keypoints were extracted whole-frame at imgsz 640,
+  the setting the resolution test showed finds far fewer swimmers. 10 rescue clips have
+  no keypoints even though their videos are readable and swimmers are detectable, and
+  about 10 of 56 measurable events have under 50% pose coverage. Roughly 30% of
+  positives are compromised until re-extraction.
+- **Submerged victims are nearly invisible to pose models.** On a real rescue frame the
+  arms-up victim scored about 0.02 in every tile and nothing whole-frame, with YOLO11 and
+  YOLO26 alike. Plan A has to rely on the victim being tracked before going under.
+- **Tracking fixes, not yet run on the full dataset.** The original merge and tracker
+  had three problems, now fixed in `build_tracks.py` (`--legacy` reproduces them):
+  half-body boxes at tile seams survived the IoU-only merge; lost tracks were deleted
+  after a fixed 30 frames (0.5 s at 60 fps); and new tracks could only start at 0.6
+  confidence, so the 0.3 activation setting did nothing. Defaults now merge on IoU or
+  intersection-over-smaller across crops, keep lost tracks 1.0 s at the clip's fps, and
+  start tracks at 0.5. On 90 frames of one rescue clip that gave 19 tracks of 45+ frames
+  vs 15, at the cost of more short fragments (7 vs 5).
+- **Track IDs still change after longer submersions.** A 1.0 s buffer does not cover a
+  real submersion, so Rule 1 must re-associate new tracks with lost ones.
 - **Time-scoped labels.** During a rescue, the lifeguard's track is also labeled
   distress, which inflates autoencoder eval. Plan A is not affected.
 
@@ -108,16 +113,21 @@ new ID after a short submersion (see Known issues).
   partial-visibility cases that matter, such as shoulders up and hips sinking. Options:
   keep partial poses with a visibility channel, fall back to shoulder-based
   normalization, or normalize by the bounding box.
-- **Scene cuts:** multi-angle videos break tracking. Split clips into single-camera
-  segments before extraction.
+- **Scene cuts:** multi-angle videos break tracking. Extraction now records a per-frame
+  scene-change score, so clips can be split into single-camera segments without
+  re-reading the video.
 - **Normal data volume:** how much normal swimming the autoencoder needs. This can't be
   answered until the features carry the signal.
 
 ## Decisions of record
 
 - **Anomaly detection over classification.** Real positives are too rare. Favor recall.
-- **Pose backend:** YOLO-pose at imgsz 1280 or higher. It beat MediaPipe, and
-  resolution was the biggest recall lever.
+- **Pose backend:** YOLO11n-pose at imgsz 1280 or higher. It beat MediaPipe, and
+  resolution was the biggest recall lever. YOLO26-pose (n/s/m) was tested on 10 rescue
+  frames in September 2026: despite better COCO scores it found about half as many
+  swimmers and scored the same people lower, so YOLO11n stays.
+- **Save raw detections before merging or tracking,** so only YOLO needs the GPU and
+  everything after it is rerunnable.
 - **SAHI-style tiling** for distant swimmers. Only helps when imgsz is larger than the
   tile size.
 - **ByteTrack, run separately from YOLO,** because YOLO's tracker can't consume merged

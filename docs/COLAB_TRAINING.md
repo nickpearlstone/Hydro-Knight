@@ -47,55 +47,37 @@ DRIVE = "/content/drive/MyDrive/hydroknight"
 ### Cell 2 — restore data from Drive
 ```python
 from pathlib import Path
-# keypoints: skips re-extraction entirely if you saved them last session
-!mkdir -p data && cp -r {DRIVE}/keypoints data/ 2>/dev/null || echo "no saved keypoints -> run Cell 3"
-# videos: needed for extraction AND for true per-clip fps in the report
+# keypoints: skips extraction entirely if you built them last session
+!mkdir -p data && cp -r {DRIVE}/keypoints_tiled data/keypoints 2>/dev/null || echo "no saved keypoints -> run Cell 3"
+# videos: needed for extraction
 !mkdir -p raw_local
 !unzip -q -n {DRIVE}/videos.zip -d raw_local
 RAW = Path("raw_local"); KP = Path("data/keypoints")
 print("videos:", len(list(RAW.glob("*.mp4"))), "| keypoint parquets:", len(list(KP.glob("*.parquet"))))
 ```
 
-### Cell 3 — extract poses (SKIP if Cell 2 restored keypoints)
+### Cell 3 — extract raw detections (SKIP if Cell 2 restored keypoints)
 ```python
-import warnings; warnings.simplefilter("ignore")
-import cv2
-from hydro_knight.ingest.manifest import Manifest, Label
-from hydro_knight.preprocess.extract_pose import extract, extract_tiled
-
-def _readable(p):                      # skip missing / 0-byte / unreadable clips
-    c = cv2.VideoCapture(str(p)); ok = c.isOpened() and c.get(cv2.CAP_PROP_FRAME_COUNT) > 0; c.release()
-    return ok
-
-recs = Manifest(Path("data/manifests/pool_footage.jsonl")).load()
-clips = [r for r in recs
-         if (RAW / f"{r.clip_id}.mp4").exists()
-         and "[HOLD" not in r.notes               # skip held (indoor/out-of-scope) clips
-         and _readable(RAW / f"{r.clip_id}.mp4")]  # skip dead/0-byte (e.g. evicted reef) clips
-print(f"{len(clips)} clips to extract")
-
 import torch
 assert torch.cuda.is_available(), "No GPU! Runtime > Change runtime type > T4 GPU"
 print("GPU:", torch.cuda.get_device_name(0))
-
-KP = Path("data/keypoints"); KP.mkdir(parents=True, exist_ok=True)
-for i, r in enumerate(clips, 1):
-    out = KP / f"{r.clip_id}.parquet"
-    if out.exists():
-        continue
-    # imgsz=640 is the speedup (~4x vs 1280). Do NOT cap frames: many distress
-    # events occur >25s in, so each clip must be extracted in full to include
-    # them. (Raise to imgsz=1280 / swap to extract_tiled for the recall upgrade.)
-    extract(RAW / f"{r.clip_id}.mp4", out, imgsz=640, device=0)
-    print(f"[{i}/{len(clips)}] {r.clip_id} done")
+# Writes straight to Drive in 1000-frame chunks. After a disconnect, rerun this
+# same cell: finished clips are skipped and the interrupted one resumes.
+!python scripts/extract_dataset.py --device 0 --out {DRIVE}/detections
 ```
-> `extract()` is the fast whole-frame path (~1 inference/frame); `extract_tiled()`
-> is SAHI (~7×, max recall) — use it only for a later recall run. The `_readable`
-> guard skips evicted/0-byte clips so the loop never stalls on them. **Save the
-> keypoints to Drive right after** so future sessions skip this cell:
-> ```python
-> !cp -r data/keypoints {DRIVE}/
-> ```
+> This is the only GPU step. It runs YOLO11n-pose over 480px tiles at imgsz 1280
+> plus a whole-frame pass, and saves every raw detection before any merging or
+> tracking (see `preprocess/extract_pose.py` for the folder format). Labeled clips
+> run first; unlabeled reef footage runs last. Every clip is extracted in full:
+> many distress events start more than 25 s in.
+
+### Cell 3b — merge + track into keypoint files (CPU, minutes)
+```python
+!python scripts/build_tracks.py --detections {DRIVE}/detections --out data/keypoints --overwrite
+!cp -r data/keypoints {DRIVE}/keypoints_tiled   # so Cell 2 can restore them next time
+```
+> Rerun this cell any time the merge or tracker settings change; no GPU or video
+> needed. `--legacy` reproduces the original merge + tracker for comparison.
 
 ### Cell 4 — the report (pick ONE mode)
 
@@ -121,9 +103,9 @@ false-alarms-per-hour**, latency, per-event catch/miss board, pose coverage
 inside events, track lengths), plus `sweep.parquet` / `event_catches.parquet`.
 
 Notes that keep the numbers honest:
-- `--videos raw_local` reads each clip's **true fps** — event windows are in
-  seconds, so latency/overlap need it (a 60 fps clip at an assumed 30 would
-  double every latency).
+- Each clip's **true fps** comes from the manifest (`scripts/backfill_fps.py`);
+  event windows are in seconds, so latency/overlap need it (a 60 fps clip at an
+  assumed 30 would double every latency).
 - In Mode B, window-level ROC/PR/percentiles use **only held-out** normals —
   never windows the model trained on. Per-event recall uses everything.
 - Mode A's window metrics have no holdout information (the old checkpoint's

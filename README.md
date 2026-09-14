@@ -90,16 +90,17 @@ being reworked based on it, and later results will be reported the same way.
   pose data survives inside each event
 - MLflow experiment tracking, and CI running pytest plus ruff lint and format checks
 
-**Dataset:** 72 clips (66 rescues, 2 normal, 4 unlabeled). An audit found 10 rescue
+**Dataset:** 74 clips (66 rescues, 4 normal, 4 unlabeled). An audit found 10 rescue
 clips produced no keypoints during extraction, so roughly 30% of positive examples
 currently need work.
 
 **In progress / next**
-1. A controlled comparison of the model with and without velocity features
-2. Recording each clip's true frame rate so event labels line up with the right frames
+1. Re-extracting the full dataset with a new two-step pipeline: tiled detection saved
+   raw on the GPU, then merging and tracking on CPU, so tracking fixes never need
+   another GPU pass
+2. A controlled comparison of the model with and without velocity features
 3. A rule-based detector for swimmers who go under and don't resurface
-4. Re-extracting the clips that came back empty
-5. Keeping partial poses instead of dropping them, and labeling windows by swimmer
+4. Keeping partial poses instead of dropping them, and labeling windows by swimmer
    instead of by time range
 
 ## Quickstart

@@ -31,6 +31,9 @@ mlartifacts/
 # (commit strategy for the final training set TBD; ignored during dev)
 data/keypoints/
 
+# Raw tiled detections from extraction — large, regenerable from video
+data/detections/
+
 # Raw video files are never committed (size, copyright, privacy)
 raw_local/
 *.mp4
