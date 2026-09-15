@@ -52,6 +52,10 @@ from pathlib import Path
 # videos: needed for extraction
 !mkdir -p raw_local
 !unzip -q -n {DRIVE}/videos.zip -d raw_local
+# Colab's OpenCV cannot decode AV1. The 10 AV1 clips were re-encoded to H.264 with
+# scripts/transcode_av1.py (frame-exact) and uploaded to videos_h264/; they replace the zip's copies.
+!cp -f {DRIVE}/videos_h264/*.mp4 raw_local/
+!for f in raw_local/*.mp4; do [ "$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = av1 ] && echo "STILL AV1: $f"; done
 RAW = Path("raw_local"); KP = Path("data/keypoints")
 print("videos:", len(list(RAW.glob("*.mp4"))), "| keypoint parquets:", len(list(KP.glob("*.parquet"))))
 ```

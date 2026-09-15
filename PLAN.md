@@ -83,7 +83,8 @@ new ID after a short submersion (see Known issues).
 
 - **Dataset quality.** The current keypoints were extracted whole-frame at imgsz 640,
   the setting the resolution test showed finds far fewer swimmers. 10 rescue clips have
-  no keypoints even though their videos are readable and swimmers are detectable, and
+  no keypoints because they are AV1-encoded and Colab's OpenCV cannot decode AV1 (it read
+  0 frames). They are re-encoded to H.264 with `scripts/transcode_av1.py`. Also,
   about 10 of 56 measurable events have under 50% pose coverage. Roughly 30% of
   positives are compromised until re-extraction.
 - **Submerged victims are nearly invisible to pose models.** On a real rescue frame the

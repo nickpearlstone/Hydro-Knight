@@ -25,6 +25,7 @@ from hydro_knight.preprocess import extract_pose
 from hydro_knight.preprocess.extract_pose import (
     DET_COLUMNS,
     FRAME_COLUMNS,
+    VideoReadError,
     extract_raw,
     load_detections,
 )
@@ -46,6 +47,8 @@ def _install_fakes(monkeypatch, n_frames: int, people_per_frame=None, crash_at=N
             return True
 
         def get(self, prop):
+            if prop == extract_pose.cv2.CAP_PROP_FOURCC:
+                return float(0x34363268)  # "h264"
             return {
                 extract_pose.cv2.CAP_PROP_FRAME_WIDTH: 1280,
                 extract_pose.cv2.CAP_PROP_FRAME_HEIGHT: 720,
@@ -170,3 +173,32 @@ def test_incomplete_folder_is_rejected_by_default(monkeypatch, tmp_path):
         extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=2)
     with pytest.raises(RuntimeError, match="not complete"):
         load_detections(tmp_path / "clip")
+
+
+def test_undecodable_video_is_not_marked_complete_and_retries(monkeypatch, tmp_path):
+    # The AV1 failure on Colab: the file opens and reports its frame count, but read()
+    # returns nothing. It must not be marked complete, or every rerun would skip it.
+    _install_fakes(monkeypatch, 5)
+    monkeypatch.setattr(
+        extract_pose.cv2.VideoCapture, "read", lambda self: (False, None)
+    )
+    with pytest.raises(VideoReadError, match="read 0 of 5"):
+        extract_raw(tmp_path / "clip.mp4", tmp_path / "clip")
+    meta = json.loads((tmp_path / "clip" / "meta.json").read_text())
+    assert not meta["complete"] and "error" in meta
+
+    _install_fakes(monkeypatch, 5)  # e.g. after re-encoding to H.264
+    meta = extract_raw(tmp_path / "clip.mp4", tmp_path / "clip")
+    assert meta["complete"] and "error" not in meta and meta["frames_processed"] == 5
+
+
+def test_video_that_stops_early_is_not_marked_complete(monkeypatch, tmp_path):
+    _install_fakes(monkeypatch, 100)
+    real_read = extract_pose.cv2.VideoCapture.read
+
+    def read_first_50(self):
+        return real_read(self) if self.i < 50 else (False, None)
+
+    monkeypatch.setattr(extract_pose.cv2.VideoCapture, "read", read_first_50)
+    with pytest.raises(VideoReadError, match="read 50 of 100"):
+        extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=20)

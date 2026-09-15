@@ -68,6 +68,11 @@ BOX_COLUMNS = ["bx1", "by1", "bx2", "by2"]
 DET_COLUMNS = ["frame", "crop"] + BOX_COLUMNS + ["conf"] + KP_COLUMNS
 FRAME_COLUMNS = ["frame", "n_dets", "scene_diff"]
 
+
+class VideoReadError(RuntimeError):
+    """The video opened but yielded far fewer frames than it reports (often an unsupported codec)."""
+
+
 # Settings that must match for a resumed or skipped folder to be trusted.
 _SETTING_KEYS = (
     "model",
@@ -105,6 +110,12 @@ def _versions() -> dict:
         "torch": torch.__version__,
         "code": _code_version(),
     }
+
+
+def _fourcc(cap) -> str:
+    """Codec tag of an open capture, e.g. "h264" or "av01"."""
+    code = int(cap.get(cv2.CAP_PROP_FOURCC))
+    return "".join(chr((code >> 8 * i) & 0xFF) for i in range(4)).strip("\x00 ")
 
 
 def _scene_hist(frame: np.ndarray) -> np.ndarray:
@@ -216,8 +227,11 @@ def extract_raw(
     Returns:
         The final meta dict (also written to out_dir/meta.json).
     Raises:
-        ValueError: the folder holds a previous run made with different settings.
+        ValueError: the folder holds a previous run made with different settings, or the video's
+            frame size changed since frames were already extracted.
         OSError: the video cannot be opened.
+        VideoReadError: the video yielded no frames, or under 99% of its reported frame count.
+            The folder stays incomplete, so a rerun retries it (e.g. after re-encoding the video).
     """
     video_path, out_dir = Path(video_path), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -249,8 +263,21 @@ def extract_raw(
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     origins = tile_grid(width, height, tile, overlap)
+    codec = _fourcc(cap)
 
-    if meta is None:
+    if (
+        meta is not None
+    ):  # resuming or retrying: the video file may have been re-encoded
+        if meta["frames_processed"] and (width, height) != (
+            meta["video"]["width"],
+            meta["video"]["height"],
+        ):
+            raise ValueError(
+                f"{video_path.name} is now {width}x{height} but frames were extracted at "
+                f"{meta['video']['width']}x{meta['video']['height']}; delete {out_dir}"
+            )
+        meta["video"].update(path=str(video_path), codec=codec)
+    else:
         meta = {
             "clip_id": video_path.stem,
             "video": {
@@ -259,6 +286,7 @@ def extract_raw(
                 "height": height,
                 "fps": float(cap.get(cv2.CAP_PROP_FPS)),
                 "frame_count": int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
+                "codec": codec,
             },
             "settings": settings,
             "tile_origins": [list(o) for o in origins],
@@ -329,11 +357,20 @@ def extract_raw(
     bar.close()
     cap.release()
 
+    # Container frame counts are estimates, so only a gap over 1% is treated as real.
     expected = meta["video"]["frame_count"]
+    short = max_frames is None and expected and frame_idx < 0.99 * expected
+    if frame_idx == 0 or short:
+        meta["error"] = (
+            f"read {frame_idx} of {expected} frames; "
+            f"the {codec!r} video may not be decodable in this environment"
+        )
+        _write_json_atomic(meta_path, meta)
+        raise VideoReadError(f"{video_path.name}: {meta['error']}")
+    meta.pop("error", None)
     meta["complete"] = True
     meta["finished"] = datetime.now(UTC).isoformat(timespec="seconds")
-    if max_frames is None and expected and abs(frame_idx - expected) > 0.01 * expected:
-        # Container frame counts are estimates, so only a large gap is suspicious.
+    if max_frames is None and expected and frame_idx > 1.01 * expected:
         meta["warning"] = f"read {frame_idx} frames but video reports {expected}"
         print(f"WARNING {video_path.name}: {meta['warning']}")
     _write_json_atomic(meta_path, meta)

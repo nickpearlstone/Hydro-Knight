@@ -6,6 +6,8 @@ unreadable, and runs `extract_raw` on each. Labeled clips go first and
 unlabeled/review clips last, so the clips that training and eval need are
 finished early in a long run. Finished clips are skipped and interrupted ones
 resume, so rerunning the same command after a Colab disconnect just continues.
+A clip whose video cannot be decoded is reported at the end and left incomplete,
+so it is retried on the next run.
 
 Usage:
     uv run python scripts/extract_dataset.py --device 0                # full run (GPU)
@@ -22,7 +24,7 @@ from pathlib import Path
 import cv2
 
 from hydro_knight.ingest.manifest import Label, Manifest
-from hydro_knight.preprocess.extract_pose import extract_raw
+from hydro_knight.preprocess.extract_pose import VideoReadError, extract_raw
 
 _LATER = (Label.UNLABELED, Label.REVIEW)
 
@@ -67,18 +69,32 @@ def main() -> None:
         todo.append((r, video))
 
     device = int(args.device) if args.device and args.device.isdigit() else args.device
+    failed = []
     for i, (r, video) in enumerate(todo, 1):
-        meta = extract_raw(
-            video,
-            out / r.clip_id,
-            model_name=args.model,
-            conf=args.conf,
-            device=device,
-            max_frames=args.max_frames,
-        )
+        try:
+            meta = extract_raw(
+                video,
+                out / r.clip_id,
+                model_name=args.model,
+                conf=args.conf,
+                device=device,
+                max_frames=args.max_frames,
+            )
+        except (
+            VideoReadError
+        ) as e:  # keep going; the folder stays incomplete for a retry
+            print(f"[{i}/{len(todo)}] FAILED {e}")
+            failed.append(r.clip_id)
+            continue
         print(
             f"[{i}/{len(todo)}] {r.clip_id} ({r.label}): "
             f"{meta['frames_processed']} frames, complete={meta['complete']}"
+        )
+
+    if failed:
+        raise SystemExit(
+            f"{len(failed)} clip(s) could not be read: {' '.join(failed)}. "
+            "AV1 videos: run scripts/transcode_av1.py, then rerun this command."
         )
 
 
