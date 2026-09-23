@@ -1077,10 +1077,10 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "certifi" },
+    { name = "flask" },
     { name = "numpy" },
     { name = "opencv-python" },
     { name = "pandas" },
-    { name = "pillow" },
     { name = "pyarrow" },
     { name = "scikit-learn" },
     { name = "supervision" },
@@ -1107,12 +1107,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "certifi", specifier = ">=2024.0.0" },
+    { name = "flask", specifier = ">=3.0" },
     { name = "mediapipe", marker = "extra == 'spike'", specifier = ">=0.10.0" },
     { name = "mlflow", marker = "extra == 'tracking'", specifier = ">=2.9.0" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "opencv-python", specifier = ">=4.9.0" },
     { name = "pandas", specifier = ">=2.2.0" },
-    { name = "pillow", specifier = ">=10.0.0" },
     { name = "pyarrow", specifier = ">=15.0.0" },
     { name = "scikit-learn", specifier = ">=1.4.0" },
     { name = "supervision", specifier = ">=0.29.0" },

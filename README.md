@@ -79,8 +79,8 @@ being reworked based on it, and later results will be reported the same way.
 ## Project status
 
 **Built and tested**
-- Data pipeline: a JSONL manifest of source clips, a download tool, and a desktop
-  labeling app for marking distress events by time
+- Data pipeline: a JSONL manifest of source clips, a download tool, and a browser
+  labeling app for marking each rescue's timeline and where the victim is
 - Pose extraction with YOLO11-pose, SAHI tiling, and ByteTrack
 - Features: hip-centered, torso-scaled poses plus joint and body velocity (70 values
   per frame)
