@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hydro-Knight Labeler</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Hydro-Knight labeler</div>
+    <label class="filter">
+      Show
+      <select id="filter">
+        <option value="needs_victim">Needs victim marks</option>
+        <option value="distress">All rescue clips</option>
+        <option value="unlabeled">Unlabeled</option>
+        <option value="all">All clips</option>
+      </select>
+    </label>
+    <div class="nav">
+      <button id="prev" class="btn ghost" title="Previous clip">‹ Prev</button>
+      <span id="counter" class="counter">–</span>
+      <button id="next" class="btn ghost" title="Next clip">Next ›</button>
+      <button id="nextTodo" class="btn" title="Next clip that still needs marks">Next unfinished ›</button>
+    </div>
+    <div id="saveState" class="pill">Loading…</div>
+  </header>
+
+  <main class="layout">
+    <section class="left">
+      <div class="clipline">
+        <span id="clipId" class="mono"></span>
+        <span id="clipNotes" class="muted"></span>
+      </div>
+
+      <div id="stage" class="stage">
+        <div id="zoomer" class="zoomer">
+          <video id="video" preload="auto" playsinline muted></video>
+          <canvas id="overlay"></canvas>
+        </div>
+        <div id="armBanner" class="arm-banner" hidden>
+          <span id="armText">Click on the victim</span>
+          <button id="armCancel" class="btn small ghost">Cancel <kbd>Esc</kbd></button>
+        </div>
+        <div id="zoomBadge" class="zoom-badge" hidden>1.0×</div>
+        <div id="emptyState" class="empty-state" hidden>No clips match this filter.</div>
+      </div>
+
+      <div id="timeline" class="timeline" title="Click to jump">
+        <div id="tlSegments" class="tl-segments"></div>
+        <div id="tlMarks" class="tl-marks"></div>
+        <div id="tlHead" class="tl-head"></div>
+      </div>
+      <div class="legend">
+        <span><i class="sw normal"></i>Normal before</span>
+        <span><i class="sw distress"></i>Drowning (onset → contact)</span>
+        <span><i class="sw rescue"></i>Rescue (contact → saved)</span>
+        <span><i class="sw after"></i>After save</span>
+        <span><i class="sw trimmed"></i>Trimmed out</span>
+      </div>
+
+      <div class="transport">
+        <button class="btn" data-act="back1s" title="Back 1 second">« 1s <kbd>⇧←</kbd></button>
+        <button class="btn" data-act="backFrame" title="Back one frame">‹ Frame <kbd>←</kbd></button>
+        <button id="playBtn" class="btn primary wide" data-act="play">▶ Play <kbd>Space</kbd></button>
+        <button class="btn" data-act="fwdFrame" title="Forward one frame">Frame › <kbd>→</kbd></button>
+        <button class="btn" data-act="fwd1s" title="Forward 1 second">1s » <kbd>⇧→</kbd></button>
+        <div class="speeds" role="group" aria-label="Playback speed">
+          <button class="btn chip" data-speed="0.25">¼×</button>
+          <button class="btn chip" data-speed="0.5">½×</button>
+          <button class="btn chip active" data-speed="1">1×</button>
+        </div>
+        <div id="clock" class="clock mono">0:00.00 · frame 0</div>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <div class="card">
+        <h2><span class="step">1</span> Clip label <span id="chkLabel" class="chk"></span></h2>
+        <div class="seg">
+          <button class="btn toggle" data-label="distress">Distress</button>
+          <button class="btn toggle" data-label="normal">Normal</button>
+        </div>
+      </div>
+
+      <div class="card" id="eventCard">
+        <h2><span class="step">2</span> Rescue timeline <span id="chkTimes" class="chk"></span></h2>
+        <p class="hint">Pause on the moment, then press <b>Set</b>.</p>
+        <div class="row" data-field="start">
+          <span class="name"><i class="sw distress"></i>Drowning onset</span>
+          <span class="val mono" data-val></span>
+          <button class="btn small" data-set>Set</button>
+          <button class="btn small ghost" data-go title="Jump here">Go</button>
+          <button class="btn small ghost danger" data-clear title="Clear">✕</button>
+        </div>
+        <div class="row" data-field="contact">
+          <span class="name"><i class="sw rescue"></i>Guard contact</span>
+          <span class="val mono" data-val></span>
+          <button class="btn small" data-set>Set</button>
+          <button class="btn small ghost" data-go title="Jump here">Go</button>
+          <button class="btn small ghost danger" data-clear title="Clear">✕</button>
+        </div>
+        <div class="row" data-field="end">
+          <span class="name"><i class="sw after"></i>Victim saved</span>
+          <span class="val mono" data-val></span>
+          <button class="btn small" data-set>Set</button>
+          <button class="btn small ghost" data-go title="Jump here">Go</button>
+          <button class="btn small ghost danger" data-clear title="Clear">✕</button>
+        </div>
+        <p id="eventWarn" class="warn" hidden></p>
+      </div>
+
+      <div class="card" id="victimCard">
+        <h2><span class="step">3</span> Where is the victim? <span id="chkVictim" class="chk"></span></h2>
+        <p class="hint">Press a button, then click on the person drowning. Zoom with the scroll wheel if they're small.</p>
+        <div class="stack">
+          <button class="btn arm" data-arm="onset">Mark victim at onset</button>
+          <button class="btn arm" data-arm="last_seen">Mark last visible moment</button>
+          <button class="btn arm ghost" data-arm="extra">Add extra point</button>
+        </div>
+        <ul id="markList" class="marks"></ul>
+      </div>
+
+      <div class="card">
+        <h2><span class="step">4</span> Usable part of clip</h2>
+        <p class="hint">Trim off intros and end cards.</p>
+        <div class="row" data-field="trimStart">
+          <span class="name">Start</span>
+          <span class="val mono" data-val></span>
+          <button class="btn small" data-set>Set</button>
+          <button class="btn small ghost" data-go>Go</button>
+          <button class="btn small ghost danger" data-clear title="Reset">✕</button>
+        </div>
+        <div class="row" data-field="trimEnd">
+          <span class="name">End</span>
+          <span class="val mono" data-val></span>
+          <button class="btn small" data-set>Set</button>
+          <button class="btn small ghost" data-go>Go</button>
+          <button class="btn small ghost danger" data-clear title="Reset">✕</button>
+        </div>
+      </div>
+
+      <div class="card tools">
+        <button id="boxesBtn" class="btn toggle" title="Show what the detector found on this frame">Show detector boxes <kbd>B</kbd></button>
+        <button id="zoomReset" class="btn ghost">Reset zoom</button>
+        <button id="undoBtn" class="btn ghost">↶ Undo <kbd>⌘Z</kbd></button>
+      </div>
+
+      <div class="card danger-zone">
+        <button id="deleteBtn" class="btn danger">Delete clip &amp; block URL…</button>
+      </div>
+    </aside>
+  </main>
+
+  <div id="modal" class="modal" hidden>
+    <div class="modal-box">
+      <h3>Delete this clip?</h3>
+      <p>The video file is removed and its URL is added to the blocklist so it is never collected again. This can't be undone from here.</p>
+      <div class="modal-actions">
+        <button id="modalCancel" class="btn ghost">Cancel</button>
+        <button id="modalConfirm" class="btn danger">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

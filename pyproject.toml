@@ -14,7 +14,7 @@ dependencies = [
     "certifi>=2024.0.0",       # CA bundle for SSL verification (yt-dlp HTTPS)
     # --- Annotation tool ---
     "opencv-python>=4.9.0",    # video frame reading / drawing
-    "Pillow>=10.0.0",          # OpenCV frames -> tkinter-compatible images
+    "flask>=3.0",              # local browser labeler (annotate/server.py)
     # --- Pose extraction (preprocess/) ---
     "ultralytics>=8.4.0",      # YOLO-pose detection (pulls in torch)
     "supervision>=0.29.0",     # Detections container feeding the tracker

@@ -9,7 +9,8 @@ The roadmap and decisions of record. For the project overview see the
 
 **Built**
 - **Data:** JSONL manifest of source clips, metadata-only collection, local download,
-  and a tkinter annotation app for marking distress events by time.
+  and a browser labeling app for rescue timelines (onset, guard contact, saved) and
+  clicked victim positions.
 - **Pose extraction, two steps.** `scripts/extract_dataset.py` (GPU) runs YOLO11n-pose
   over 480px tiles at imgsz 1280 plus a whole-frame pass and saves every raw detection,
   un-merged and un-tracked, in resumable chunks with per-frame records and provenance.
@@ -76,7 +77,17 @@ new ID after a short submersion (see Known issues).
    place; the matched 34 vs 70 value run on the new keypoints is next.
 3. **Plan A, Rule 1.**
 4. **Tune tracking** on the re-extracted data (start threshold, lost-track seconds).
-5. **Feature fixes:** keep partial poses (below) and label windows by the victim's
+5. **Scenario generation for Plan A (backlog, after extraction).** Build distress
+   scenarios as data rather than video: scripted track timelines (confidence and
+   position over time) for the five signatures, at a chosen fps and resolution, plus
+   scripted events injected into *real* extracted tracks so the pose statistics stay
+   real and the event timing is exactly known. Uses: tuning Plan A's thresholds and
+   timers, measuring detection latency, and measuring false alarms over real normal
+   footage. Not for training the autoencoder's normal data, and never a substitute for
+   recall measured on real rescues. Generating synthetic *video* was considered and set
+   aside: short clips break tracking, generated swimmers are easier to detect than real
+   submerged ones, and hours of footage would be needed.
+6. **Feature fixes:** keep partial poses (below) and label windows by the victim's
    track instead of by time.
 
 ## Known issues
@@ -114,6 +125,12 @@ new ID after a short submersion (see Known issues).
   partial-visibility cases that matter, such as shoulders up and hips sinking. Options:
   keep partial poses with a visibility channel, fall back to shoulder-based
   normalization, or normalize by the bounding box.
+- **Frame rate is not normalized in the features.** `windows.py` measures velocity per
+  *frame* and windows are 32 *frames*, but the dataset mixes 24, 30, and 60 fps: the same
+  swimming speed gives half the per-frame motion at 60 fps, and a window covers 0.53 s
+  there versus 1.07 s at 30 fps. Fix at the feature layer (resample tracks to a canonical
+  fps, or express velocity per second and windows in seconds), not at extraction, which
+  correctly stores native frame rates. A 30 fps edge deployment would add a third variant.
 - **Scene cuts:** multi-angle videos break tracking. Extraction now records a per-frame
   scene-change score, so clips can be split into single-camera segments without
   re-reading the video.
