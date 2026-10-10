@@ -169,7 +169,7 @@ def test_event_without_onset_is_kept(app_env):
 @pytest.mark.parametrize(
     "bad",
     [
-        {"start": 5.0, "end": 1.0},  # end before start
+        {"start": -1.0, "end": 5.0},  # negative time
         {
             "start": 1.0,
             "end": 5.0,
@@ -185,17 +185,22 @@ def test_malformed_events_are_refused_and_nothing_is_written(app_env, bad):
     assert manifest_path.read_text() == before
 
 
-@pytest.mark.parametrize(
-    "trims",
-    [
-        {"trim_start": 6.0, "trim_end": 2.0},  # end before start
-        {"trim_start": -1.0},  # negative
-    ],
-)
-def test_bad_trims_are_refused_and_nothing_is_written(app_env, trims):
+def test_wrong_order_is_saved_but_clip_stays_unfinished(app_env):
+    # One slip (saved before onset) used to fail the whole save, label and trims too.
+    client, manifest_path, *_ = app_env
+    backwards = {**DONE_EVENT, "start": 6.0}  # onset after contact and save
+    body = {"events": [backwards], "trim_start": 9.0, "trim_end": 2.0}
+    assert client.post("/api/clip/todo", json=body).status_code == 200
+    rec = {r.clip_id: r for r in Manifest(manifest_path).load()}["todo"]
+    assert rec.events[0]["start"] == 6.0 and rec.events[0]["contact"] == 3.0
+    assert (rec.trim_start, rec.trim_end) == (9.0, 2.0)
+    assert "todo" in _ids(client, "needs_victim")
+
+
+def test_negative_trim_is_refused_and_nothing_is_written(app_env):
     client, manifest_path, *_ = app_env
     before = manifest_path.read_text()
-    assert client.post("/api/clip/todo", json=trims).status_code == 400
+    assert client.post("/api/clip/todo", json={"trim_start": -1.0}).status_code == 400
     assert manifest_path.read_text() == before
 
 

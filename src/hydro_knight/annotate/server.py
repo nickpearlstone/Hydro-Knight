@@ -88,9 +88,18 @@ def needs_victim_marks(record) -> bool:
         saved = ev.get("end") is not None or ev.get("saved_off_camera")
         if ev.get("start") is None or ev.get("contact") is None or not saved:
             return True
+        if not events_in_order(ev):
+            return True
         if not {"onset", "last_seen"} <= kinds:
             return True
     return False
+
+
+def events_in_order(ev: dict) -> bool:
+    """True when the event's set times run onset <= contact <= saved (unset times are skipped)."""
+    times = [ev.get(k) for k in ("start", "contact", "end")]
+    times = [t for t in times if t is not None]
+    return times == sorted(times)
 
 
 def _optional_time(v) -> float | None:
@@ -107,15 +116,15 @@ def _clean_events(events: list) -> list[dict]:
     """Validate events posted by the UI and return them in manifest form.
 
     Any field may still be unset (None), so a half-labeled event is kept, never dropped.
+    Times in the wrong order are kept too: the UI warns and the clip stays unfinished
+    (needs_victim_marks) until they're fixed, so one slip never discards a whole save.
     Raises:
-        ValueError: malformed event or victim mark.
+        ValueError: malformed event or victim mark (not a number, negative, unknown kind).
     """
     out = []
     for ev in events:
         start = _optional_time(ev.get("start"))
         end = _optional_time(ev.get("end"))
-        if start is not None and end is not None and end < start:
-            raise ValueError("event end is before its start")
         off_camera = bool(ev.get("saved_off_camera")) and end is None
         contact = ev.get("contact")
         contact = None if contact is None else float(contact)
@@ -261,9 +270,6 @@ def create_app(
                 events = _clean_events(body.get("events", r.events))
                 trim_start = _optional_time(body.get("trim_start", r.trim_start))
                 trim_end = _optional_time(body.get("trim_end", r.trim_end))
-                both = trim_start is not None and trim_end is not None
-                if both and trim_end <= trim_start:
-                    raise ValueError("trim end is not after trim start")
             except (ValueError, KeyError, TypeError) as e:
                 return jsonify({"error": str(e)}), 400
             updated = dataclasses.replace(

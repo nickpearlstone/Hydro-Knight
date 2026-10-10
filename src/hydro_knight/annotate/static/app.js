@@ -145,6 +145,9 @@ async function openClip(i) {
 // ---------------------------------------------------------------- playback
 
 const frameNow = () => Math.floor(video.currentTime * S.fps + 1e-4);
+// Stored times sit in the middle of their frame, so two fields set on one frame are equal
+// and converting back to a frame number can't round into the neighbouring frame.
+const frameTime = () => Math.round(((frameNow() + 0.5) / S.fps) * 1e6) / 1e6;
 
 function seek(t) {
   video.currentTime = Math.max(0, Math.min(S.dur - 0.5 / S.fps, t));
@@ -268,6 +271,8 @@ function isDone() {
   const e = S.ev;
   if (!e || e.start == null || e.contact == null) return false;
   if (e.end == null && !e.offCamera) return false;
+  const times = [e.start, e.contact, e.end].filter((v) => v != null);
+  if (times.some((v, i) => i > 0 && v < times[i - 1])) return false; // out of order
   const kinds = new Set((e.victim || []).map((m) => m.kind));
   return kinds.has("onset") && kinds.has("last_seen");
 }
@@ -297,7 +302,7 @@ function setField(f, v) {
 
 function onRowAction(row, action) {
   const f = row.dataset.field;
-  const t = video.currentTime;
+  const t = frameTime();
   if (action === "set") {
     edit(() => setField(f, t), `${FIELD_NAMES[f]} set to ${fmt(t)}`);
     if (["start", "contact", "end"].includes(f) && S.label !== "distress") {
@@ -332,6 +337,7 @@ function checkOrder() {
     if (e.contact != null && e.end != null && e.contact > e.end) msgs.push("Guard contact is after the save.");
     if (e.start != null && e.end == null && !e.offCamera) msgs.push("Set Victim saved, or press Not on camera if the clip ends first.");
   }
+  if (S.trimStart != null && S.trimEnd != null && S.trimEnd <= S.trimStart) msgs.push("Trim end is not after trim start.");
   warn.hidden = msgs.length === 0;
   warn.textContent = msgs.join(" ");
 }
@@ -366,7 +372,7 @@ function placeMark(clientX, clientY) {
   const y = ((clientY - r.top) / r.height) * S.vh;
   if (x < 0 || y < 0 || x > S.vw || y > S.vh) return;
   const kind = S.armed;
-  const t = video.currentTime;
+  const t = frameTime();
   const names = { onset: "Victim at onset", last_seen: "Last visible", extra: "Extra point" };
   edit(() => {
     const e = ensureEvent();
