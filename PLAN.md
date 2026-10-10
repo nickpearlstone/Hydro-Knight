@@ -41,7 +41,7 @@ evaluation can't separate a good detector from a random one: events are time ran
 and any swimmer's detection counts as a catch, so a random detector scored 0.497 and
 caught 23 of 23 events, and a perfect victim detector could reach only about 0.52.
 The 0.539 says nothing about the features or the model. Full writeup in
-[docs/FINDINGS.md](docs/FINDINGS.md#3-first-training-run-roc-auc-0539-and-why-the-number-cant-be-trusted).
+[docs/FINDINGS.md](docs/FINDINGS.md#3-first-training-run-roc-auc-0539-and-a-broken-evaluation).
 
 **Decisions:** evaluation is rebuilt around the victim's track before any more model
 work. The autoencoder is kept for flailing only and may end up as one input feature.
