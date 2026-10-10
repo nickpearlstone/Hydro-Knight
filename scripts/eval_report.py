@@ -62,6 +62,7 @@ from hydro_knight.models.tcn_autoencoder import (
     reconstruction_error,
     train_tcn,
 )
+from hydro_knight.preprocess.build_tracks import read_provenance
 
 
 def _load_model(ckpt_path: str):
@@ -82,35 +83,37 @@ def _save_model(model, scaler, path: str) -> None:
 
 
 def _clip_fps(
-    clip_id: str, videos_dir: Path | None, default: float, record=None
-) -> float:
-    """Per-clip fps: the manifest first, then the video file, then the default.
+    parquet: Path, videos_dir: Path | None, default: float, record=None
+) -> tuple[float, bool]:
+    """Per-clip fps, from the same source the tracker used whenever possible.
 
-    The manifest is preferred because it is populated from source metadata
-    (scripts/backfill_fps.py) and is present even when the videos are not — which
-    is the normal local case. Falling through to `default` means every frame<->time
-    conversion for that clip is a guess, so the caller warns when it happens.
+    Order: the video fps recorded in the keypoint file by build_tracks (exactly what
+    tracking used), then the manifest, then the video file, then `default`. Falling
+    through to `default` makes every frame<->time conversion a guess, so the caller warns.
     Args:
-        clip_id: the clip's id (Parquet stem).
+        parquet: the clip's keypoint Parquet (its stem is the clip id).
         videos_dir: directory holding <clip_id>.mp4, or None.
         default: last-resort fps if nothing else is known.
         record: the clip's ClipRecord, when the manifest was loaded.
     Returns:
-        Frames per second for this clip.
+        (fps, guessed): guessed is True only when `default` was used.
     """
+    prov = read_provenance(parquet)
+    fps = (prov or {}).get("video", {}).get("fps")
+    if fps and fps > 0:
+        return float(fps), False
     if record is not None and record.fps > 0:
-        return float(record.fps)
-    if videos_dir is None:
-        return default
-    video = videos_dir / f"{clip_id}.mp4"
-    if not video.exists():
-        return default
-    import cv2
+        return float(record.fps), False
+    video = videos_dir / f"{parquet.stem}.mp4" if videos_dir else None
+    if video is not None and video.exists():
+        import cv2
 
-    cap = cv2.VideoCapture(str(video))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    cap.release()
-    return float(fps) if fps and fps > 0 else default
+        cap = cv2.VideoCapture(str(video))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        cap.release()
+        if fps and fps > 0:
+            return float(fps), False
+    return default, True
 
 
 def _window_is_normal(f0: int, window: int, fps: float, events: list[dict]) -> bool:
@@ -223,8 +226,8 @@ def main() -> None:
             df, window=args.window, stride=args.stride, velocity=use_velocity
         )
         rec = records.get(p.stem)
-        fps = _clip_fps(p.stem, videos_dir, args.fps, record=rec)
-        if rec is None or not rec.fps:
+        fps, guessed = _clip_fps(p, videos_dir, args.fps, record=rec)
+        if guessed:
             guessed_fps.append(p.stem)
         duration = float(df["frame"].max() + 1) / fps
         events = resolve_events(rec.events, duration) if rec else []
