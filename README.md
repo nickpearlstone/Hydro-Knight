@@ -49,7 +49,9 @@ Full writeups, figures, and numbers are in [docs/FINDINGS.md](docs/FINDINGS.md).
 
 **1. Image resolution mattered more than model choice.** YOLO-pose found far more
 swimmers than MediaPipe on crowded scenes. Raising YOLO's input size from 640px to
-1280px found 3 to 6 times more swimmers on the same frames.
+1280px found 3 to 6 times more swimmers on the same frames. A later benchmark against
+736 hand-counted swimmers confirmed YOLO11n over larger YOLO11 models, YOLO26, and
+MediaPipe, and showed that even the best setup finds only 30 to 40% of swimmers.
 
 ![YOLO at 640px vs 1280px](docs/images/pose_resolution.png)
 
@@ -59,28 +61,23 @@ detected skeletons are drawn clearly.*
 **2. Tiling and a dedicated tracker made distant swimmers usable.** Splitting each
 frame into overlapping tiles (SAHI) raised detections from about 13 to about 50
 swimmers per frame on a crowded clip. ByteTrack then turned those detections into
-15 stable swimmer IDs, down from 53 unstable ones with a simple tracker.
+15 stable swimmer IDs on a short test stretch, down from 53 with a simple tracker.
+Over whole clips, tracks are still short (about 1 second median).
 
-**3. The first trained model scored at chance, and the reason changed the plan.**
-The first full training run of the temporal autoencoder scored a ROC-AUC of 0.539,
-which is about the same as guessing. Tracing the data showed the problem was in the
-input features, and more training would not have fixed it:
-
-- When a swimmer goes under, pose confidence drops and those frames get filtered out.
-  The moments that matter most never reach the model.
-- A still, face-down body is easy to reconstruct, so it looks *more* normal to the
-  model.
-- Poses are centered on each swimmer's hips, which hides whether they are actually
-  moving through the water.
-
-This result is a baseline. The feature pipeline, labeling, and detectors are all
-being reworked based on it, and later results will be reported the same way.
+**3. The first evaluation couldn't tell a good model from a random one.** The first
+trained autoencoder scored a ROC-AUC of 0.539. An audit then showed that a detector
+outputting random numbers scored 0.497 and still "caught" every rescue, because a
+rescue counted as caught if any of the roughly 21 swimmers in frame was flagged. The
+evaluation is being rebuilt around the victim's own track, using clicked victim
+positions and the moment the lifeguard makes contact, with a random baseline reported
+next to every result.
 
 ## Project status
 
 **Built and tested**
 - Data pipeline: a JSONL manifest of source clips, a download tool, and a browser
-  labeling app for marking each rescue's timeline and where the victim is
+  labeling app with two tabs: one for each rescue's timeline and where the victim is,
+  one for counting every swimmer on still frames
 - Pose extraction with YOLO11-pose, SAHI tiling, and ByteTrack
 - Features: hip-centered, torso-scaled poses plus joint and body velocity (70 values
   per frame)
@@ -88,20 +85,21 @@ being reworked based on it, and later results will be reported the same way.
 - An evaluation harness that works with any detector. It reports per-event recall,
   how quickly each event is caught, false alarms per hour, ROC/PR curves, and how much
   pose data survives inside each event
+- A pose-model benchmark scored against hand-counted swimmers
 - MLflow experiment tracking, and CI running pytest plus ruff lint and format checks
 
-**Dataset:** 74 clips (66 rescues, 4 normal, 4 unlabeled). An audit found 10 rescue
-clips produced no keypoints during extraction, so roughly 30% of positive examples
-currently need work.
+**Dataset:** 74 clips (66 rescues, 4 normal, 4 unlabeled). 57 are extracted with the
+tiled pipeline.
 
 **In progress / next**
-1. Re-extracting the full dataset with a new two-step pipeline: tiled detection saved
-   raw on the GPU, then merging and tracking on CPU, so tracking fixes never need
-   another GPU pass
-2. A controlled comparison of the model with and without velocity features
-3. A rule-based detector for swimmers who go under and don't resurface
-4. Keeping partial poses instead of dropping them, and labeling windows by swimmer
-   instead of by time range
+1. Labeling every rescue: guard contact time and where the victim is
+2. Rebuilding the evaluation to score only the victim's track, from drowning onset to
+   guard contact
+3. Checking whether the victim is detected and tracked before going under at these
+   camera distances
+4. A rule-based detector for swimmers who go under and don't resurface
+5. A head-focused detector, and a distance cutoff so each camera only watches the part
+   of the pool it can see clearly
 
 ## Quickstart
 

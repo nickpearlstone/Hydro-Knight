@@ -3,14 +3,17 @@
 The roadmap and decisions of record. For the project overview see the
 [README](README.md); for experiment writeups see [docs/FINDINGS.md](docs/FINDINGS.md).
 
-*Last updated 2026-09-14.*
+*Last updated 2026-10-10.*
 
 ## Current status
 
 **Built**
 - **Data:** JSONL manifest of source clips, metadata-only collection, local download,
-  and a browser labeling app for rescue timelines (onset, guard contact, saved) and
-  clicked victim positions.
+  and a browser labeling app with two tabs. *Rescue timeline* marks onset, guard
+  contact, saved, trims, and clicked victim positions. *Swimmer count* marks every
+  person on still frames for the pose benchmark. Trims (`trim_start`/`trim_end`) are
+  stored separately from the downloaded window (`start_sec`/`end_sec`), so trimming
+  never shifts labels.
 - **Pose extraction, two steps.** `scripts/extract_dataset.py` (GPU) runs YOLO11n-pose
   over 480px tiles at imgsz 1280 plus a whole-frame pass and saves every raw detection,
   un-merged and un-tracked, in resumable chunks with per-frame records and provenance.
@@ -22,26 +25,27 @@ The roadmap and decisions of record. For the project overview see the
 - **Evaluation:** a detector-agnostic harness. Any detector produces the same detections
   table and gets the same report: per-event recall, detection latency, false alarms per
   hour, ROC/PR, and pose coverage inside each event.
+- **Pose benchmark:** `scripts/benchmark_pose.py` scores pose models against
+  hand-counted swimmers (found, missed, duplicates, false positives, speed) and compares
+  them at equal false positives.
 - **Tooling:** MLflow tracking (SQLite), CI running pytest, ruff lint, and ruff format.
 
-**Dataset:** 74 clips (66 rescue, 4 normal, 4 unlabeled). Each rescue clip has one
-labeled event window. Many events start more than 25 seconds in, so clips are always
+**Dataset:** 74 clips (66 rescue, 4 normal, 4 unlabeled), 57 extracted with the tiled
+pipeline. Each rescue clip has one labeled event window. Many events start more than 25 seconds in, so clips are always
 extracted in full. Clips marked `[HOLD` in their notes are excluded from training.
 
-## First result: ROC-AUC 0.539
+## The first evaluation was broken
 
-The first Colab training run of the TCN autoencoder scored at chance. The cause is the
-feature representation, so tuning the model will not fix it:
+The first TCN autoencoder run scored ROC-AUC 0.539. A September 2026 audit showed the
+evaluation can't separate a good detector from a random one: events are time ranges
+and any swimmer's detection counts as a catch, so a random detector scored 0.497 and
+caught 23 of 23 events, and a perfect victim detector could reach only about 0.52.
+The 0.539 says nothing about the features or the model. Full writeup in
+[docs/FINDINGS.md](docs/FINDINGS.md#3-first-training-run-roc-auc-0539-and-why-the-number-cant-be-trusted).
 
-1. **Submersion is filtered out.** Low-confidence frames are dropped and windows are
-   stitched over the gap.
-2. **Face-down floating looks normal.** A still pose is easy to reconstruct.
-3. **Displacement is removed.** Hip-centering hides movement through the water.
-
-Full writeup in [docs/FINDINGS.md](docs/FINDINGS.md#3-first-training-run-roc-auc-0539).
-
-**Decision:** the autoencoder is kept for flailing only. Everything else moves to
-explicit per-track rules.
+**Decisions:** evaluation is rebuilt around the victim's track before any more model
+work. The autoencoder is kept for flailing only and may end up as one input feature.
+Everything else moves to explicit per-track rules.
 
 ## Five distress signatures
 
@@ -63,41 +67,49 @@ Suppress when the loss happens at a frame edge or the track was heading out of f
 
 **Rule 2, bobbing.** K submerge/resurface cycles with near-zero net displacement.
 
-**Evaluation:** per-event recall and latency on the existing labeled events, using the
-eval harness. No new annotation is needed.
+**Evaluation:** per-event recall, latency, and false alarms per hour, scored on the
+victim's track from onset to guard contact (needs the victim labels).
 
 Rule 1 has to match a *new* track to the lost one, because the tracker gives a swimmer a
 new ID after a short submersion (see Known issues).
 
 ## Next steps
 
-1. **Re-extract the dataset** with the new tiled pipeline: a pilot on about 5 clips
-   (including one that came back empty), then all clips, labeled first.
-2. **Clean velocity A/B.** The `--no-velocity` switch and per-clip manifest fps are in
-   place; the matched 34 vs 70 value run on the new keypoints is next.
-3. **Plan A, Rule 1.**
-4. **Tune tracking** on the re-extracted data (start threshold, lost-track seconds).
-5. **Scenario generation for Plan A (backlog, after extraction).** Build distress
-   scenarios as data rather than video: scripted track timelines (confidence and
-   position over time) for the five signatures, at a chosen fps and resolution, plus
-   scripted events injected into *real* extracted tracks so the pose statistics stay
-   real and the event timing is exactly known. Uses: tuning Plan A's thresholds and
-   timers, measuring detection latency, and measuring false alarms over real normal
-   footage. Not for training the autoencoder's normal data, and never a substitute for
-   recall measured on real rescues. Generating synthetic *video* was considered and set
-   aside: short clips break tracking, generated swimmers are easier to detect than real
-   submerged ones, and hours of footage would be needed.
-6. **Feature fixes:** keep partial poses (below) and label windows by the victim's
-   track instead of by time.
+1. **Label the 66 rescue clips:** guard contact time, victim click at onset, victim
+   click at the last visible moment. Everything below depends on these labels.
+2. **Fix the evaluation:** match victim clicks to tracks by position and time, score
+   only the victim's track from onset to guard contact, skip trimmed footage, and
+   report a random baseline with every result.
+3. **Finish extracting the labeled clips** (11 left).
+4. **Go/no-go:** is the victim detected and tracked before going under? If usually not
+   at these camera distances, this footage can't support the approach.
+5. **Plan A, Rule 1,** starting from the strict disappearance rule (a track of 2 s or
+   more vanishes mid-pool with no detection in that spot for 10 s).
+6. **Head-focused detection with a distance cutoff.** The pose benchmark found that
+   even the best setup misses most distant swimmers, and a lifeguard can't judge a
+   swimmer who is too far away either. Plan: label heads on the benchmark frames, test
+   an off-the-shelf head detector against YOLO11n, pick a per-camera distance cutoff
+   from the measured recall, and track heads as the primary object with pose attached
+   when the swimmer is close enough. Victims beyond the cutoff are reported as out of
+   zone, never dropped. A real deployment would use several cameras, each covering one
+   zone, like lifeguard sections.
+7. **Small supervised model on per-track features.** Victim labels make every other
+   swimmer a negative example. Hold out whole clips, and use only pre-contact footage.
+8. **Scenario generation for Plan A (backlog).** Build distress scenarios as data
+   rather than video: scripted track timelines (confidence and position over time) for
+   the five signatures, plus scripted events injected into *real* extracted tracks so
+   the pose statistics stay real and the timing is exactly known. Uses: tuning Plan A's
+   thresholds and timers, measuring detection latency, and measuring false alarms over
+   real normal footage. Never a substitute for recall measured on real rescues.
+   Synthetic *video* was set aside: short clips break tracking, generated swimmers are
+   easier to detect than real submerged ones, and hours of footage would be needed.
 
 ## Known issues
 
-- **Dataset quality.** The current keypoints were extracted whole-frame at imgsz 640,
-  the setting the resolution test showed finds far fewer swimmers. 10 rescue clips have
-  no keypoints because they are AV1-encoded and Colab's OpenCV cannot decode AV1 (it read
-  0 frames). They are re-encoded to H.264 with `scripts/transcode_av1.py`. Also,
-  about 10 of 56 measurable events have under 50% pose coverage. Roughly 30% of
-  positives are compromised until re-extraction.
+- **Most distant swimmers are never detected.** Against 736 hand-counted swimmers,
+  tiled YOLO11n found 30% at the 0.25 cutoff and 40% at 0.15; even at 0.05 it missed
+  37%. Whole-frame inference found under 5%.
+- **Tracks are short.** On 22 extracted clips the median track lasted about 1 second.
 - **Submerged victims are nearly invisible to pose models.** On a real rescue frame the
   arms-up victim scored about 0.02 in every tile and nothing whole-frame, with YOLO11 and
   YOLO26 alike. Plan A has to rely on the victim being tracked before going under.
@@ -111,10 +123,17 @@ new ID after a short submersion (see Known issues).
   vs 15, at the cost of more short fragments (7 vs 5).
 - **Track IDs still change after longer submersions.** A 1.0 s buffer does not cover a
   real submersion, so Rule 1 must re-associate new tracks with lost ones.
-- **Time-scoped labels.** During a rescue, the lifeguard's track is also labeled
-  distress, which inflates autoencoder eval. Plan A is not affected.
+- **Time-scoped labels.** Event labels cover every swimmer in frame, including the
+  lifeguard, which is why the first evaluation could not measure anything. The fix is
+  victim labels (Next steps 1 and 2).
 
 ## Open questions
+
+- **Confidence cutoff:** extraction keeps detections at 0.25 and up. Lowering it to
+  0.15 found a third more swimmers in the benchmark but needs a re-extraction and a
+  better duplicate merge. Decide together with the head detector.
+- **Distance cutoff:** how far from the camera a swimmer can be and still be judged,
+  measured as recall against apparent head size.
 
 - **Submersion threshold:** how long under water should trigger an alert, given normal
   breath-holding?
@@ -140,10 +159,11 @@ new ID after a short submersion (see Known issues).
 ## Decisions of record
 
 - **Anomaly detection over classification.** Real positives are too rare. Favor recall.
-- **Pose backend:** YOLO11n-pose at imgsz 1280 or higher. It beat MediaPipe, and
-  resolution was the biggest recall lever. YOLO26-pose (n/s/m) was tested on 10 rescue
-  frames in September 2026: despite better COCO scores it found about half as many
-  swimmers and scored the same people lower, so YOLO11n stays.
+- **Pose backend:** YOLO11n-pose at imgsz 1280 or higher, with tiling. It beat
+  MediaPipe, and resolution was the biggest recall lever. The October 2026 benchmark
+  against hand-counted swimmers confirmed it: YOLO11n found more swimmers than YOLO11
+  s/m (which were 2 to 5 times slower) and YOLO26 n/s/m (with or without NMS) at equal
+  false positives, and speed was tied with YOLO26n on an M1.
 - **Save raw detections before merging or tracking,** so only YOLO needs the GPU and
   everything after it is rerunnable.
 - **SAHI-style tiling** for distant swimmers. Only helps when imgsz is larger than the
