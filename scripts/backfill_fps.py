@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 import re
 import subprocess
@@ -162,8 +163,11 @@ def main() -> None:
         return
 
     for r, fps, _dur, _how in resolved:
-        r.fps = fps
-        manifest.update(r)
+        # modify() changes only fps on the latest saved record, so labels written by an
+        # open labeler while this ran are kept.
+        manifest.modify(
+            r.clip_id, lambda rec, fps=fps: dataclasses.replace(rec, fps=fps)
+        )
     print(f"\nwrote fps for {len(resolved)} records -> {args.manifest}")
 
 

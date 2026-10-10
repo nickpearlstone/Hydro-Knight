@@ -263,24 +263,26 @@ def create_app(
     @app.post("/api/clip/<clip_id>")
     def save_clip(clip_id: str):
         body = request.get_json(force=True)
+
+        def apply(r):
+            # Built from the latest saved record (inside the manifest lock), so a field
+            # another writer changed meanwhile, such as fps, is kept.
+            return dataclasses.replace(
+                r,
+                label=Label(body.get("label", r.label.value)),
+                events=_clean_events(body.get("events", r.events)),
+                trim_start=_optional_time(body.get("trim_start", r.trim_start)),
+                trim_end=_optional_time(body.get("trim_end", r.trim_end)),
+            )
+
         with lock:
-            r = get_record(clip_id)
             try:
-                label = Label(body.get("label", r.label.value))
-                events = _clean_events(body.get("events", r.events))
-                trim_start = _optional_time(body.get("trim_start", r.trim_start))
-                trim_end = _optional_time(body.get("trim_end", r.trim_end))
+                updated = manifest.modify(clip_id, apply)
             except (ValueError, KeyError, TypeError) as e:
                 return jsonify({"error": str(e)}), 400
-            updated = dataclasses.replace(
-                r,
-                label=label,
-                events=events,
-                trim_start=trim_start,
-                trim_end=trim_end,
-            )
-            manifest.update(updated)
-        return jsonify({"ok": True, "events": events})
+        if updated is None:
+            abort(404, f"no clip {clip_id}")
+        return jsonify({"ok": True, "events": updated.events})
 
     @app.post("/api/clip/<clip_id>/delete")
     def delete_clip(clip_id: str):

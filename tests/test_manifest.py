@@ -8,8 +8,13 @@ These pin down the two properties the whole reproducibility story depends on:
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import threading
+import time
 from dataclasses import asdict
+
+import pytest
 
 from hydro_knight.ingest.manifest import (
     CameraView,
@@ -145,3 +150,42 @@ def test_load_missing_file_returns_empty(tmp_path):
     # Callers shouldn't have to check for the file first.
     m = Manifest(tmp_path / "does_not_exist.jsonl")
     assert m.load() == []
+
+
+def test_concurrent_writers_on_one_clip_both_survive(tmp_path):
+    # The labeler saving a clip while backfill_fps changes the same clip's fps: without the
+    # lock, the slower writer would rewrite the file from a stale copy and erase the other.
+    m = Manifest(tmp_path / "manifest.jsonl")
+    rec = _record()
+    m.append(rec)
+    started = threading.Event()
+
+    def slow_labeler_save(r):
+        started.set()
+        time.sleep(0.3)  # the other writer tries to run in here
+        return dataclasses.replace(r, notes="labeled")
+
+    t = threading.Thread(target=m.modify, args=(rec.clip_id, slow_labeler_save))
+    t.start()
+    started.wait()
+    m.modify(rec.clip_id, lambda r: dataclasses.replace(r, fps=59.94))
+    t.join()
+
+    (out,) = m.load()
+    assert out.notes == "labeled" and out.fps == 59.94
+
+
+def test_failed_change_leaves_file_untouched_and_no_temp_files(tmp_path):
+    m = Manifest(tmp_path / "manifest.jsonl")
+    rec = _record()
+    m.append(rec)
+    before = m.path.read_text()
+
+    def bad(_r):
+        raise ValueError("bad label")
+
+    with pytest.raises(ValueError):
+        m.modify(rec.clip_id, bad)
+    assert m.modify("no-such-clip", lambda r: r) is None
+    assert m.path.read_text() == before
+    assert not list(tmp_path.glob("*.tmp"))
