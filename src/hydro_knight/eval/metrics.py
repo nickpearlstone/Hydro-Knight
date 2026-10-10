@@ -36,6 +36,24 @@ from sklearn.metrics import auc, precision_recall_curve, roc_curve
 DET_COLUMNS = ["track_id", "frame", "score", "span"]
 
 
+def resolve_events(events: list[dict], clip_end_s: float) -> list[dict]:
+    """Events ready for scoring: unlabeled onsets dropped, open saves closed at clip end.
+
+    The labeler stores None for an onset not yet marked and for a save that happens
+    after the clip ends ("saved_off_camera"); scoring needs both ends as numbers.
+    Args:
+        events: manifest events (source seconds).
+        clip_end_s: end of the clip in the same timeline.
+    Returns:
+        Copies of the events with a start, each with a numeric "end".
+    """
+    return [
+        {**ev, "end": clip_end_s if ev.get("end") is None else ev["end"]}
+        for ev in events
+        if ev.get("start") is not None
+    ]
+
+
 @dataclass
 class ClipEval:
     """Everything the harness needs to know about one clip."""

@@ -45,6 +45,23 @@ events are marked as typed time windows (`distress` / `submerged` / `face_down`)
 in each clip's `events` field; frames outside those windows on an anomaly clip
 are still reusable as normal training data.
 
+### Rescue labeling protocol
+
+Each rescue clip gets one event, labeled in the browser labeler
+(`uv run python -m hydro_knight.annotate`, Rescue timeline tab):
+
+| Field | Mark it at |
+|---|---|
+| Drowning onset | The earliest visible sign of trouble, judged with hindsight: head low or tilted back, body vertical, no forward progress, slipping under. Not when the guard reacts. |
+| Guard contact | The first frame the guard or rescue tube reaches the victim. A detection only counts as a catch between onset and contact. |
+| Victim saved | The victim's head is held above water with the guard supporting them. If the clip ends first, mark it **Not on camera**; evaluation then treats the event as running to the end of the clip. |
+| Victim at onset | A click on the victim's head at the onset frame. |
+| Last visible | A click where the victim was last seen before going under or being hidden. If they never disappear, the frame before guard contact. |
+| Trim | From the first frame of live pool footage to the last frame of continuous live footage, before any replay, slow motion, highlight circle or arrow, or end card. |
+
+Victim positions are clicks, never track ids, because track ids change whenever
+tracking settings change. Clicks are matched to tracks by position and time.
+
 ## Positive (anomaly) examples — in priority order
 
 1. Consented research datasets (e.g. the Figshare underwater drowning dataset)

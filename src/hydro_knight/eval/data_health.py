@@ -115,17 +115,20 @@ def dataset_census(records) -> dict:
         event_duration_mean_s, event_duration_median_s, clips_with_hold.
     """
     label_counts: dict[str, int] = {}
-    event_durs, event_labels = [], {}
+    event_durs, event_labels, n_events = [], {}, 0
     for r in records:
         label_counts[r.label.value] = label_counts.get(r.label.value, 0) + 1
         for ev in r.events:
-            event_durs.append(ev["end"] - ev["start"])
+            n_events += 1
             lab = ev.get("label", "distress")
             event_labels[lab] = event_labels.get(lab, 0) + 1
+            if ev.get("start") is None or ev.get("end") is None:
+                continue  # half-labeled or saved off camera: no fixed duration
+            event_durs.append(ev["end"] - ev["start"])
     return {
         "n_clips": len(records),
         "label_counts": label_counts,
-        "n_events": len(event_durs),
+        "n_events": n_events,
         "event_label_counts": event_labels,
         "event_duration_mean_s": float(np.mean(event_durs)) if event_durs else 0.0,
         "event_duration_median_s": float(np.median(event_durs)) if event_durs else 0.0,

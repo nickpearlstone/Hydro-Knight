@@ -48,7 +48,12 @@ from hydro_knight.eval.data_health import (
     frame_coverage_in_events,
     track_stats,
 )
-from hydro_knight.eval.metrics import ClipEval, detections_from_windows, split_scores
+from hydro_knight.eval.metrics import (
+    ClipEval,
+    detections_from_windows,
+    resolve_events,
+    split_scores,
+)
 from hydro_knight.eval.report import generate_report
 from hydro_knight.features.windows import make_windows
 from hydro_knight.ingest.manifest import Manifest
@@ -218,11 +223,11 @@ def main() -> None:
             df, window=args.window, stride=args.stride, velocity=use_velocity
         )
         rec = records.get(p.stem)
-        events = rec.events if rec else []
         fps = _clip_fps(p.stem, videos_dir, args.fps, record=rec)
         if rec is None or not rec.fps:
             guessed_fps.append(p.stem)
         duration = float(df["frame"].max() + 1) / fps
+        events = resolve_events(rec.events, duration) if rec else []
         per_clip.append((p.stem, df, w, info, events, fps, duration))
     if not per_clip:
         raise SystemExit("no usable clips (all parquets empty)")

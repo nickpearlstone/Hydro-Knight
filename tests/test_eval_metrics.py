@@ -19,6 +19,7 @@ from hydro_knight.eval.metrics import (
     false_alarm_episodes,
     label_detections,
     normal_hours,
+    resolve_events,
     roc_pr,
     split_scores,
     sweep_recall_fa,
@@ -153,3 +154,14 @@ def test_split_scores_and_perfect_roc():
     assert res["roc_auc"] == 1.0
     # Degenerate inputs return None rather than crashing.
     assert roc_pr(np.array([]), err_d) is None
+
+
+def test_resolve_events_closes_off_camera_saves_and_skips_unlabeled_onsets():
+    events = [
+        {"start": 5.0, "end": None, "saved_off_camera": True},  # saved after the clip
+        {"start": 1.0, "end": 3.0},
+        {"start": None, "end": None, "contact": 2.0},  # onset not marked yet
+    ]
+    out = resolve_events(events, clip_end_s=40.0)
+    assert [(e["start"], e["end"]) for e in out] == [(5.0, 40.0), (1.0, 3.0)]
+    assert events[0]["end"] is None  # input untouched

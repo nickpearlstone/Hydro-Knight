@@ -104,10 +104,12 @@ async function openClip(i) {
   S.label = c.label;
   S.trimStart = c.trim_start == null ? null : c.trim_start - S.offset;
   S.trimEnd = c.trim_end == null ? null : c.trim_end - S.offset;
+  const fromSource = (t) => (t == null ? null : t - S.offset);
   const evs = (c.events || []).map((e) => ({
-    start: e.start - S.offset,
-    end: e.end - S.offset,
-    contact: e.contact == null ? null : e.contact - S.offset,
+    start: fromSource(e.start),
+    end: fromSource(e.end),
+    offCamera: !!e.saved_off_camera,
+    contact: fromSource(e.contact),
     label: e.label || "distress",
     victim: (e.victim || []).map((m) => ({ ...m, t: m.t - S.offset })),
   }));
@@ -195,20 +197,28 @@ function undo() {
 }
 
 function ensureEvent() {
-  if (!S.ev) S.ev = { start: null, end: null, contact: null, label: "distress", victim: [] };
+  if (!S.ev) S.ev = { start: null, end: null, offCamera: false, contact: null, label: "distress", victim: [] };
   return S.ev;
+}
+
+// Any event with at least one mark is sent, even half-finished: the server keeps unset
+// fields as null, so clearing one time never deletes the rest of the clip's marks.
+function hasMarks(e) {
+  return e.start != null || e.end != null || e.offCamera || e.contact != null || (e.victim || []).length > 0;
 }
 
 function eventPayload() {
   const out = [];
+  const toSource = (t) => (t == null ? null : t + S.offset);
   const conv = (e) => ({
-    start: e.start + S.offset,
-    end: e.end + S.offset,
+    start: toSource(e.start),
+    end: toSource(e.end),
+    saved_off_camera: !!e.offCamera && e.end == null,
     label: e.label || "distress",
-    contact: e.contact == null ? null : e.contact + S.offset,
+    contact: toSource(e.contact),
     victim: (e.victim || []).map((m) => ({ ...m, t: m.t + S.offset })),
   });
-  if (S.ev && S.ev.start != null && S.ev.end != null) out.push(conv(S.ev));
+  if (S.ev && hasMarks(S.ev)) out.push(conv(S.ev));
   S.extraEvents.forEach((e) => out.push(conv(e)));
   return out;
 }
@@ -242,8 +252,7 @@ async function save() {
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error((await res.json()).error || res.statusText);
-    const pending = S.ev && (S.ev.start == null) !== (S.ev.end == null);
-    setSaveState(pending ? "saving" : "saved", pending ? "Needs onset + saved" : "Saved ✓");
+    setSaveState("saved", "Saved ✓");
     S.clips[S.idx].done = isDone();
     S.clips[S.idx].label = S.label;
     updateCounter();
@@ -257,7 +266,8 @@ function isDone() {
   if (S.label === "normal") return true;
   if (S.label !== "distress") return false;
   const e = S.ev;
-  if (!e || e.start == null || e.end == null || e.contact == null) return false;
+  if (!e || e.start == null || e.contact == null) return false;
+  if (e.end == null && !e.offCamera) return false;
   const kinds = new Set((e.victim || []).map((m) => m.kind));
   return kinds.has("onset") && kinds.has("last_seen");
 }
@@ -278,7 +288,11 @@ function getField(f) {
 function setField(f, v) {
   if (f === "trimStart") S.trimStart = v;
   else if (f === "trimEnd") S.trimEnd = v;
-  else ensureEvent()[f] = v;
+  else {
+    const e = ensureEvent();
+    e[f] = v;
+    if (f === "end" && v != null) e.offCamera = false; // a real save time replaces "not on camera"
+  }
 }
 
 function onRowAction(row, action) {
@@ -296,8 +310,16 @@ function onRowAction(row, action) {
     setPlaying(false);
     seek(v);
   } else if (action === "clear") {
-    edit(() => setField(f, null), `${FIELD_NAMES[f]} cleared`);
+    edit(() => { setField(f, null); if (f === "end") ensureEvent().offCamera = false; }, `${FIELD_NAMES[f]} cleared`);
   }
+}
+
+// "Victim saved" happens after the clip ends: clears any save time and counts as set.
+function toggleOffCamera() {
+  const on = !(S.ev && S.ev.offCamera);
+  edit(() => { const e = ensureEvent(); e.offCamera = on; if (on) e.end = null; },
+    on ? "Marked: victim saved after the clip ends" : "Not-on-camera cleared");
+  if (on && S.label !== "distress") edit(() => { S.label = "distress"; }, "Clip labeled Distress");
 }
 
 function checkOrder() {
@@ -308,7 +330,7 @@ function checkOrder() {
     if (e.start != null && e.end != null && e.end < e.start) msgs.push("Saved is before onset.");
     if (e.contact != null && e.start != null && e.contact < e.start) msgs.push("Guard contact is before onset.");
     if (e.contact != null && e.end != null && e.contact > e.end) msgs.push("Guard contact is after the save.");
-    if ((e.start == null) !== (e.end == null)) msgs.push("Set both onset and saved; the event is saved once both exist.");
+    if (e.start != null && e.end == null && !e.offCamera) msgs.push("Set Victim saved, or press Not on camera if the clip ends first.");
   }
   warn.hidden = msgs.length === 0;
   warn.textContent = msgs.join(" ");
@@ -524,9 +546,12 @@ function renderRows() {
     const v = getField(row.dataset.field);
     const el = row.querySelector("[data-val]");
     const isTrim = row.dataset.field.startsWith("trim");
-    el.textContent = v == null ? (isTrim ? (row.dataset.field === "trimStart" ? "start" : "end") : "—") : fmt(v);
-    el.classList.toggle("set", v != null);
+    const offCam = row.dataset.field === "end" && S.ev && S.ev.offCamera && v == null;
+    el.textContent = offCam ? "off cam" : v == null ? (isTrim ? (row.dataset.field === "trimStart" ? "start" : "end") : "—") : fmt(v);
+    el.classList.toggle("set", v != null || offCam);
   });
+  const offBtn = $("[data-offcam]");
+  if (offBtn) offBtn.classList.toggle("active", !!(S.ev && S.ev.offCamera));
 }
 
 function renderMarks() {
@@ -559,7 +584,9 @@ function renderChecklist() {
     $("#chkTimes").className = "chk"; $("#chkTimes").textContent = "not needed";
     $("#chkVictim").className = "chk"; $("#chkVictim").textContent = "not needed";
   } else {
-    const missing = ["start", "contact", "end"].filter((f) => !e || e[f] == null).map((f) => FIELD_NAMES[f].toLowerCase());
+    const missing = ["start", "contact", "end"]
+      .filter((f) => !e || (e[f] == null && !(f === "end" && e.offCamera)))
+      .map((f) => FIELD_NAMES[f].toLowerCase());
     set("#chkTimes", missing.length === 0, `missing ${missing.join(", ")}`);
     const kinds = new Set(((e && e.victim) || []).map((m) => m.kind));
     const need = [["onset", "onset"], ["last_seen", "last visible"]].filter(([k]) => !kinds.has(k)).map(([, n]) => n);
@@ -615,6 +642,7 @@ document.addEventListener("click", (e) => {
   else if ("set" in btn.dataset) onRowAction(btn.closest(".row"), "set");
   else if ("go" in btn.dataset) onRowAction(btn.closest(".row"), "go");
   else if ("clear" in btn.dataset) onRowAction(btn.closest(".row"), "clear");
+  else if ("offcam" in btn.dataset) toggleOffCamera();
 });
 
 $("#timeline").addEventListener("click", (e) => {

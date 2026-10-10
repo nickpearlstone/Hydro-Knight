@@ -91,6 +91,9 @@ class ClipRecord:
     # Event windows: typed time spans (in the same source-video timeline as
     # start_sec/end_sec) marking WHERE a specific anomaly is visible.
     # Each element is a dict: {"start": float, "end": float, "label": str}.
+    # Labeler events may also carry "contact", "victim" and "saved_off_camera";
+    # "start"/"end" can be None while half-labeled or when the save is off camera
+    # (eval uses eval.metrics.resolve_events to turn those into usable spans).
     # The per-event "label" is one of the anomaly Label values
     # (distress / submerged / face_down), so a single clip can contain
     # multiple events of DIFFERENT types — e.g. a submersion that becomes

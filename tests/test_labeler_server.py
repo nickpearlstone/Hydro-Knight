@@ -125,6 +125,47 @@ def test_save_writes_marks_and_keeps_fields_it_does_not_own(app_env):
     assert "todo" not in client_ids
 
 
+def _event(manifest_path, cid="todo"):
+    return {r.clip_id: r for r in Manifest(manifest_path).load()}[cid].events
+
+
+def test_clearing_saved_keeps_the_rest_of_the_event(app_env):
+    # The old UI dropped an event with no "saved" time, deleting contact and clicks.
+    client, manifest_path, *_ = app_env
+    half = {**DONE_EVENT, "end": None}
+    assert client.post("/api/clip/todo", json={"events": [half]}).status_code == 200
+    (ev,) = _event(manifest_path)
+    assert ev["end"] is None and ev["contact"] == 3.0 and len(ev["victim"]) == 2
+    assert "todo" in _ids(client, "needs_victim")  # unfinished until saved is set
+
+
+def test_saved_off_camera_counts_as_done(app_env):
+    client, manifest_path, *_ = app_env
+    off = {**DONE_EVENT, "end": None, "saved_off_camera": True}
+    client.post("/api/clip/todo", json={"events": [off]})
+    (ev,) = _event(manifest_path)
+    assert ev["end"] is None and ev["saved_off_camera"] is True
+    assert "todo" not in _ids(client, "needs_victim")
+
+
+def test_off_camera_flag_dropped_when_a_save_time_exists(app_env):
+    client, manifest_path, *_ = app_env
+    client.post(
+        "/api/clip/todo", json={"events": [{**DONE_EVENT, "saved_off_camera": True}]}
+    )
+    (ev,) = _event(manifest_path)
+    assert ev["end"] == 5.0 and "saved_off_camera" not in ev
+
+
+def test_event_without_onset_is_kept(app_env):
+    client, manifest_path, *_ = app_env
+    no_onset = {**DONE_EVENT, "start": None}
+    assert client.post("/api/clip/todo", json={"events": [no_onset]}).status_code == 200
+    (ev,) = _event(manifest_path)
+    assert ev["start"] is None and ev["contact"] == 3.0
+    assert "todo" in _ids(client, "needs_victim")
+
+
 @pytest.mark.parametrize(
     "bad",
     [

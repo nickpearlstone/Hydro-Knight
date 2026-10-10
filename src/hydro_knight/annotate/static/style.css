@@ -175,6 +175,9 @@ kbd {
 .row .val { color: var(--muted); text-align: right; }
 .row .val.set { color: var(--text); }
 .stack { display: grid; gap: 8px; }
+.protocol { margin: 0 0 10px; padding-left: 18px; color: var(--muted); font-size: 12.5px; display: grid; gap: 3px; }
+.protocol b { color: var(--text); font-weight: 500; }
+.offcam-row { display: flex; justify-content: flex-end; margin: -2px 0 6px; }
 .marks { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; }
 .marks li {
   display: grid; grid-template-columns: 12px 1fr auto auto; gap: 8px; align-items: center;

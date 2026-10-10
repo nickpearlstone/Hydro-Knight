@@ -10,9 +10,10 @@ What gets labeled, per clip:
 - trim: trim_start / trim_end, the part of the clip that counts (cuts intros,
   post-save footage, end cards); None = untrimmed on that side
 - per event (distress clips):
-    start   drowning onset
-    contact guard makes contact           (new)
-    end     victim saved
+    start   drowning onset: the earliest visible sign of trouble (None until set)
+    contact guard (or rescue tube) first reaches the victim
+    end     victim saved: head held above water, supported (None until set)
+    saved_off_camera  true when the clip ends before the save (end stays None)
     victim  clicked points on the victim  (new), each {"t", "x", "y", "kind"}
             kind is "onset", "last_seen" or "extra"; x/y are pixels in the
             original video frame, so they stay valid for any display size
@@ -76,14 +77,18 @@ def _video_facts(path: Path) -> dict:
 
 
 def needs_victim_marks(record) -> bool:
-    """True for a distress clip with an event missing contact or an onset/last_seen victim click."""
+    """True for a distress clip whose event lacks onset, contact, a save (time or off camera),
+    or an onset/last_seen victim click."""
     if record.label != Label.DISTRESS:
         return False
     if not record.events:
         return True
     for ev in record.events:
         kinds = {m.get("kind") for m in ev.get("victim", [])}
-        if ev.get("contact") is None or not {"onset", "last_seen"} <= kinds:
+        saved = ev.get("end") is not None or ev.get("saved_off_camera")
+        if ev.get("start") is None or ev.get("contact") is None or not saved:
+            return True
+        if not {"onset", "last_seen"} <= kinds:
             return True
     return False
 
@@ -101,14 +106,17 @@ def _optional_time(v) -> float | None:
 def _clean_events(events: list) -> list[dict]:
     """Validate events posted by the UI and return them in manifest form.
 
+    Any field may still be unset (None), so a half-labeled event is kept, never dropped.
     Raises:
         ValueError: malformed event or victim mark.
     """
     out = []
     for ev in events:
-        start, end = float(ev["start"]), float(ev["end"])
-        if end < start:
+        start = _optional_time(ev.get("start"))
+        end = _optional_time(ev.get("end"))
+        if start is not None and end is not None and end < start:
             raise ValueError("event end is before its start")
+        off_camera = bool(ev.get("saved_off_camera")) and end is None
         contact = ev.get("contact")
         contact = None if contact is None else float(contact)
         victim = []
@@ -125,12 +133,14 @@ def _clean_events(events: list) -> list[dict]:
             )
         victim.sort(key=lambda m: m["t"])
         clean = {"start": start, "end": end, "label": ev.get("label", "distress")}
+        if off_camera:
+            clean["saved_off_camera"] = True
         if contact is not None:
             clean["contact"] = contact
         if victim:
             clean["victim"] = victim
         out.append(clean)
-    return sorted(out, key=lambda e: e["start"])
+    return sorted(out, key=lambda e: (e["start"] is None, e["start"] or 0.0))
 
 
 def create_app(
