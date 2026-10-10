@@ -10,9 +10,10 @@ What gets labeled, per clip:
 - trim: trim_start / trim_end, the part of the clip that counts (cuts intros,
   post-save footage, end cards); None = untrimmed on that side
 - per event (distress clips):
-    start   drowning onset
-    contact guard makes contact           (new)
-    end     victim saved
+    start   drowning onset: the earliest visible sign of trouble (None until set)
+    contact guard (or rescue tube) first reaches the victim
+    end     victim saved: head held above water, supported (None until set)
+    saved_off_camera  true when the clip ends before the save (end stays None)
     victim  clicked points on the victim  (new), each {"t", "x", "y", "kind"}
             kind is "onset", "last_seen" or "extra"; x/y are pixels in the
             original video frame, so they stay valid for any display size
@@ -76,16 +77,29 @@ def _video_facts(path: Path) -> dict:
 
 
 def needs_victim_marks(record) -> bool:
-    """True for a distress clip with an event missing contact or an onset/last_seen victim click."""
+    """True for a distress clip whose event lacks onset, contact, a save (time or off camera),
+    or an onset/last_seen victim click."""
     if record.label != Label.DISTRESS:
         return False
     if not record.events:
         return True
     for ev in record.events:
         kinds = {m.get("kind") for m in ev.get("victim", [])}
-        if ev.get("contact") is None or not {"onset", "last_seen"} <= kinds:
+        saved = ev.get("end") is not None or ev.get("saved_off_camera")
+        if ev.get("start") is None or ev.get("contact") is None or not saved:
+            return True
+        if not events_in_order(ev):
+            return True
+        if not {"onset", "last_seen"} <= kinds:
             return True
     return False
+
+
+def events_in_order(ev: dict) -> bool:
+    """True when the event's set times run onset <= contact <= saved (unset times are skipped)."""
+    times = [ev.get(k) for k in ("start", "contact", "end")]
+    times = [t for t in times if t is not None]
+    return times == sorted(times)
 
 
 def _optional_time(v) -> float | None:
@@ -101,14 +115,17 @@ def _optional_time(v) -> float | None:
 def _clean_events(events: list) -> list[dict]:
     """Validate events posted by the UI and return them in manifest form.
 
+    Any field may still be unset (None), so a half-labeled event is kept, never dropped.
+    Times in the wrong order are kept too: the UI warns and the clip stays unfinished
+    (needs_victim_marks) until they're fixed, so one slip never discards a whole save.
     Raises:
-        ValueError: malformed event or victim mark.
+        ValueError: malformed event or victim mark (not a number, negative, unknown kind).
     """
     out = []
     for ev in events:
-        start, end = float(ev["start"]), float(ev["end"])
-        if end < start:
-            raise ValueError("event end is before its start")
+        start = _optional_time(ev.get("start"))
+        end = _optional_time(ev.get("end"))
+        off_camera = bool(ev.get("saved_off_camera")) and end is None
         contact = ev.get("contact")
         contact = None if contact is None else float(contact)
         victim = []
@@ -125,12 +142,14 @@ def _clean_events(events: list) -> list[dict]:
             )
         victim.sort(key=lambda m: m["t"])
         clean = {"start": start, "end": end, "label": ev.get("label", "distress")}
+        if off_camera:
+            clean["saved_off_camera"] = True
         if contact is not None:
             clean["contact"] = contact
         if victim:
             clean["victim"] = victim
         out.append(clean)
-    return sorted(out, key=lambda e: e["start"])
+    return sorted(out, key=lambda e: (e["start"] is None, e["start"] or 0.0))
 
 
 def create_app(
@@ -244,27 +263,26 @@ def create_app(
     @app.post("/api/clip/<clip_id>")
     def save_clip(clip_id: str):
         body = request.get_json(force=True)
+
+        def apply(r):
+            # Built from the latest saved record (inside the manifest lock), so a field
+            # another writer changed meanwhile, such as fps, is kept.
+            return dataclasses.replace(
+                r,
+                label=Label(body.get("label", r.label.value)),
+                events=_clean_events(body.get("events", r.events)),
+                trim_start=_optional_time(body.get("trim_start", r.trim_start)),
+                trim_end=_optional_time(body.get("trim_end", r.trim_end)),
+            )
+
         with lock:
-            r = get_record(clip_id)
             try:
-                label = Label(body.get("label", r.label.value))
-                events = _clean_events(body.get("events", r.events))
-                trim_start = _optional_time(body.get("trim_start", r.trim_start))
-                trim_end = _optional_time(body.get("trim_end", r.trim_end))
-                both = trim_start is not None and trim_end is not None
-                if both and trim_end <= trim_start:
-                    raise ValueError("trim end is not after trim start")
+                updated = manifest.modify(clip_id, apply)
             except (ValueError, KeyError, TypeError) as e:
                 return jsonify({"error": str(e)}), 400
-            updated = dataclasses.replace(
-                r,
-                label=label,
-                events=events,
-                trim_start=trim_start,
-                trim_end=trim_end,
-            )
-            manifest.update(updated)
-        return jsonify({"ok": True, "events": events})
+        if updated is None:
+            abort(404, f"no clip {clip_id}")
+        return jsonify({"ok": True, "events": updated.events})
 
     @app.post("/api/clip/<clip_id>/delete")
     def delete_clip(clip_id: str):

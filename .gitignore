@@ -265,3 +265,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Manifest write lock + atomic-rewrite temp files (ingest/manifest.py)
+data/manifests/*.lock
+data/manifests/*.tmp

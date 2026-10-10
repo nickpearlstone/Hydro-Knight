@@ -125,10 +125,51 @@ def test_save_writes_marks_and_keeps_fields_it_does_not_own(app_env):
     assert "todo" not in client_ids
 
 
+def _event(manifest_path, cid="todo"):
+    return {r.clip_id: r for r in Manifest(manifest_path).load()}[cid].events
+
+
+def test_clearing_saved_keeps_the_rest_of_the_event(app_env):
+    # The old UI dropped an event with no "saved" time, deleting contact and clicks.
+    client, manifest_path, *_ = app_env
+    half = {**DONE_EVENT, "end": None}
+    assert client.post("/api/clip/todo", json={"events": [half]}).status_code == 200
+    (ev,) = _event(manifest_path)
+    assert ev["end"] is None and ev["contact"] == 3.0 and len(ev["victim"]) == 2
+    assert "todo" in _ids(client, "needs_victim")  # unfinished until saved is set
+
+
+def test_saved_off_camera_counts_as_done(app_env):
+    client, manifest_path, *_ = app_env
+    off = {**DONE_EVENT, "end": None, "saved_off_camera": True}
+    client.post("/api/clip/todo", json={"events": [off]})
+    (ev,) = _event(manifest_path)
+    assert ev["end"] is None and ev["saved_off_camera"] is True
+    assert "todo" not in _ids(client, "needs_victim")
+
+
+def test_off_camera_flag_dropped_when_a_save_time_exists(app_env):
+    client, manifest_path, *_ = app_env
+    client.post(
+        "/api/clip/todo", json={"events": [{**DONE_EVENT, "saved_off_camera": True}]}
+    )
+    (ev,) = _event(manifest_path)
+    assert ev["end"] == 5.0 and "saved_off_camera" not in ev
+
+
+def test_event_without_onset_is_kept(app_env):
+    client, manifest_path, *_ = app_env
+    no_onset = {**DONE_EVENT, "start": None}
+    assert client.post("/api/clip/todo", json={"events": [no_onset]}).status_code == 200
+    (ev,) = _event(manifest_path)
+    assert ev["start"] is None and ev["contact"] == 3.0
+    assert "todo" in _ids(client, "needs_victim")
+
+
 @pytest.mark.parametrize(
     "bad",
     [
-        {"start": 5.0, "end": 1.0},  # end before start
+        {"start": -1.0, "end": 5.0},  # negative time
         {
             "start": 1.0,
             "end": 5.0,
@@ -144,17 +185,22 @@ def test_malformed_events_are_refused_and_nothing_is_written(app_env, bad):
     assert manifest_path.read_text() == before
 
 
-@pytest.mark.parametrize(
-    "trims",
-    [
-        {"trim_start": 6.0, "trim_end": 2.0},  # end before start
-        {"trim_start": -1.0},  # negative
-    ],
-)
-def test_bad_trims_are_refused_and_nothing_is_written(app_env, trims):
+def test_wrong_order_is_saved_but_clip_stays_unfinished(app_env):
+    # One slip (saved before onset) used to fail the whole save, label and trims too.
+    client, manifest_path, *_ = app_env
+    backwards = {**DONE_EVENT, "start": 6.0}  # onset after contact and save
+    body = {"events": [backwards], "trim_start": 9.0, "trim_end": 2.0}
+    assert client.post("/api/clip/todo", json=body).status_code == 200
+    rec = {r.clip_id: r for r in Manifest(manifest_path).load()}["todo"]
+    assert rec.events[0]["start"] == 6.0 and rec.events[0]["contact"] == 3.0
+    assert (rec.trim_start, rec.trim_end) == (9.0, 2.0)
+    assert "todo" in _ids(client, "needs_victim")
+
+
+def test_negative_trim_is_refused_and_nothing_is_written(app_env):
     client, manifest_path, *_ = app_env
     before = manifest_path.read_text()
-    assert client.post("/api/clip/todo", json=trims).status_code == 400
+    assert client.post("/api/clip/todo", json={"trim_start": -1.0}).status_code == 400
     assert manifest_path.read_text() == before
 
 

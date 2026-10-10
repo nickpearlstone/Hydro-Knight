@@ -48,8 +48,15 @@ from hydro_knight.eval.data_health import (
     frame_coverage_in_events,
     track_stats,
 )
-from hydro_knight.eval.metrics import ClipEval, detections_from_windows, split_scores
+from hydro_knight.eval.metrics import (
+    ClipEval,
+    detections_from_windows,
+    is_scorable,
+    resolve_events,
+    split_scores,
+)
 from hydro_knight.eval.report import generate_report
+from hydro_knight.eval.timing import clip_fps
 from hydro_knight.features.windows import make_windows
 from hydro_knight.ingest.manifest import Manifest
 from hydro_knight.models.tcn_autoencoder import (
@@ -74,38 +81,6 @@ def _save_model(model, scaler, path: str) -> None:
     import torch
 
     torch.save({"model": model.state_dict(), "scaler": scaler}, path)
-
-
-def _clip_fps(
-    clip_id: str, videos_dir: Path | None, default: float, record=None
-) -> float:
-    """Per-clip fps: the manifest first, then the video file, then the default.
-
-    The manifest is preferred because it is populated from source metadata
-    (scripts/backfill_fps.py) and is present even when the videos are not — which
-    is the normal local case. Falling through to `default` means every frame<->time
-    conversion for that clip is a guess, so the caller warns when it happens.
-    Args:
-        clip_id: the clip's id (Parquet stem).
-        videos_dir: directory holding <clip_id>.mp4, or None.
-        default: last-resort fps if nothing else is known.
-        record: the clip's ClipRecord, when the manifest was loaded.
-    Returns:
-        Frames per second for this clip.
-    """
-    if record is not None and record.fps > 0:
-        return float(record.fps)
-    if videos_dir is None:
-        return default
-    video = videos_dir / f"{clip_id}.mp4"
-    if not video.exists():
-        return default
-    import cv2
-
-    cap = cv2.VideoCapture(str(video))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    cap.release()
-    return float(fps) if fps and fps > 0 else default
 
 
 def _window_is_normal(f0: int, window: int, fps: float, events: list[dict]) -> bool:
@@ -218,11 +193,11 @@ def main() -> None:
             df, window=args.window, stride=args.stride, velocity=use_velocity
         )
         rec = records.get(p.stem)
-        events = rec.events if rec else []
-        fps = _clip_fps(p.stem, videos_dir, args.fps, record=rec)
-        if rec is None or not rec.fps:
+        fps, guessed = clip_fps(p, videos_dir, args.fps, record=rec)
+        if guessed:
             guessed_fps.append(p.stem)
         duration = float(df["frame"].max() + 1) / fps
+        events = resolve_events(rec.events, duration) if rec else []
         per_clip.append((p.stem, df, w, info, events, fps, duration))
     if not per_clip:
         raise SystemExit("no usable clips (all parquets empty)")
@@ -283,7 +258,8 @@ def main() -> None:
 
     threshold = args.threshold
     if threshold is None:
-        err_n, _ = split_scores(clips)  # trained-on windows already excluded
+        # Normal windows need victim labels to be known; unlabeled clips can't supply them.
+        err_n, _ = split_scores([c for c in clips if is_scorable(c)])
         threshold = float(np.percentile(err_n, 99)) if len(err_n) else 1.0
 
     summary, metrics = generate_report(

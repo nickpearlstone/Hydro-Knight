@@ -31,6 +31,7 @@ import pandas as pd
 from .metrics import (
     ClipEval,
     event_catches,
+    is_scorable,
     percentile_table,
     roc_pr,
     split_scores,
@@ -295,6 +296,9 @@ def generate_report(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Only clips whose victims are matched to tracks can be scored; the rest are listed.
+    skipped = [c.clip_id for c in clips if not is_scorable(c)]
+    clips = [c for c in clips if is_scorable(c)]
     err_n, err_d = split_scores(clips)
     curves = roc_pr(err_n, err_d)
     sweep = sweep_recall_fa(clips) if any(c.events for c in clips) else pd.DataFrame()
@@ -322,6 +326,7 @@ def generate_report(
         f"# Eval report — {run_name}",
         "",
         f"- clips evaluated: **{len(clips)}**  |  events: **{len(catches)}**",
+        f"- clips skipped (victim not matched to a track yet): **{len(skipped)}**",
         f"- operating threshold: **{threshold:.4f}**",
     ]
     if catches:
@@ -351,7 +356,12 @@ def generate_report(
     summary.write_text("\n".join(lines), encoding="utf-8")
 
     # Headline metrics, also returned so callers (e.g. the --mlflow path) can log them.
-    metrics = {"threshold": threshold, "n_clips": len(clips), "n_events": len(catches)}
+    metrics = {
+        "threshold": threshold,
+        "n_clips": len(clips),
+        "n_clips_skipped": len(skipped),
+        "n_events": len(catches),
+    }
     if curves:
         metrics["roc_auc"] = curves["roc_auc"]
         metrics["pr_auc"] = curves["pr_auc"]

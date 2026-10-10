@@ -8,8 +8,13 @@ in, and what label it has been given.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
+import os
+import tempfile
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -91,6 +96,9 @@ class ClipRecord:
     # Event windows: typed time spans (in the same source-video timeline as
     # start_sec/end_sec) marking WHERE a specific anomaly is visible.
     # Each element is a dict: {"start": float, "end": float, "label": str}.
+    # Labeler events may also carry "contact", "victim" and "saved_off_camera";
+    # "start"/"end" can be None while half-labeled or when the save is off camera
+    # (eval uses eval.metrics.resolve_events to turn those into usable spans).
     # The per-event "label" is one of the anomaly Label values
     # (distress / submerged / face_down), so a single clip can contain
     # multiple events of DIFFERENT types — e.g. a submersion that becomes
@@ -150,6 +158,14 @@ def make_clip_id(source_url: str, start_sec: float, end_sec: float) -> str:
 # --- Manifest reader / writer ------------------------------------------------
 
 
+def _to_row(record: ClipRecord) -> dict:
+    """A record as a JSON-ready dict: Enums become their string values (JSON has no Enums)."""
+    row = asdict(record)
+    for key in ("camera_view", "setting", "time_of_day", "weather", "label"):
+        row[key] = getattr(record, key).value
+    return row
+
+
 class Manifest:
     """
     Reads and writes a JSONL manifest file.
@@ -158,6 +174,11 @@ class Manifest:
     object. This format is append-safe: you can add new clips by writing a new
     line without rewriting the whole file. It also diffs cleanly in git
     because each clip is on its own line.
+
+    Every write holds an exclusive lock on a sidecar "<manifest>.lock" file for its
+    whole read-change-write, so the labeler and scripts like backfill_fps can run at
+    the same time without one silently overwriting the other's change. Use modify()
+    to change one clip based on its latest saved state.
     """
 
     def __init__(self, path: Path) -> None:
@@ -208,6 +229,55 @@ class Manifest:
                 )
         return records
 
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        """Hold an exclusive advisory lock across one read-change-write (blocks until free)."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self.path.with_name(self.path.name + ".lock")
+        with lock_path.open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def _write_all(self, records: list[ClipRecord]) -> None:
+        """Rewrite the whole file atomically: a uniquely named temp file, then rename.
+
+        An interrupted write can't corrupt the manifest, and two writers never share a temp file.
+        """
+        fd, tmp = tempfile.mkstemp(
+            dir=self.path.parent, prefix=self.path.name + ".", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                for record in records:
+                    f.write(json.dumps(_to_row(record)) + "\n")
+            os.replace(tmp, self.path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
+
+    def modify(
+        self, clip_id: str, change: Callable[[ClipRecord], ClipRecord]
+    ) -> ClipRecord | None:
+        """Apply change() to one clip's latest saved record and write it back, all under the lock.
+
+        Args:
+            clip_id: the clip to change.
+            change: takes the current record, returns the replacement.
+        Returns:
+            The written record, or None if no clip has that id.
+        """
+        with self._locked():
+            records = self.load()
+            for i, record in enumerate(records):
+                if record.clip_id == clip_id:
+                    records[i] = change(record)
+                    self._write_all(records)
+                    return records[i]
+        return None
+
     def append(self, record: ClipRecord) -> bool:
         """Append one record, skipping it if its clip_id already exists.
 
@@ -217,69 +287,27 @@ class Manifest:
         Returns:
             True if written, False if it was a duplicate.
         """
-        existing_ids = {r.clip_id for r in self.load()}
-        if record.clip_id in existing_ids:
-            return False
-
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-
-        with self.path.open("a", encoding="utf-8") as f:
-            # asdict() converts the dataclass to a plain dict.
-            # We then convert each Enum to its .value string so JSON can
-            # serialize it (JSON doesn't know what an Enum is).
-            row = asdict(record)
-            row["camera_view"] = record.camera_view.value
-            row["setting"] = record.setting.value
-            row["time_of_day"] = record.time_of_day.value
-            row["weather"] = record.weather.value
-            row["label"] = record.label.value
-            f.write(json.dumps(row) + "\n")
-
+        with self._locked():
+            if record.clip_id in {r.clip_id for r in self.load()}:
+                return False
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(_to_row(record)) + "\n")
         return True
 
     def update(self, updated: ClipRecord) -> bool:
-        """Replace an existing record (matched by clip_id) via an atomic full-file rewrite.
+        """Replace an existing record (matched by clip_id) with an atomic full-file rewrite.
 
-        Writes to a temp file then renames, so an interrupted write can't corrupt the manifest
-        (JSONL has no "edit line N"; whole-file rewrite is the only safe edit, and stays fast).
+        This overwrites every field with `updated`. To change some fields of the latest saved
+        record without clobbering a concurrent writer's change, use modify().
         Args:
             updated: the replacement ClipRecord (matched on its clip_id).
         Returns:
             True if a matching record was found and replaced, False otherwise.
         """
-        records = self.load()
-        found = False
-
-        for i, record in enumerate(records):
-            if record.clip_id == updated.clip_id:
-                records[i] = updated
-                found = True
-                break
-
-        if not found:
-            return False
-
-        # Write all records back to the file from scratch.
-        # We write to a temporary file first, then replace the original.
-        # This protects against data loss if the process is interrupted
-        # mid-write — without this, a crash halfway through would leave
-        # a half-written, corrupted manifest.
-        tmp = self.path.with_suffix(".tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            for record in records:
-                row = asdict(record)
-                row["camera_view"] = record.camera_view.value
-                row["setting"] = record.setting.value
-                row["time_of_day"] = record.time_of_day.value
-                row["weather"] = record.weather.value
-                row["label"] = record.label.value
-                f.write(json.dumps(row) + "\n")
-
-        tmp.replace(self.path)
-        return True
+        return self.modify(updated.clip_id, lambda _old: updated) is not None
 
     def delete(self, clip_id: str) -> bool:
-        """Remove a record by clip_id via the same atomic temp-file rewrite as update().
+        """Remove a record by clip_id via the same locked, atomic rewrite as modify().
 
         Recoverable from git history if the record was ever committed.
         Args:
@@ -287,24 +315,12 @@ class Manifest:
         Returns:
             True if a matching record was removed, False otherwise.
         """
-        records = self.load()
-        filtered = [r for r in records if r.clip_id != clip_id]
-
-        if len(filtered) == len(records):
-            return False
-
-        tmp = self.path.with_suffix(".tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            for record in filtered:
-                row = asdict(record)
-                row["camera_view"] = record.camera_view.value
-                row["setting"] = record.setting.value
-                row["time_of_day"] = record.time_of_day.value
-                row["weather"] = record.weather.value
-                row["label"] = record.label.value
-                f.write(json.dumps(row) + "\n")
-
-        tmp.replace(self.path)
+        with self._locked():
+            records = self.load()
+            kept = [r for r in records if r.clip_id != clip_id]
+            if len(kept) == len(records):
+                return False
+            self._write_all(kept)
         return True
 
     def append_many(self, records: list[ClipRecord]) -> tuple[int, int]:

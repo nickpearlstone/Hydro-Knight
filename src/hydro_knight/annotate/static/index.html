@@ -91,6 +91,11 @@
       <div class="card" id="eventCard">
         <h2><span class="step">2</span> Rescue timeline <span id="chkTimes" class="chk"></span></h2>
         <p class="hint">Pause on the moment, then press <b>Set</b>.</p>
+        <ul class="protocol">
+          <li><b>Onset:</b> the earliest visible sign of trouble (head low or back, vertical, no progress, slipping under), not when the guard reacts.</li>
+          <li><b>Guard contact:</b> the first frame the guard or rescue tube reaches the victim.</li>
+          <li><b>Saved:</b> head held above water and supported. If the clip ends first, press <b>Not on camera</b>.</li>
+        </ul>
         <div class="row" data-field="start">
           <span class="name"><i class="sw distress"></i>Drowning onset</span>
           <span class="val mono" data-val></span>
@@ -112,12 +117,19 @@
           <button class="btn small ghost" data-go title="Jump here">Go</button>
           <button class="btn small ghost danger" data-clear title="Clear">✕</button>
         </div>
+        <div class="offcam-row">
+          <button class="btn small toggle" data-offcam title="The clip ends before the victim is saved">Not on camera</button>
+        </div>
         <p id="eventWarn" class="warn" hidden></p>
       </div>
 
       <div class="card" id="victimCard">
         <h2><span class="step">3</span> Where is the victim? <span id="chkVictim" class="chk"></span></h2>
-        <p class="hint">Press a button, then click on the person drowning. Zoom with the scroll wheel if they're small.</p>
+        <p class="hint">Press a button, then click the victim's <b>head</b>. Zoom with the scroll wheel if they're small.</p>
+        <ul class="protocol">
+          <li><b>At onset:</b> at the onset frame.</li>
+          <li><b>Last visible:</b> the last frame any part of them shows before going under or being hidden; if they never disappear, the frame before guard contact.</li>
+        </ul>
         <div class="stack">
           <button class="btn arm" data-arm="onset">Mark victim at onset</button>
           <button class="btn arm" data-arm="last_seen">Mark last visible moment</button>
@@ -128,7 +140,7 @@
 
       <div class="card">
         <h2><span class="step">4</span> Usable part of clip</h2>
-        <p class="hint">Trim off intros and end cards.</p>
+        <p class="hint">Start at the first frame of live pool footage. End at the last frame of continuous live footage, before any replay, slow motion, circles or arrows, or end card.</p>
         <div class="row" data-field="trimStart">
           <span class="name">Start</span>
           <span class="val mono" data-val></span>
