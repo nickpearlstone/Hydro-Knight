@@ -21,6 +21,9 @@ settings over time and a victim's id changes every second or so; a clicked
 position can be matched to whatever the tracker produced afterwards, and a
 click with no detection nearby records that the victim was not detected.
 
+A second tab, Swimmer count (/count), labels every person on a few still frames for
+the pose benchmark; see annotate/count.py for that file's format.
+
 Times: the manifest stores event and trim times in the source-video timeline.
 For clips downloaded as a section, the local file starts at start_sec, so the
 UI works in file time and converts with `offset` (0 for whole downloads).
@@ -43,6 +46,7 @@ from ..ingest.download import done_marker, local_path
 from ..ingest.manifest import Label, Manifest
 from ..preprocess.extract_pose import load_detections
 from ..preprocess.tiled_pose import merge_detections
+from . import count
 
 STATIC = Path(__file__).parent / "static"
 VICTIM_KINDS = ("onset", "last_seen", "extra")
@@ -137,6 +141,7 @@ def create_app(
     manifest_path: Path,
     detections_dir: Path = Path("data/detections"),
     blocklist: Blocklist | None = None,
+    count_path: Path = count.COUNT_PATH,
 ) -> Flask:
     """Build the labeler app around one manifest file.
 
@@ -144,6 +149,7 @@ def create_app(
         manifest_path: JSONL manifest to read and write.
         detections_dir: raw tiled detections (for the optional box overlay).
         blocklist: URL blocklist for clip deletion (default: the project blocklist).
+        count_path: swimmer-count label file for the Swimmer count tab.
     Returns:
         The Flask app.
     """
@@ -283,6 +289,47 @@ def create_app(
         if by_frame is None:
             return jsonify({"available": False, "boxes": []})
         return jsonify({"available": True, "boxes": by_frame.get(frame, [])})
+
+    # ------------------------------------------------------------ swimmer count tab
+
+    def count_frames() -> list[dict]:
+        if not Path(count_path).exists():
+            abort(404, f"no {count_path}: run scripts/benchmark_pose.py frames first")
+        return count.load(count_path)["frames"]
+
+    @app.get("/count")
+    def count_page():
+        return send_file(STATIC / "count.html")
+
+    @app.get("/api/count")
+    def count_list():
+        return jsonify(count_frames())
+
+    @app.get("/api/count/<int:i>/image")
+    def count_image(i: int):
+        frames = count_frames()
+        if not 0 <= i < len(frames):
+            abort(404)
+        try:
+            img = count.read_frame(frames[i])
+        except FileNotFoundError as e:
+            abort(404, str(e))
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        return app.response_class(buf.tobytes(), mimetype="image/jpeg")
+
+    @app.post("/api/count/<int:i>")
+    def count_save(i: int):
+        with lock:
+            data = count.load(count_path) if Path(count_path).exists() else None
+            if data is None or not 0 <= i < len(data["frames"]):
+                abort(404)
+            try:
+                points = count.clean_points(request.get_json(force=True))
+            except (ValueError, TypeError) as e:
+                return jsonify({"error": str(e)}), 400
+            data["frames"][i].update(points)
+            count.save(data, count_path)
+        return jsonify({"ok": True})
 
     return app
 

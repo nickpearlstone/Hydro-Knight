@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hydro-Knight Labeler</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Hydro-Knight labeler</div>
+    <nav class="tabs" aria-label="Labeling task">
+      <a class="tab" href="/">Rescue timeline</a>
+      <a class="tab active" href="/count" aria-current="page">Swimmer count</a>
+    </nav>
+    <div class="nav">
+      <button id="prev" class="btn ghost" title="Previous frame">‹ Prev <kbd>←</kbd></button>
+      <span id="counter" class="counter">–</span>
+      <button id="next" class="btn ghost" title="Next frame">Next › <kbd>→</kbd></button>
+    </div>
+    <div id="saveState" class="pill">Loading…</div>
+  </header>
+
+  <main class="layout">
+    <section class="left">
+      <div class="clipline">
+        <span id="clipId" class="mono"></span>
+        <span id="clipNotes" class="muted"></span>
+      </div>
+      <div id="stage" class="stage counting">
+        <div id="zoomer" class="zoomer">
+          <img id="frame" alt="" draggable="false">
+          <canvas id="overlay"></canvas>
+        </div>
+        <div id="zoomBadge" class="zoom-badge" hidden>1.0×</div>
+        <div id="emptyState" class="empty-state" hidden>
+          No count frames yet. Run: uv run python scripts/benchmark_pose.py frames
+        </div>
+      </div>
+      <div class="legend">
+        <span><i class="sw water"></i>In the water</span>
+        <span><i class="sw deck"></i>Out of the water</span>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <div class="card">
+        <h2>Mark every person</h2>
+        <ul class="keys">
+          <li><b>Click</b> a person in the water</li>
+          <li><b>Shift-click</b> a person out of the water (deck, stairs, guard stand)</li>
+          <li><b>Right-click</b> a dot to remove it</li>
+          <li><b>Scroll</b> to zoom, <b>drag</b> to pan</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>This frame</h2>
+        <div class="tally">
+          <div><span class="muted">In water</span><b id="nWater">0</b></div>
+          <div><span class="muted">Out of water</span><b id="nDeck">0</b></div>
+        </div>
+      </div>
+
+      <div class="card tools">
+        <button id="zoomReset" class="btn ghost">Reset zoom <kbd>0</kbd></button>
+        <button id="undoBtn" class="btn ghost">↶ Undo <kbd>⌘Z</kbd></button>
+      </div>
+
+      <div class="card">
+        <h2>Frames</h2>
+        <ul id="frameList" class="frames"></ul>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="/static/count.js"></script>
+</body>
+</html>
