@@ -30,6 +30,7 @@ mlartifacts/
 # Extracted keypoint tables — regenerable from video; can be large.
 # (commit strategy for the final training set TBD; ignored during dev)
 data/keypoints/
+data/keypoints_tiled/
 
 # Raw tiled detections from extraction — large, regenerable from video
 data/detections/
