@@ -102,8 +102,8 @@ async function openClip(i) {
   S.vh = c.video.height || 1;
   S.dur = c.video.duration || 0;
   S.label = c.label;
-  S.trimStart = c.start_sec > 0 ? c.start_sec - S.offset : null;
-  S.trimEnd = c.end_sec > 0 ? c.end_sec - S.offset : null;
+  S.trimStart = c.trim_start == null ? null : c.trim_start - S.offset;
+  S.trimEnd = c.trim_end == null ? null : c.trim_end - S.offset;
   const evs = (c.events || []).map((e) => ({
     start: e.start - S.offset,
     end: e.end - S.offset,
@@ -219,16 +219,22 @@ function scheduleSave() {
   S.saveTimer = setTimeout(() => { S.saveTimer = null; save(); }, 400);
 }
 
+// Trims go back to the source timeline; null = untrimmed. start_sec/end_sec (the download
+// window) are never sent: the labeler doesn't own them.
+function savePayload() {
+  const toSource = (t) => (t == null ? null : t + S.offset);
+  return {
+    label: S.label,
+    trim_start: toSource(S.trimStart),
+    trim_end: toSource(S.trimEnd),
+    events: eventPayload(),
+  };
+}
+
 async function save() {
   const c = S.clip;
   if (!c) return;
-  // A sectioned download can't be widened past its section, so "cleared" trim keeps its bounds.
-  const body = {
-    label: S.label,
-    start_sec: S.trimStart == null ? S.offset : S.trimStart + S.offset,
-    end_sec: S.trimEnd != null ? S.trimEnd + S.offset : S.offset > 0 ? c.end_sec : -1,
-    events: eventPayload(),
-  };
+  const body = savePayload();
   try {
     const res = await fetch(`/api/clip/${c.clip_id}`, {
       method: "POST",
@@ -667,14 +673,7 @@ document.addEventListener("keydown", (e) => {
 // Closing the tab with an edit still waiting on the 400 ms save timer: send it anyway.
 window.addEventListener("beforeunload", () => {
   if (!S.saveTimer || !S.clip) return;
-  const c = S.clip;
-  const body = {
-    label: S.label,
-    start_sec: S.trimStart == null ? S.offset : S.trimStart + S.offset,
-    end_sec: S.trimEnd != null ? S.trimEnd + S.offset : S.offset > 0 ? c.end_sec : -1,
-    events: eventPayload(),
-  };
-  navigator.sendBeacon(`/api/clip/${c.clip_id}`, new Blob([JSON.stringify(body)], { type: "application/json" }));
+  navigator.sendBeacon(`/api/clip/${S.clip.clip_id}`, new Blob([JSON.stringify(savePayload())], { type: "application/json" }));
 });
 
 loadQueue().then(() => requestAnimationFrame(tick));

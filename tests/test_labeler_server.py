@@ -107,8 +107,9 @@ def test_save_writes_marks_and_keeps_fields_it_does_not_own(app_env):
         "/api/clip/todo",
         json={
             "label": "distress",
-            "start_sec": 0.5,
-            "end_sec": 6.0,
+            "trim_start": 0.5,
+            "trim_end": 6.0,
+            "start_sec": 99.0,  # the download window is not the labeler's to change
             "events": [DONE_EVENT],
         },
     )
@@ -117,7 +118,8 @@ def test_save_writes_marks_and_keeps_fields_it_does_not_own(app_env):
     rec = {r.clip_id: r for r in Manifest(manifest_path).load()}["todo"]
     assert rec.events[0]["contact"] == 3.0
     assert [m["kind"] for m in rec.events[0]["victim"]] == ["onset", "last_seen"]
-    assert (rec.start_sec, rec.end_sec) == (0.5, 6.0)
+    assert (rec.trim_start, rec.trim_end) == (0.5, 6.0)
+    assert (rec.start_sec, rec.end_sec) == (0.0, -1.0)  # download window untouched
     assert rec.fps == 30.0 and rec.camera_view == CameraView.ELEVATED  # untouched
     client_ids = _ids(client, "needs_victim")
     assert "todo" not in client_ids
@@ -140,6 +142,28 @@ def test_malformed_events_are_refused_and_nothing_is_written(app_env, bad):
     res = client.post("/api/clip/todo", json={"events": [bad]})
     assert res.status_code == 400
     assert manifest_path.read_text() == before
+
+
+@pytest.mark.parametrize(
+    "trims",
+    [
+        {"trim_start": 6.0, "trim_end": 2.0},  # end before start
+        {"trim_start": -1.0},  # negative
+    ],
+)
+def test_bad_trims_are_refused_and_nothing_is_written(app_env, trims):
+    client, manifest_path, *_ = app_env
+    before = manifest_path.read_text()
+    assert client.post("/api/clip/todo", json=trims).status_code == 400
+    assert manifest_path.read_text() == before
+
+
+def test_clearing_a_trim_saves_none(app_env):
+    client, manifest_path, *_ = app_env
+    client.post("/api/clip/todo", json={"trim_start": 1.0, "trim_end": 4.0})
+    client.post("/api/clip/todo", json={"trim_start": None, "trim_end": 4.0})
+    rec = {r.clip_id: r for r in Manifest(manifest_path).load()}["todo"]
+    assert (rec.trim_start, rec.trim_end) == (None, 4.0)
 
 
 def test_video_supports_range_requests_for_seeking(app_env):
@@ -203,11 +227,21 @@ def test_delete_blocklists_url_and_removes_video(app_env):
     assert blocklist.contains("https://example.com/calm")
 
 
-def test_file_offset_only_for_sectioned_downloads():
-    whole = _record("a", start=0.0, end=30.0)
-    sectioned = _record("b", start=14.0, end=93.0)
-    assert server.file_offset(whole, duration=38.0) == 0.0
-    assert server.file_offset(sectioned, duration=79.2) == 14.0
-    assert (
-        server.file_offset(sectioned, duration=760.0) == 0.0
-    )  # full file despite trim
+def test_offset_comes_from_the_download_window_not_from_trims(tmp_path, monkeypatch):
+    # The old labeler guessed "sectioned" from file length vs. start/end, so a small
+    # trim on a whole download could flip the offset. Now trims never move it.
+    raw = tmp_path / "raw_local"
+    raw.mkdir()
+    monkeypatch.setattr(download, "RAW_LOCAL", raw)
+    m = Manifest(tmp_path / "m.jsonl")
+    trimmed = _record("trimmed")
+    trimmed.trim_start, trimmed.trim_end = 0.5, 0.9  # trims that fooled the old guess
+    m.append(trimmed)
+    m.append(_record("section", start=14.0, end=15.0))
+    for cid in ("trimmed", "section"):
+        _write_video(raw / f"{cid}.mp4")
+    client = server.create_app(
+        m.path, tmp_path / "d", Blocklist(tmp_path / "b")
+    ).test_client()
+    assert client.get("/api/clip/trimmed").get_json()["offset"] == 0.0
+    assert client.get("/api/clip/section").get_json()["offset"] == 14.0
