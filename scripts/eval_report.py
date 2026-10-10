@@ -51,6 +51,7 @@ from hydro_knight.eval.data_health import (
 from hydro_knight.eval.metrics import (
     ClipEval,
     detections_from_windows,
+    is_scorable,
     resolve_events,
     split_scores,
 )
@@ -291,7 +292,8 @@ def main() -> None:
 
     threshold = args.threshold
     if threshold is None:
-        err_n, _ = split_scores(clips)  # trained-on windows already excluded
+        # Normal windows need victim labels to be known; unlabeled clips can't supply them.
+        err_n, _ = split_scores([c for c in clips if is_scorable(c)])
         threshold = float(np.percentile(err_n, 99)) if len(err_n) else 1.0
 
     summary, metrics = generate_report(
