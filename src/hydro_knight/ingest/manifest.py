@@ -67,6 +67,10 @@ class ClipRecord:
     clip_id: str  # deterministic hash, computed from source + timestamps
     source_url: str  # original URL the clip came from
     platform: str  # e.g. "youtube", "vimeo", "local"
+    # The DOWNLOAD window: which part of the source video the local file holds.
+    # start_sec > 0 means only that section was downloaded (file frame 0 is source
+    # time start_sec); start_sec == 0 means the whole video. Only ingest writes
+    # these; the "part that counts" is trim_start/trim_end below.
     start_sec: float  # where in the source video this clip starts (seconds)
     end_sec: float  # where it ends; use -1.0 to mean "to the end"
     camera_view: CameraView
@@ -101,6 +105,30 @@ class ClipRecord:
     # default_factory=list gives each ClipRecord its own empty list rather
     # than sharing one mutable list across all instances (a classic bug).
     events: list[dict] = field(default_factory=list)
+
+    # The TRIM: the part of the clip that counts (cuts intros, post-save footage,
+    # end cards). Source-video seconds, like events; None = no trim on that side.
+    # Kept separate from start_sec/end_sec so trimming never changes what a
+    # download fetches, and never invalidates frame numbers already extracted.
+    trim_start: float | None = None
+    trim_end: float | None = None
+
+    @property
+    def file_offset(self) -> float:
+        """Source-video time of the local file's frame 0 (0.0 for whole downloads).
+
+        Section downloads are cut exactly at start_sec (see ingest/download.py), so
+        this is exact, not a guess.
+        """
+        return self.start_sec if self.start_sec > 0 else 0.0
+
+    def to_file_time(self, t: float) -> float:
+        """Convert a source-video time (events, trims) to seconds into the local file."""
+        return t - self.file_offset
+
+    def to_source_time(self, t: float) -> float:
+        """Convert seconds into the local file to source-video time."""
+        return t + self.file_offset
 
 
 def make_clip_id(source_url: str, start_sec: float, end_sec: float) -> str:
@@ -174,6 +202,8 @@ class Manifest:
                         # the events / fps fields existed) loading without error.
                         fps=data.get("fps", 0.0),
                         events=data.get("events", []),
+                        trim_start=data.get("trim_start"),
+                        trim_end=data.get("trim_end"),
                     )
                 )
         return records

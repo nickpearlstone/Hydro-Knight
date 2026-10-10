@@ -70,8 +70,9 @@ def download_clip(
 ) -> bool:
     """Download one clip's video to raw_local/, optionally just its [start,end] section.
 
-    A clip with start_sec/end_sec > 0 downloads only that source section (re-based to 0);
-    clips starting at 0 download whole. Writes a .done marker on success.
+    A clip with start_sec/end_sec > 0 downloads only that source section, cut exactly at
+    start_sec and re-based to 0; clips starting at 0 download whole. Trims never affect
+    the download. Writes a .done marker on success.
     Args:
         record: the clip to download.
         cookies_file: optional cookies.txt for age/region-gated videos.
@@ -108,12 +109,11 @@ def download_clip(
     elif cookies_from_browser:
         cmd += ["--cookies-from-browser", cookies_from_browser]
 
-    # Section download for clips with a real start offset (e.g. a 9.5h slice of
+    # Section download for clips with a real start offset (e.g. a 3h slice of
     # a 12h livestream). Downloading the full source would be wasteful/huge.
     # Convention: the local file always corresponds to the manifest's
-    # [start_sec, end_sec] window. For a sectioned download the file is
-    # re-based to 0, so the pose-extraction step maps file-time t to
-    # source-time (start_sec + t); events (source timeline) map in the same way.
+    # [start_sec, end_sec] window, re-based to 0, so file time t is source time
+    # start_sec + t (ClipRecord.to_file_time / to_source_time do the conversion).
     # Clips with start_sec == 0 download whole (the common short-clip case).
     if (
         record.start_sec
@@ -121,10 +121,15 @@ def download_clip(
         and record.end_sec
         and record.end_sec > 0
     ):
-        # Cut at nearest keyframes (no --force-keyframes-at-cuts): a stream copy
-        # that's fast and avoids a multi-hour re-encode on long sections. Start/
-        # end may be off by a few seconds, which is fine for our purposes.
-        cmd += ["--download-sections", f"*{record.start_sec}-{record.end_sec}"]
+        # --force-keyframes-at-cuts re-encodes so the file starts EXACTLY at
+        # start_sec. A plain stream copy can only cut at an existing keyframe,
+        # which lands a few seconds early by a different amount each download,
+        # silently shifting every label on the clip. Slower, but paid once.
+        cmd += [
+            "--download-sections",
+            f"*{record.start_sec}-{record.end_sec}",
+            "--force-keyframes-at-cuts",
+        ]
 
     result = subprocess.run(cmd, capture_output=True, text=True, env=_ENV)
 

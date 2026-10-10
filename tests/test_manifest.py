@@ -116,6 +116,31 @@ def test_manifest_without_fps_field_still_loads(tmp_path):
     assert loaded.fps == 0.0
 
 
+def test_trims_roundtrip_and_old_rows_load_untrimmed(tmp_path):
+    path = tmp_path / "manifest.jsonl"
+    m = Manifest(path)
+    trimmed = _record()
+    trimmed.trim_start, trimmed.trim_end = 2.5, 8.0
+    m.append(trimmed)
+    old = json.loads(json.dumps(asdict(_record("https://example.com/old"))))
+    del old["trim_start"], old["trim_end"]  # rows written before trims existed
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(old) + "\n")
+
+    new, legacy = m.load()
+    assert (new.trim_start, new.trim_end) == (2.5, 8.0)
+    assert (legacy.trim_start, legacy.trim_end) == (None, None)
+
+
+def test_file_time_conversion_uses_the_download_window():
+    whole = _record(start=0.0, end=10.0)
+    section = _record(start=8820.0, end=19620.0)  # a 3 h slice of a livestream
+    assert whole.to_file_time(12.0) == 12.0  # whole download: one clock
+    assert section.file_offset == 8820.0
+    assert section.to_file_time(9420.0) == 600.0  # 10 min into the file
+    assert section.to_source_time(600.0) == 9420.0
+
+
 def test_load_missing_file_returns_empty(tmp_path):
     # Callers shouldn't have to check for the file first.
     m = Manifest(tmp_path / "does_not_exist.jsonl")

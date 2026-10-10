@@ -7,7 +7,8 @@ straight from raw_local/.
 
 What gets labeled, per clip:
 - label: distress or normal
-- trim: start_sec / end_sec, the usable part of the clip (excludes end cards)
+- trim: trim_start / trim_end, the part of the clip that counts (cuts intros,
+  post-save footage, end cards); None = untrimmed on that side
 - per event (distress clips):
     start   drowning onset
     contact guard makes contact           (new)
@@ -26,7 +27,9 @@ the pose benchmark; see annotate/count.py for that file's format.
 
 Times: the manifest stores event and trim times in the source-video timeline.
 For clips downloaded as a section, the local file starts at start_sec, so the
-UI works in file time and converts with `offset` (0 for whole downloads).
+UI works in file time and converts with `offset` (ClipRecord.file_offset, 0 for
+whole downloads). The labeler never writes start_sec/end_sec: those are the
+download window, owned by ingest.
 """
 
 from __future__ import annotations
@@ -72,23 +75,6 @@ def _video_facts(path: Path) -> dict:
     }
 
 
-def file_offset(record, duration: float) -> float:
-    """Seconds to subtract from source-timeline times to get local-file times.
-
-    A sectioned download starts at start_sec, so its file is about (end - start) long; a whole
-    download is much longer than that, and its file time already equals source time.
-    Args:
-        record: the ClipRecord.
-        duration: local file duration in seconds.
-    Returns:
-        start_sec for sectioned downloads, else 0.0.
-    """
-    s, e = record.start_sec, record.end_sec
-    if s > 0 and e > 0 and abs(duration - (e - s)) < 2.0:
-        return float(s)
-    return 0.0
-
-
 def needs_victim_marks(record) -> bool:
     """True for a distress clip with an event missing contact or an onset/last_seen victim click."""
     if record.label != Label.DISTRESS:
@@ -100,6 +86,16 @@ def needs_victim_marks(record) -> bool:
         if ev.get("contact") is None or not {"onset", "last_seen"} <= kinds:
             return True
     return False
+
+
+def _optional_time(v) -> float | None:
+    """A posted time in seconds, or None when unset. Raises ValueError if negative."""
+    if v is None:
+        return None
+    t = float(v)
+    if t < 0:
+        raise ValueError("time is negative")
+    return t
 
 
 def _clean_events(events: list) -> list[dict]:
@@ -234,10 +230,10 @@ def create_app(
                 "label": r.label.value,
                 "notes": r.notes,
                 "source_url": r.source_url,
-                "start_sec": r.start_sec,
-                "end_sec": r.end_sec,
+                "trim_start": r.trim_start,
+                "trim_end": r.trim_end,
                 "events": r.events,
-                "offset": file_offset(r, facts["duration"]),
+                "offset": r.file_offset,
                 "video": facts,
                 "has_detections": (
                     Path(detections_dir) / clip_id / "meta.json"
@@ -253,12 +249,19 @@ def create_app(
             try:
                 label = Label(body.get("label", r.label.value))
                 events = _clean_events(body.get("events", r.events))
-                start = float(body.get("start_sec", r.start_sec))
-                end = float(body.get("end_sec", r.end_sec))
+                trim_start = _optional_time(body.get("trim_start", r.trim_start))
+                trim_end = _optional_time(body.get("trim_end", r.trim_end))
+                both = trim_start is not None and trim_end is not None
+                if both and trim_end <= trim_start:
+                    raise ValueError("trim end is not after trim start")
             except (ValueError, KeyError, TypeError) as e:
                 return jsonify({"error": str(e)}), 400
             updated = dataclasses.replace(
-                r, label=label, events=events, start_sec=start, end_sec=end
+                r,
+                label=label,
+                events=events,
+                trim_start=trim_start,
+                trim_end=trim_end,
             )
             manifest.update(updated)
         return jsonify({"ok": True, "events": events})
