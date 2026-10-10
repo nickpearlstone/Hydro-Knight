@@ -56,6 +56,7 @@ from hydro_knight.eval.metrics import (
     split_scores,
 )
 from hydro_knight.eval.report import generate_report
+from hydro_knight.eval.timing import clip_fps
 from hydro_knight.features.windows import make_windows
 from hydro_knight.ingest.manifest import Manifest
 from hydro_knight.models.tcn_autoencoder import (
@@ -63,7 +64,6 @@ from hydro_knight.models.tcn_autoencoder import (
     reconstruction_error,
     train_tcn,
 )
-from hydro_knight.preprocess.build_tracks import read_provenance
 
 
 def _load_model(ckpt_path: str):
@@ -81,40 +81,6 @@ def _save_model(model, scaler, path: str) -> None:
     import torch
 
     torch.save({"model": model.state_dict(), "scaler": scaler}, path)
-
-
-def _clip_fps(
-    parquet: Path, videos_dir: Path | None, default: float, record=None
-) -> tuple[float, bool]:
-    """Per-clip fps, from the same source the tracker used whenever possible.
-
-    Order: the video fps recorded in the keypoint file by build_tracks (exactly what
-    tracking used), then the manifest, then the video file, then `default`. Falling
-    through to `default` makes every frame<->time conversion a guess, so the caller warns.
-    Args:
-        parquet: the clip's keypoint Parquet (its stem is the clip id).
-        videos_dir: directory holding <clip_id>.mp4, or None.
-        default: last-resort fps if nothing else is known.
-        record: the clip's ClipRecord, when the manifest was loaded.
-    Returns:
-        (fps, guessed): guessed is True only when `default` was used.
-    """
-    prov = read_provenance(parquet)
-    fps = (prov or {}).get("video", {}).get("fps")
-    if fps and fps > 0:
-        return float(fps), False
-    if record is not None and record.fps > 0:
-        return float(record.fps), False
-    video = videos_dir / f"{parquet.stem}.mp4" if videos_dir else None
-    if video is not None and video.exists():
-        import cv2
-
-        cap = cv2.VideoCapture(str(video))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        cap.release()
-        if fps and fps > 0:
-            return float(fps), False
-    return default, True
 
 
 def _window_is_normal(f0: int, window: int, fps: float, events: list[dict]) -> bool:
@@ -227,7 +193,7 @@ def main() -> None:
             df, window=args.window, stride=args.stride, velocity=use_velocity
         )
         rec = records.get(p.stem)
-        fps, guessed = _clip_fps(p, videos_dir, args.fps, record=rec)
+        fps, guessed = clip_fps(p, videos_dir, args.fps, record=rec)
         if guessed:
             guessed_fps.append(p.stem)
         duration = float(df["frame"].max() + 1) / fps

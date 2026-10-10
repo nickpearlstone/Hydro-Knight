@@ -1,5 +1,5 @@
 """
-fps source of truth: backfill snapping and the order eval_report reads fps in.
+fps source of truth: backfill snapping and the order evaluation reads fps in.
 
 Clicks and events are seconds, tracks are frames, so the tracker and the evaluation
 must agree on each clip's fps. These pin that eval reads the fps the tracker used.
@@ -18,7 +18,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from backfill_fps import _snap  # noqa: E402
-from eval_report import _clip_fps  # noqa: E402
+
+from hydro_knight.eval.timing import clip_fps  # noqa: E402
 
 
 @pytest.mark.parametrize(
@@ -54,10 +55,10 @@ def _parquet(path, video_fps=None):
 
 def test_eval_uses_the_fps_the_tracker_used(tmp_path):
     p = _parquet(tmp_path / "clip.parquet", video_fps=60.0)
-    assert _clip_fps(p, None, 30.0, record=_Rec()) == (60.0, False)
+    assert clip_fps(p, None, 30.0, record=_Rec()) == (60.0, False)
 
 
 def test_falls_back_to_manifest_then_default(tmp_path):
     p = _parquet(tmp_path / "old.parquet")  # written before provenance existed
-    assert _clip_fps(p, None, 30.0, record=_Rec()) == (59.94, False)
-    assert _clip_fps(p, None, 30.0, record=None) == (30.0, True)
+    assert clip_fps(p, None, 30.0, record=_Rec()) == (59.94, False)
+    assert clip_fps(p, None, 30.0, record=None) == (30.0, True)
