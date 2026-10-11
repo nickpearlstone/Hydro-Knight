@@ -25,6 +25,12 @@ The roadmap and decisions of record. For the project overview see the
 - **Evaluation:** a detector-agnostic harness. Any detector produces the same detections
   table and gets the same report: per-event recall, detection latency, false alarms per
   hour, ROC/PR, and pose coverage inside each event.
+- **v2 inputs and model:** each swimmer track resampled to 30 fps as 58 features
+  (box-normalized pose, every keypoint confidence, a detected flag, box shape, size
+  and area change, body velocity), with missing frames kept. 3-second windows read
+  real frames beyond their edges instead of padding. A dilated residual TCN
+  autoencoder comes in three sizes; `scripts/train_v2.py` trains only on swimmers
+  who are not the victim, so it waits on victim labels.
 - **Pose benchmark:** `scripts/benchmark_pose.py` scores pose models against
   hand-counted swimmers (found, missed, duplicates, false positives, speed) and compares
   them at equal false positives.
