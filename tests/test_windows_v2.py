@@ -58,3 +58,19 @@ def test_concat_keeps_series_and_offsets():
     assert len(both) == len(a) + len(b)
     assert both.info(len(a))[0:2] == ("b", 5)
     assert np.array_equal(both.gather([len(a)])[0], b.gather([0])[0])
+
+
+def test_short_tracks_get_one_centered_padded_window_when_allowed():
+    long, short, tiny = _ts(200), _ts(40, track_id=2), _ts(20, track_id=3)
+    off = make_window_set([long, short, tiny], window=90)
+    on = make_window_set([long, short, tiny], window=90, min_track_s=1.0)
+    # 1 s = 30 steps: the 40-step track gets one window, the 20-step one does not
+    assert len(on) == len(off) + 1
+    s, a = on.index[-1]
+    assert s == 1 and a == -25  # (90 - 40) // 2 padding before the track
+    x, m = on.gather([len(on) - 1])
+    c = on.context
+    scored = m[0, c : c + 90]
+    assert scored.sum() == 40 and scored[25:65].all()  # real steps in the middle
+    pad = ~m[0]
+    assert (x[0][pad][:, zero_when_missing(N_BASE)] == 0).all()

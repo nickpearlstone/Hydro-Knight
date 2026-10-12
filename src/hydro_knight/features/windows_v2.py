@@ -8,6 +8,11 @@ where the track itself starts or ends is the context made of "not detected" step
 which is the honest value there. The context equals the sum of the encoder's
 dilations, so the encoder's output is exactly the WINDOW scored steps.
 
+Tracks shorter than one window can still be scored (min_track_s): they get a single
+window centered on the track, and the steps beyond the track are "not detected" steps,
+exactly like context at a track's ends. The same rule applies to every swimmer, so short
+tracks are treated alike whoever they belong to.
+
 Windows are gathered lazily: materializing every window for 57 clips would need tens
 of GB, while the series themselves are about 1 GB.
 """
@@ -110,17 +115,26 @@ class WindowSet:
 
 
 def make_window_set(
-    series: list[TrackSeries], window: int = WINDOW, stride_s: float = STRIDE_S
+    series: list[TrackSeries],
+    window: int = WINDOW,
+    stride_s: float = STRIDE_S,
+    min_track_s: float | None = None,
 ) -> WindowSet:
     """Index every scored window (one every stride_s) that fits inside its track.
 
-    Tracks shorter than `window` steps give no windows.
+    Args:
+        min_track_s: if set, a track shorter than `window` steps but at least this long
+            gets one window centered on it, padded with not-detected steps. If None,
+            tracks shorter than `window` steps give no windows.
     """
     step = stride_s * TARGET_FPS
+    min_steps = None if min_track_s is None else max(1, round(min_track_s * TARGET_FPS))
     index = []
     for si, ts in enumerate(series):
         last = len(ts) - window
         if last < 0:
+            if min_steps is not None and len(ts) >= min_steps:
+                index.append((si, -((window - len(ts)) // 2)))
             continue
         starts = np.unique(np.rint(np.arange(0, last + 1e-9, step)).astype(np.int64))
         index += [(si, int(a)) for a in starts]

@@ -87,6 +87,7 @@ def build_datasets(
     rates: str = "raw",
     exclude_clips=frozenset(),
     path_fragments: bool = True,
+    min_track_s: float | None = None,
 ) -> tuple[WindowSet, WindowSet, DatasetReport]:
     """Train and test window sets of non-victim swimmers, split by whole clips.
 
@@ -94,6 +95,7 @@ def build_datasets(
         rates: box rate handling (track_series.RATE_MODES).
         exclude_clips: clip ids to skip (labels a review marked wrong).
         path_fragments: also remove tracks that follow the victim's path between clicks.
+        min_track_s: also score tracks shorter than a window (windows_v2.make_window_set).
 
     Raises:
         ValueError: no usable clip (label clips first, or pass require_labels=False).
@@ -138,7 +140,7 @@ def build_datasets(
             rep.unmatched_clicks[r.clip_id] = len(match.unmatched)
         series = clip_series(path, r, joint_velocity, exclude, rates)
         side = "train" if r.clip_id in train_ids else "test"
-        parts[side].append(make_window_set(series, window, stride_s))
+        parts[side].append(make_window_set(series, window, stride_s, min_track_s))
         (rep.used_train if side == "train" else rep.used_test).append(r.clip_id)
 
     empty = make_window_set([], window, stride_s)
@@ -156,6 +158,7 @@ def victim_windows(
     stride_s: float = 0.25,
     joint_velocity: bool = False,
     rates: str = "raw",
+    min_track_s: float | None = None,
 ) -> tuple[WindowSet, np.ndarray]:
     """Windows of the test clips' victim tracks that overlap onset -> guard contact.
 
@@ -175,7 +178,7 @@ def victim_windows(
         t_on, t_ct = r.to_file_time(ev["start"]), r.to_file_time(ev["contact"])
         path = Path(keypoints_dir) / f"{cid}.parquet"
         series = clip_series(path, r, joint_velocity, rates=rates, only_tracks=tracks)
-        ws = make_window_set(series, window, stride_s)
+        ws = make_window_set(series, window, stride_s, min_track_s)
         span = window / TARGET_FPS
         starts = np.array([ws.info(i)[2] for i in range(len(ws))])
         sets.append(ws)
