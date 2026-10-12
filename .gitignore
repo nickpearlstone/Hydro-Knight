@@ -272,3 +272,7 @@ data/manifests/*.tmp
 
 # Local Claude Code settings and browser-preview config (personal, never shared)
 .claude/
+
+# Superpowers plan docs and plan workspaces (local working notes, not public docs)
+docs/superpowers/
+.superpowers/
