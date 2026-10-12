@@ -34,6 +34,11 @@ anywhere). Accept only if ALL hold:
 **Rescue clip** (`--kind rescue`):
 - A swimming pool of any kind (wave pool, lap pool, leisure or hotel pool, lazy river,
   water park). Not open water: no ocean, lake, or river.
+- Camera angle like the existing clips: mounted somewhat above the deck (a guard-stand
+  or pole height), looking across the pool at a slant. Reject straight-down overhead or
+  drone views, water-level or underwater shots, and far-away or very high views where
+  swimmers are tiny. When unsure, compare with a frame from an existing clip
+  (e.g. `scripts/label_sheets.py 829a5075e439 overview`).
 - Fixed camera: no panning, zooming, or handheld movement during the event. A camera
   that only cuts between fixed views is OK only if the whole event is in one view.
 - The rescue is fully on camera: you can see the victim before the guard reaches them,
@@ -42,11 +47,12 @@ anywhere). Accept only if ALL hold:
   contact to before the first sign of trouble). If you cannot, REJECT with that reason.
 - Not a duplicate of a clip already in the manifest (same footage re-uploaded).
 
-**Normal footage** (`--kind normal`): any pool (no open water), fixed camera, people swimming, no rescue
+**Normal footage** (`--kind normal`): any pool (no open water), the same camera angle,
+fixed camera, people swimming, no rescue
 or guard entry anywhere in the kept part, at least 60 s. Videos over 3 minutes need
 `--section A B` (seconds, at most 180 s, a stretch with no overlays or cuts).
 
-Otherwise `reject` with a short specific reason (e.g. "open water", "handheld camera",
+Otherwise `reject` with a short specific reason (e.g. "open water", "overhead angle", "handheld camera",
 "rescue cut mid-event", "victim not identifiable", "duplicate of <clip>").
 
 ## 2. Label accepted rescue clips
