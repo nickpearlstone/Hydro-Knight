@@ -47,6 +47,10 @@ QUERIES = [
     "waterpark lifeguard rescue wave pool",
     "wave pool surveillance camera",
     "wave pool crowd overhead view",
+    "pool rescue caught on camera",
+    "lifeguard rescue public pool",
+    "swimming pool security camera swimmers",
+    "public pool crowd overhead view",
 ]
 
 
