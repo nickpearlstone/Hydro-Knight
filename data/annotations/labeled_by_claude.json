@@ -1,0 +1,30 @@
+{
+  "829a5075e439": {
+    "date": "2026-10-12",
+    "notes": "Victim = girl in pink suit who flips backward off the blue tube near the stand. Onset 9.1 s = tipping off the tube (alternative ~9.25 s, head under). Mostly face-down/low with a bystander (light skin, pink cap) right beside her 10-14 s; don't confuse the two. Contact 14.6 = guard lands beside her. Kept Nick's June trim_end 22.06 (live footage actually runs to the overlay at ~25.9 s)."
+  },
+  "6c8e80ca2628": {
+    "date": "2026-10-12",
+    "notes": "SPOT CHECK. Victim = small dark-haired child near the drifting blue tube just right of the stand (full ~360,380), NOT the swimmer in the red top near the wall (decoy, fine) nor the kid by the wall. Child is low in the water reaching for the tube from ~10.75 s; arm up 13.0; mostly submerged from ~15.5, faint until 17.75. Onset 11.0 matches Nick's June coarse start; could be argued earlier (~10.75). Victim often hidden by the tube 11.5-12.75. Guard jumps 18.5, lands on the spot ~18.85 (not 0.1-s refined). Kept Nick's trims 8.24..25.78."
+  },
+  "58aa336eddd4": {
+    "date": "2026-10-12",
+    "notes": "SPOT CHECK. Victim = small child far from camera, left of center (full ~390,375), alone in open water; NOT the tube kids in the foreground (decoys). Child swims in slowly ~17-18.5 s, then stays in place, horizontal/low with a weak arm stroke, no progress, ~26 s until the guard arrives. Onset 18.5 = progress stops (Nick's June coarse start 17.0 is the alternative). Victim tiny (~15 px head) and low-res; last visible 38.0, under from ~38.5. Guard jumps ~32, long swim, reaches the spot ~44.0; both heads up 45.25. \"Like and Subscribe\" overlay (lower right) ~3.5-9.2 s, so trim_start 9.4; no overlay or cut after that through 61 s."
+  },
+  "dc923d55a892": {
+    "date": "2026-10-12",
+    "notes": "Victim = person on a blue tube right of center (full ~1140,580) who flips backward off it at 4.75-5.0 s (legs up, upside down 5.25-6.0), then struggles low in the water with arms up until the guard arrives. Onset 5.0 = flipped off the tube (alternative 4.75, tube starts tipping). Guard jumps ~10 s and swims out; contact 16.0 = guard's tube reaches the victim (victim never hidden before contact, so last_seen = just before contact). Saved 17.5. 10-14 s positions read from 1 fps overview (approximate). No overlay or cut; untrimmed. Nick's June coarse start was 8.29."
+  },
+  "99922f6d32ae": {
+    "date": "2026-10-12",
+    "notes": "Victim = person in a black suit standing at a blue tube on the left (full ~420,600) who slips off it at 13.75 s and goes low, splashing, mostly behind the tube 14.25-15.5 s (head only partly visible). Guard jumps ~17, lands beside her at 18.0 (alternative contact 19.0 when the guard actually reaches her). Victim never hidden before contact, so last_seen = just before. Red under the guard at 19.5 is the guard's own shorts, not a second person. No overlay seen through ~59 s; untrimmed. Nick's June coarse start was 15.25."
+  },
+  "cc9bd9e965e3": {
+    "date": "2026-10-12",
+    "notes": "SPOT CHECK. Victim = dark-haired swimmer in a crowded mid-pool area left of center (full ~610,440), vertical in place with arms out/up, far from camera and low-res; neighbours are close, so the identity before ~42 s is less certain. Seems to be in the same spot from ~28 s (arms out wide 33-35, could be treading). Onset 36.5 = first arm straight up (alternatives: Nick's June coarse 37.37, or ~33). Guard jumps ~49.4, lands beside the victim 49.75 (reaches/holds 50.5). Victim never hidden before contact. No overlay through 72 s; untrimmed."
+  },
+  "2795b458ce69": {
+    "date": "2026-10-12",
+    "notes": "SPOT CHECK, LOW CONFIDENCE. Far side near the stand, crowded, low-res. Victim taken as the dark-haired girl the guard holds at 19-21 s (full ~440,300); she seems to stay near (420-430,310-320) from ~10 s, next to a tube that flips up on end at ~11 s. No clear sign of trouble visible at this resolution; onset 11.5 follows Nick's June coarse start (11.54) and the tube flip. Onset click placed at 13.0 (first frame I could place her), so onset click time != onset. Guard jumps ~17.25, lands at the spot 17.75, holds her by 19.0 (drops his tube). No overlay; untrimmed."
+  }
+}
