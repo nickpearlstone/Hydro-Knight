@@ -33,6 +33,10 @@ const R = {
   prevT: 0,
   box: { x: 0, y: 0, w: 1, h: 1 }, // unzoomed video rectangle inside the stage
   flash: null,     // {text, until}
+  load: 0,         // bumps on every openClip; a stale load's response is dropped
+  loading: false,  // true until the new clip's data is on screen
+  saves: Promise.resolve(), // verdict saves run one at a time, in order
+  scrub: null,     // {t, dot} while the timeline is pressed or dragged
 };
 
 // ---------------------------------------------------------------- feedback
@@ -111,10 +115,15 @@ function renderVerdict() {
 
 async function openClip(i) {
   if (i < 0 || i >= R.rows.length) return;
-  R.idx = i;
+  const tok = ++R.load;
+  R.loading = true;
   const row = R.rows[i];
-  localStorage.setItem("hk.review.clip", row.clip_id);
   const c = await (await fetch(`/api/clip/${row.clip_id}`)).json();
+  if (tok !== R.load) return; // a newer openClip won
+  // R.idx changes only now, so a verdict always goes to the clip on screen
+  R.idx = i;
+  R.loading = false;
+  localStorage.setItem("hk.review.clip", row.clip_id);
   R.fps = c.video.fps || 30;
   R.offset = c.offset || 0;
   R.vw = c.video.width || 1;
@@ -131,10 +140,14 @@ async function openClip(i) {
     end: f(e.end),
     offCamera: !!e.saved_off_camera,
   };
+  // loop window: LEAD before onset to TAIL after the save, never outside the trims
+  // (trimmed-out footage can hold overlays and end cards)
+  const trimA = f(c.trim_start) ?? 0;
+  const trimB = f(c.trim_end) ?? (R.dur || Infinity);
   const first = R.ev.start ?? (R.clicks[0] || {}).t ?? 0;
-  const last = R.ev.offCamera ? R.dur : (R.ev.end ?? R.ev.contact ?? first + 10) + TAIL;
-  R.a = Math.max(0, first - LEAD);
-  R.b = Math.min(R.dur || last, last);
+  const last = R.ev.offCamera ? trimB : (R.ev.end ?? R.ev.contact ?? first + 10) + TAIL;
+  R.a = Math.max(trimA, first - LEAD);
+  R.b = Math.min(trimB, last);
   R.prevT = R.a;
   R.flash = null;
 
@@ -156,7 +169,7 @@ async function openClip(i) {
   video.addEventListener(
     "loadedmetadata",
     () => {
-      video.currentTime = R.a;
+      seek(R.a);
       video.play().catch(() => {});
     },
     { once: true },
@@ -165,9 +178,16 @@ async function openClip(i) {
 
 // ---------------------------------------------------------------- verdicts
 
-async function sendVerdict(verdict) {
+// Saves are chained so two (a note save on blur, then a verdict click) can't land out of order.
+function sendVerdict(verdict) {
   const row = R.rows[R.idx];
   const note = $("#note").value;
+  const p = R.saves.then(() => postVerdict(row, verdict, note));
+  R.saves = p.catch(() => false);
+  return p;
+}
+
+async function postVerdict(row, verdict, note) {
   setSaveState("saving", "Saving…");
   const res = await fetch(`/api/review/${row.clip_id}`, {
     method: "POST",
@@ -182,20 +202,23 @@ async function sendVerdict(verdict) {
   }
   row.verdict = verdict;
   row.note = verdict ? note.trim() : "";
-  if (!verdict) $("#note").value = "";
-  renderVerdict();
+  const onScreen = row === R.rows[R.idx];
+  if (!verdict && onScreen) $("#note").value = "";
+  if (onScreen) renderVerdict();
   renderList();
   updateCounter();
   return true;
 }
 
 async function markGood() {
+  if (R.loading) return;
   if (!(await sendVerdict("good"))) return;
   toast("Marked good");
   nextUnreviewed();
 }
 
 async function markBad() {
+  if (R.loading) return;
   if (!(await sendVerdict("not_good"))) return;
   if (!$("#note").value.trim()) {
     toast("Marked not good. Add a note on what's wrong if you can; it saves when you leave the box.", "warn");
@@ -228,7 +251,7 @@ function renderTimes() {
     row.disabled = t == null;
     row.onclick = () => {
       video.pause();
-      video.currentTime = t;
+      seek(t);
     };
     box.appendChild(row);
   }
@@ -254,11 +277,14 @@ function renderTimeline() {
     d.style.width = `${(100 * (t1 - t0)) / span}%`;
     seg.appendChild(d);
   }
+  $("#tlStart").textContent = fmt(R.a);
+  $("#tlEnd").textContent = fmt(R.b);
   const marks = $("#tlMarks");
   marks.innerHTML = "";
   for (const m of R.clicks) {
     const d = document.createElement("div");
     d.className = `tl-dot ${m.kind}`;
+    d.dataset.t = m.t;
     d.style.left = pct(m.t);
     d.title = `${m.kind} ${fmt(m.t)}`;
     marks.appendChild(d);
@@ -310,13 +336,26 @@ function phaseAt(t) {
   return ["after", "After save"];
 }
 
-function draw() {
-  const t = video.currentTime;
-  // loop the window while playing
-  if (!video.paused && (t >= R.b || t < R.a - 0.25)) {
-    video.currentTime = R.a;
-    R.prevT = R.a;
+// Seek, kept inside the loop window.
+function seek(t) {
+  video.currentTime = Math.min(Math.max(t, R.a), Math.max(R.a, R.b - 0.5 / R.fps));
+  R.prevT = video.currentTime;
+}
+
+// Back to the window start once playback reaches its end. Runs from the video's own
+// timeupdate/ended events (they keep firing in a background tab, unlike animation frames),
+// and never while the user is dragging the timeline or a seek is still pending.
+function keepInWindow() {
+  if (R.scrub || video.seeking || !R.b) return;
+  if (video.ended || video.currentTime >= R.b) {
+    seek(R.a);
+    if (!R.scrub) video.play().catch(() => {});
   }
+}
+
+function draw() {
+  if (!video.paused) keepInWindow();
+  const t = R.scrub ? R.scrub.t : video.currentTime;
   // flash a mark's name as the playhead crosses it
   for (const [key, name] of MARKS) {
     const m = R.ev[key];
@@ -386,7 +425,7 @@ function setTransform(value) {
 
 function togglePlay() {
   if (video.paused) {
-    if (video.currentTime >= R.b || video.currentTime < R.a) video.currentTime = R.a;
+    if (video.currentTime >= R.b - 0.5 / R.fps || video.currentTime < R.a) seek(R.a);
     video.play();
   } else {
     video.pause();
@@ -406,7 +445,7 @@ $("#next").onclick = () => openClip(R.idx + 1);
 $("#nextTodo").onclick = nextUnreviewed;
 $("#goodBtn").onclick = markGood;
 $("#badBtn").onclick = markBad;
-$("#clearBtn").onclick = () => sendVerdict(null);
+$("#clearBtn").onclick = () => { if (!R.loading) sendVerdict(null); };
 $("#playBtn").onclick = togglePlay;
 $("#zoomBtn").onclick = toggleZoom;
 $$("[data-speed]").forEach((b) => {
@@ -415,10 +454,43 @@ $$("[data-speed]").forEach((b) => {
     $$("[data-speed]").forEach((x) => x.classList.toggle("active", x === b));
   };
 });
-$("#timeline").onclick = (e) => {
-  const box = $("#timeline").getBoundingClientRect();
-  video.currentTime = R.a + ((e.clientX - box.left) / box.width) * (R.b - R.a);
+// Timeline: press to jump, drag to scrub. Either one pauses, so the frame you picked stays
+// on screen (a playing loop would carry on and wrap back to the start); Space resumes.
+// A press on a victim dot jumps to that click's exact time.
+const timeline = $("#timeline");
+const timeAtX = (x) => {
+  const box = timeline.getBoundingClientRect();
+  const u = Math.min(1, Math.max(0, (x - box.left) / box.width));
+  return R.a + u * (R.b - R.a);
 };
+timeline.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || !R.b) return;
+  e.preventDefault();
+  timeline.setPointerCapture(e.pointerId);
+  const dot = e.target.closest(".tl-dot");
+  R.scrub = { t: dot ? Number(dot.dataset.t) : timeAtX(e.clientX), dot: !!dot };
+  video.pause();
+  seek(R.scrub.t);
+});
+timeline.addEventListener("pointermove", (e) => {
+  if (!R.scrub || R.scrub.dot) return;
+  R.scrub.t = timeAtX(e.clientX);
+  if (!video.seeking) seek(R.scrub.t); // skip while the last seek is still decoding
+});
+const endScrub = () => {
+  if (!R.scrub) return;
+  const { t } = R.scrub;
+  R.scrub = null;
+  seek(t);
+};
+timeline.addEventListener("pointerup", endScrub);
+timeline.addEventListener("pointercancel", endScrub);
+video.addEventListener("timeupdate", keepInWindow);
+video.addEventListener("ended", keepInWindow);
+// a clicked button keeps focus, and Space would then press it as well as toggle play
+document.addEventListener("pointerup", () => {
+  if (document.activeElement && document.activeElement.tagName === "BUTTON") document.activeElement.blur();
+});
 // a note typed after the verdict is saved when you leave the box
 $("#note").addEventListener("change", () => {
   const row = R.rows[R.idx];
@@ -431,7 +503,7 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") e.target.blur();
     return;
   }
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
   const k = e.key.toLowerCase();
   if (k === " ") { e.preventDefault(); togglePlay(); }
   else if (k === "g") markGood();

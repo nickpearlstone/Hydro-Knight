@@ -262,3 +262,5 @@ kbd {
 .frames li .v { font-size: 12px; color: var(--muted); }
 .frames li.good .v { color: var(--ok); }
 .frames li.not_good .v { color: var(--bad); }
+.timeline { touch-action: none; user-select: none; } /* dragging the timeline scrubs, never scrolls or selects */
+.tl-ends { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; margin-top: -6px; }

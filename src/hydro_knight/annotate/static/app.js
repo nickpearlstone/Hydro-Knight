@@ -83,6 +83,7 @@ async function loadQueue(keepClip) {
   }
   const want = keepClip || linked || localStorage.getItem("hk.clip");
   const found = S.clips.findIndex((c) => c.clip_id === want);
+  if (linked && found < 0) toast(`Clip ${linked} isn't in the rescue clips list`, "warn");
   await openClip(found >= 0 ? found : 0);
 }
 

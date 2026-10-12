@@ -44,8 +44,10 @@ def clean_verdict(body: dict) -> dict | None:
     Returns:
         The stored form with today's date, or None when verdict is null (clear the review).
     Raises:
-        ValueError: an unknown verdict, or a note that isn't a string or is too long.
+        ValueError: a body that isn't an object, an unknown verdict, or a bad note.
     """
+    if not isinstance(body, dict):
+        raise ValueError("expected a JSON object")
     verdict = body.get("verdict")
     if verdict is None:
         return None

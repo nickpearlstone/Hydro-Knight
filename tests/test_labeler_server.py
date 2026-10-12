@@ -349,6 +349,7 @@ def test_review_refuses_bad_verdicts_and_clips_claude_did_not_label(review_env):
         client.post("/api/review/done", json={"verdict": "good", "note": 5}).status_code
         == 400
     )
+    assert client.post("/api/review/done", json=[1]).status_code == 400
     assert client.post("/api/review/todo", json={"verdict": "good"}).status_code == 404
     assert not reviews.exists()
 
