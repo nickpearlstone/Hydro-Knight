@@ -19,7 +19,8 @@ Feature layout per step (58):
   55     box size (box height / frame height)
   56-57  body velocity (box center), per second, in box heights
   58-91  optional joint velocities, per second, in box heights (joint_velocity=True)
-Rates and velocities are measured between consecutive detected steps and stored on
+Rates and velocities are measured between consecutive detected steps, over the time
+between the source frames they sampled, and stored on
 the later one.
 """
 
@@ -84,7 +85,8 @@ def resample_track(
     t_start = g.index[0] / fps_src
     n = int(np.floor((g.index[-1] - g.index[0]) / fps_src * TARGET_FPS + 1e-9)) + 1
     times = t_start + np.arange(n) / TARGET_FPS
-    r = g.reindex(np.rint(times * fps_src).astype(np.int64))
+    src = np.rint(times * fps_src).astype(np.int64)  # nearest source frame per step
+    r = g.reindex(src)
     det = r["box_conf"].notna().to_numpy()
     box = r[_BOX].ffill().to_numpy(np.float64)
     xy = r[_XY].ffill().to_numpy(np.float64).reshape(n, 17, 2)
@@ -92,8 +94,8 @@ def resample_track(
     bconf = r["box_conf"].fillna(0.0).to_numpy(np.float64)
 
     cx, cy = (box[:, 0] + box[:, 2]) / 2, (box[:, 1] + box[:, 3]) / 2
-    w = np.maximum(box[:, 2] - box[:, 0], 1e-6)
-    h = np.maximum(box[:, 3] - box[:, 1], 1e-6)
+    w = np.maximum(box[:, 2] - box[:, 0], 1.0)  # 1 px floor keeps degenerate boxes sane
+    h = np.maximum(box[:, 3] - box[:, 1], 1.0)
     center = np.stack([cx, cy], axis=1)[:, None, :]
     pose = ((xy - center) / h[:, None, None]).reshape(n, N_POSE)
     log_area = np.log(w * h)
@@ -103,11 +105,23 @@ def resample_track(
     di = np.flatnonzero(det)
     if len(di) > 1:
         a, b = di[:-1], di[1:]
-        dt = times[b] - times[a]
-        area_rate[b] = (log_area[b] - log_area[a]) / dt
-        vel[b, 0] = (cx[b] - cx[a]) / h[b] / dt
-        vel[b, 1] = (cy[b] - cy[a]) / h[b] / dt
-        jvel[b] = (pose[b] - pose[a]) / dt[:, None]
+        # Time between the source frames actually sampled, not between 30 fps steps:
+        # at 24 or 59.94 fps the two differ, which would distort every rate.
+        dt = (src[b] - src[a]) / fps_src
+        same = dt == 0  # upsampling: two steps read one source frame
+        dt = np.where(same, 1.0, dt)
+        rates = np.column_stack(
+            [
+                (log_area[b] - log_area[a]) / dt,
+                (cx[b] - cx[a]) / h[b] / dt,
+                (cy[b] - cy[a]) / h[b] / dt,
+                (pose[b] - pose[a]) / dt[:, None],
+            ]
+        )
+        for k in np.flatnonzero(same):  # a repeated frame carries the previous rate
+            rates[k] = rates[k - 1] if k > 0 else 0.0
+        area_rate[b], vel[b, 0], vel[b, 1] = rates[:, 0], rates[:, 1], rates[:, 2]
+        jvel[b] = rates[:, 3:]
 
     cols = [
         pose,

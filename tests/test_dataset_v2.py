@@ -71,7 +71,8 @@ RECORDS = [
 
 
 def test_only_labeled_active_clips_and_no_victim_tracks(kp_dir):
-    train, test, rep = build_datasets(kp_dir, RECORDS, test_frac=0.34, seed=0)
+    train, test, rep = build_datasets(kp_dir, RECORDS, test_frac=0.5, seed=0)
+    assert rep.used_train and rep.used_test  # both sides exercised
     assert sorted(rep.used_train + rep.used_test) == ["lab1", "lab2", "lab3"]
     assert (
         rep.unlabeled == ["unlab"]

@@ -39,7 +39,9 @@ def main() -> None:
     p.add_argument("--coord-weight", type=float, default=0.0)
     p.add_argument("--joint-velocity", action="store_true")
     p.add_argument("--device", default="cpu")
-    p.add_argument("--out", default="runs/v2_sizes")
+    p.add_argument(
+        "--out", default=None, help="default runs/v2_sizes (runs/v2_smoke with --smoke)"
+    )
     p.add_argument("--mlflow", action="store_true")
     p.add_argument(
         "--smoke", action="store_true", help="3 unlabeled clips, 30 steps; not a result"
@@ -50,6 +52,8 @@ def main() -> None:
     if args.smoke:
         print("SMOKE TEST: unlabeled clips, victims NOT removed. Not a result.")
         args.steps = 30
+    # A smoke run must never overwrite a real result.
+    args.out = args.out or ("runs/v2_smoke" if args.smoke else "runs/v2_sizes")
 
     records = Manifest(Path(args.manifest)).load()
     train, test, rep = build_datasets(

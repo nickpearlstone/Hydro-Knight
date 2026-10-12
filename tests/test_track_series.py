@@ -78,3 +78,19 @@ def test_trim_series(t0, t1, kept):
         assert out is None
     else:
         assert len(out) == kept and out.times()[0] >= t0 - 1e-9
+
+
+@pytest.mark.parametrize("fps", [24.0, 59.94, 60.0])
+def test_constant_velocity_is_constant_at_any_source_fps(fps):
+    # 2 px per source frame, 80 px box: true speed = 2 * fps / 80 box heights per second
+    g = track_rows(1, range(int(fps * 4)), box=(100, 100, 140, 180), dx_per_frame=2.0)
+    ts = resample_track(g, fps_src=fps, frame_h=1080)
+    v = ts.feats[1:, 56]
+    assert np.allclose(v, 2.0 * fps / 80.0, rtol=1e-3), (v.min(), v.max())
+
+
+def test_zero_size_box_keeps_pose_values_moderate():
+    g = track_rows(1, range(30), box=(100, 100, 100, 100))
+    g["x3"] = g["x3"] + 10.0  # one joint 10 px off a zero-size box
+    ts = resample_track(g, fps_src=30.0, frame_h=1080)
+    assert np.abs(ts.feats[:, :34]).max() <= 100.0

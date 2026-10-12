@@ -152,7 +152,9 @@ def fit_scaler(ws: WindowSet, n: int = 2000, seed: int = 0):
     rows = rng.choice(len(ws), size=min(n, len(ws)), replace=False)
     x, _ = ws.gather(rows)
     flat = x[:, ws.context : ws.context + ws.window].reshape(-1, x.shape[-1])
-    return flat.mean(axis=0), flat.std(axis=0) + 1e-6
+    std = flat.std(axis=0)
+    # A (near-)constant feature gets scale 1: a tiny floor would blow rare values up.
+    return flat.mean(axis=0), np.where(std < 1e-3, 1.0, std).astype(np.float32)
 
 
 def _batch(ws: WindowSet, rows, scaler, device):

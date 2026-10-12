@@ -68,3 +68,12 @@ def test_small_model_can_fit_a_tiny_set_and_scores_every_window():
     assert (
         scores.shape == (len(ws),) and np.isfinite(scores).all() and (scores >= 0).all()
     )
+
+
+def test_constant_feature_gets_unit_scale_not_a_blowup():
+    # feature 52 (detected) is 1 everywhere in the tiny set; a 1e-6 std floor would
+    # turn one missing step at test time into a value around a million
+    from hydro_knight.models.tcn_ae_v2 import fit_scaler
+
+    mean, std = fit_scaler(_tiny_set())
+    assert std[52] == 1.0 and np.all(std > 1e-3)
