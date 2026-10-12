@@ -17,10 +17,10 @@ This is a learning and portfolio project, still in active development.
 
 ```mermaid
 flowchart TD
-    A[Pool video] --> B[YOLO pose estimation at 1280px<br/>+ SAHI tiling for distant swimmers]
+    A[Pool video, 720p or 1080p] --> B[YOLO11 pose on overlapping 480px tiles<br/>each run at 1280px, plus the whole frame]
     B --> C[ByteTrack<br/>one ID per swimmer]
-    C --> D[Per-swimmer keypoint time series]
-    D --> E[Pose + velocity windows]
+    C --> D[Per-swimmer time series at 30 fps]
+    D --> E[3 s windows: pose, confidences,<br/>box shape and speed]
     E --> F[TCN autoencoder<br/>anomaly score]
     D -.-> G[Rule-based detector<br/>for swimmers who go under<br/><i>planned</i>]
 ```
@@ -48,8 +48,9 @@ position, so they will be handled by explicit rules over each swimmer's track.
 Full writeups, figures, and numbers are in [docs/FINDINGS.md](docs/FINDINGS.md).
 
 **1. Image resolution mattered more than model choice.** YOLO-pose found far more
-swimmers than MediaPipe on crowded scenes. Raising YOLO's input size from 640px to
-1280px found 3 to 6 times more swimmers on the same frames. A later benchmark against
+swimmers than MediaPipe on crowded scenes. Raising YOLO's input size (the resolution
+YOLO runs each image at) from 640px to 1280px found 3 to 6 times more swimmers on
+the same frames. A later benchmark against
 736 hand-counted swimmers confirmed YOLO11n over larger YOLO11 models, YOLO26, and
 MediaPipe, and showed that even the best setup finds only 30 to 40% of swimmers.
 
@@ -68,37 +69,49 @@ Over whole clips, tracks are still short (about 1 second median).
 trained autoencoder scored a ROC-AUC of 0.539. An audit then showed that a detector
 outputting random numbers scored 0.497 and still "caught" every rescue, because a
 rescue counted as caught if any of the roughly 21 swimmers in frame was flagged. The
-evaluation is being rebuilt around the victim's own track, using clicked victim
-positions and the moment the lifeguard makes contact, with a random baseline reported
-next to every result.
+evaluation was rebuilt around the victim's own track, using clicked victim positions
+and the moment the lifeguard makes contact, with a random baseline reported next to
+every result.
+
+**4. The second model separates victims from other swimmers.** On held-out clips,
+victim moments between drowning onset and guard contact score as more unusual than
+everyone else's with a ROC-AUC of about 0.85, where random scores give 0.50. Three model
+sizes (35k to 450k parameters) separate victims equally well, so the smallest is the
+default. Results vary from 0.75 to 0.93 depending on which clips are held out, because
+each test split has only 4 to 7 clips with a scorable victim.
 
 ## Project status
 
 **Built and tested**
 - Data pipeline: a JSONL manifest of source clips, a download tool, and a browser
-  labeling app with two tabs: one for each rescue's timeline and where the victim is,
-  one for counting every swimmer on still frames
-- Pose extraction with YOLO11-pose, SAHI tiling, and ByteTrack
-- Features: hip-centered, torso-scaled poses plus joint and body velocity (70 values
-  per frame)
-- A temporal convolutional (TCN) autoencoder
-- An evaluation harness that works with any detector. It reports per-event recall,
-  how quickly each event is caught, false alarms per hour, ROC/PR curves, and how much
-  pose data survives inside each event
+  labeling app with three tabs: each rescue's timeline and where the victim is,
+  counting every swimmer on still frames, and a quick good / not good review of labels
+- Pose extraction with YOLO11-pose, SAHI tiling, and ByteTrack, in two steps: raw
+  detections on the GPU, then merging and tracking offline
+- Features: each swimmer resampled to 30 fps, with pose relative to its bounding box,
+  all keypoint confidences, a detected flag, and box shape, size, and speed (58 values
+  per step). Missed frames stay in as "not detected" instead of being dropped
+- A dilated temporal convolutional (TCN) autoencoder in three sizes
+- Victim-based scoring: victim windows from onset to guard contact against every other
+  swimmer, on whole held-out clips, next to a random baseline
+- An earlier evaluation harness that works with any detector (per-event recall,
+  detection delay, false alarms per hour, ROC/PR curves)
 - A pose-model benchmark scored against hand-counted swimmers
 - MLflow experiment tracking, and CI running pytest plus ruff lint and format checks
 
-**Dataset:** 74 clips (66 rescues, 4 normal, 4 unlabeled). 57 are extracted with the
-tiled pipeline.
+**Dataset:** 74 clips (66 rescues, 4 normal, 4 unlabeled). The first version targets
+wave pools only: 57 wave-pool rescue clips are extracted with the tiled pipeline, and
+51 of them are labeled with drowning onset, guard contact, save, and clicked victim
+positions. Most labels were made with an AI-assisted procedure (Claude, following a
+fixed written protocol) and every one was reviewed by hand. Five clips whose victim a
+review found wrong are left out of training until corrected.
 
 **In progress / next**
-1. Labeling every rescue: guard contact time and where the victim is
-2. Rebuilding the evaluation to score only the victim's track, from drowning onset to
-   guard contact
-3. Checking whether the victim is detected and tracked before going under at these
-   camera distances
-4. A rule-based detector for swimmers who go under and don't resurface
-5. A head-focused detector, and a distance cutoff so each camera only watches the part
+1. Finishing the labels: 6 clips are unlabeled and 5 need the victim corrected
+2. Scoring victims the tracker keeps losing (tracks under 3 s), and checking whether
+   the victim is detected and tracked before going under at these camera distances
+3. A rule-based detector for swimmers who go under and don't resurface
+4. A head-focused detector, and a distance cutoff so each camera only watches the part
    of the pool it can see clearly
 
 ## Quickstart
@@ -112,14 +125,18 @@ uv sync --extra tracking         # optional: MLflow
 uv sync --extra spike            # optional: MediaPipe, to regenerate the comparison figures
 ```
 
-Pose extraction and training run on a Colab GPU. See
-[docs/COLAB_TRAINING.md](docs/COLAB_TRAINING.md). The evaluation report is generated
-with `scripts/eval_report.py`.
+Pose extraction runs on a Colab GPU or a Mac GPU (see
+[docs/COLAB_TRAINING.md](docs/COLAB_TRAINING.md)). The model comparison trains on a Mac
+GPU in about an hour:
+
+```bash
+uv run python scripts/train_v2.py --sizes small medium large --seeds 0 1 2 --rates capped --device mps
+```
 
 ## Data and privacy
 
 No video is stored in this repo. It holds a manifest of source links, metadata, and
-labeled event time windows. Publicly posted footage isn't licensed for
+labels (event times and clicked victim positions). Publicly posted footage isn't licensed for
 redistribution, and it shows identifiable people, often children. Labels are based
 on outcomes: if a lifeguard stepped in, the clip counts as a distress event. More in
 [docs/DATA_SOURCING.md](docs/DATA_SOURCING.md).

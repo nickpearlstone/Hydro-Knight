@@ -132,3 +132,53 @@ was tested with and without its optional NMS step.
 
 Reproduce: `uv run python scripts/benchmark_pose.py run` (and `sweep`). Labels:
 [`pose_bench_gt.json`](../data/annotations/pose_bench_gt.json).
+
+## 5. Second model (v2): victim separation and model size
+
+**Setup.** 46 labeled rescue clips (51 labeled, 5 left out because a review found the
+wrong victim clicked). Each swimmer's track becomes a 30 fps series of 58 features per
+step: pose relative to the box (scaled by box height), all 17 keypoint confidences,
+box confidence, a detected flag, box shape and size, and box speed. The model is a
+dilated TCN autoencoder trained on 3 s windows of non-victim swimmers only.
+
+Victim tracks are removed from the normal data: those under a victim click, plus
+"path fragments" (tracks that stay within one box height of the line between clicks
+for at least 0.3 s, because the tracker splits one swimmer into short pieces).
+
+**Score.** Clips are split whole into train and test. On the test clips, every window
+gets an anomaly score (reconstruction error). The headline number is ROC-AUC between
+victim windows inside the drowning (onset to guard contact) and every other swimmer's
+windows. Random scores give about 0.50. Each setting ran with 3 seeds; a seed sets
+both the clip split and the initialization.
+
+**Box speed features.** Box speed is mostly tracker jitter (99th percentile about 7
+box heights per second, maximum above 100). Medium model:
+
+| Box speed | AUC, seeds 0 / 1 / 2 | Mean |
+|---|---|---|
+| Raw | 0.914 / 0.749 / 0.881 | 0.848 |
+| Capped at 3 per second | 0.931 / 0.746 / 0.875 | 0.851 |
+| Removed | 0.887 / 0.726 / 0.854 | 0.822 |
+
+**Model size.** Box speed capped:
+
+| Size | Parameters | AUC, seeds 0 / 1 / 2 | Mean AUC | Held-out normal error (median) |
+|---|---|---|---|---|
+| Small | 35k | 0.914 / 0.774 / 0.871 | **0.853** | 0.276 |
+| Medium | 122k | 0.931 / 0.746 / 0.875 | 0.851 | 0.225 |
+| Large | 450k | 0.904 / 0.757 / 0.891 | 0.850 | 0.180 |
+
+**Takeaways**
+
+- The model separates victims from other swimmers well above chance (about 0.85 vs
+  0.50).
+- Larger models reconstruct normal swimming better, and all three separate victims
+  equally well. The small model is the default: same separation, 13 times fewer parameters.
+- Capping box speed costs nothing; removing it costs a little in every split.
+- The test split moves AUC from 0.75 to 0.93, far more than any setting. Each split
+  has only 4 to 7 test clips with a scorable victim, so single numbers are not precise.
+- Only victims tracked for at least 3 s straight can be scored, so victims the tracker
+  keeps losing are not in these numbers.
+
+Reproduce: `uv run python scripts/train_v2.py --sizes small medium large --seeds 0 1 2
+--rates capped --device mps`.
