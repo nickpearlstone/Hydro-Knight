@@ -14,7 +14,8 @@ Each seed picks its own whole-clip train/test split and initialization. For ever
      guard contact score as more unusual than everyone else's? Always next to the same
      number for random scores.
 Clips whose labels a review marked "not_good" (data/annotations/label_reviews.json) are
-left out until fixed. Writes runs/<out>/summary.json.
+left out until fixed, and Claude-labeled clips with no review verdict yet are held out
+until reviewed. Writes runs/<out>/summary.json.
 """
 
 from __future__ import annotations
@@ -99,13 +100,19 @@ def main() -> None:
     args.out = args.out or ("runs/v2_smoke" if args.smoke else "runs/v2_sizes")
 
     records = Manifest(Path(args.manifest)).load()
-    rejected = {
+    verdicts = review.load(Path(args.reviews))
+    rejected = {cid for cid, v in verdicts.items() if v.get("verdict") == "not_good"}
+    # Claude's labels count only after a review marks them good (held until reviewed).
+    unreviewed = {
         cid
-        for cid, v in review.load(Path(args.reviews)).items()
-        if v.get("verdict") == "not_good"
+        for cid in review.load(review.CLAUDE_PATH)
+        if verdicts.get(cid, {}).get("verdict") is None
     }
     if rejected:
         print(f"leaving out {len(rejected)} clips whose labels a review marked wrong")
+    if unreviewed:
+        print(f"leaving out {len(unreviewed)} Claude-labeled clips not reviewed yet")
+    rejected |= unreviewed
 
     results, reports = [], {}
     for seed in args.seeds:
