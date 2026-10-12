@@ -1,0 +1,96 @@
+"""Track series v2: 30 fps resampling, missing steps, box normalization, rates."""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+import pytest
+from v2_fakes import track_rows
+
+from hydro_knight.features.track_series import (
+    DETECTED,
+    N_BASE,
+    TARGET_FPS,
+    resample_track,
+    track_series,
+    trim_series,
+    zero_when_missing,
+)
+
+
+def test_60fps_track_with_a_gap_keeps_missing_steps():
+    # frames 0..59 at 60 fps = 1 s -> 30 steps; source frames 20-29 missing.
+    g = track_rows(1, [f for f in range(60) if not 20 <= f <= 29])
+    ts = resample_track(g, fps_src=60.0, frame_h=1080)
+    assert len(ts) == 30 and ts.feats.shape == (30, N_BASE)
+    # step k reads source frame 2k, so steps 10..14 are missing
+    assert ts.detected.tolist() == [not 10 <= k <= 14 for k in range(30)]
+    missing = ~ts.detected
+    assert (ts.feats[missing][:, zero_when_missing(N_BASE)] == 0).all()
+    assert (ts.feats[missing][:, :34] == ts.feats[9, :34]).all()  # coords held
+    assert (ts.feats[:, DETECTED] == ts.detected).all()
+
+
+def test_box_normalization_size_aspect_and_velocity():
+    # 40x80 box moving right 2 px per source frame at 60 fps = 120 px/s = 1.5 box heights/s
+    g = track_rows(1, range(60), box=(100, 100, 140, 180), dx_per_frame=2.0)
+    ts = resample_track(g, fps_src=60.0, frame_h=1080)
+    f = ts.feats
+    assert np.allclose(f[:, :34], 0.0)  # every keypoint at the box center
+    assert np.allclose(f[:, 53], 0.5)  # aspect w/h = 40/80
+    assert np.allclose(f[:, 55], 80 / 1080)  # box size
+    assert np.allclose(f[1:, 56], 1.5) and np.allclose(f[:, 57], 0.0)
+    assert np.allclose(f[:, 54], 0.0)  # area constant
+    assert f[0, 56] == 0.0  # first step has no previous detection
+
+
+def test_24fps_upsampling_and_degenerate_box_stay_finite():
+    g = track_rows(
+        1, range(24), box=(100, 100, 100, 100)
+    )  # zero-size box, 1 s at 24 fps
+    ts = resample_track(g, fps_src=24.0, frame_h=1080)
+    assert len(ts) == int(np.floor((23 / 24) * TARGET_FPS + 1e-9)) + 1
+    assert ts.detected.all()
+    assert np.isfinite(ts.feats).all()
+
+
+def test_joint_velocity_switch_adds_34():
+    g = track_rows(1, range(30))
+    assert (
+        resample_track(g, 30.0, 1080, joint_velocity=True).feats.shape[1] == N_BASE + 34
+    )
+
+
+def test_track_series_skips_unconfirmed_and_keeps_ids():
+    df = pd.concat([track_rows(3, range(30)), track_rows(-1, range(30))])
+    out = track_series(df, 30.0, 1080, clip_id="c1")
+    assert [(s.clip_id, s.track_id) for s in out] == [("c1", 3)]
+
+
+@pytest.mark.parametrize(
+    ("t0", "t1", "kept"),
+    [(0.0, np.inf, 30), (0.5, np.inf, 15), (0.0, 0.2, 7), (5.0, 9.0, None)],
+)
+def test_trim_series(t0, t1, kept):
+    ts = resample_track(track_rows(1, range(30)), 30.0, 1080)  # 1 s, steps at k/30 s
+    out = trim_series(ts, t0, t1)
+    if kept is None:
+        assert out is None
+    else:
+        assert len(out) == kept and out.times()[0] >= t0 - 1e-9
+
+
+@pytest.mark.parametrize("fps", [24.0, 59.94, 60.0])
+def test_constant_velocity_is_constant_at_any_source_fps(fps):
+    # 2 px per source frame, 80 px box: true speed = 2 * fps / 80 box heights per second
+    g = track_rows(1, range(int(fps * 4)), box=(100, 100, 140, 180), dx_per_frame=2.0)
+    ts = resample_track(g, fps_src=fps, frame_h=1080)
+    v = ts.feats[1:, 56]
+    assert np.allclose(v, 2.0 * fps / 80.0, rtol=1e-3), (v.min(), v.max())
+
+
+def test_zero_size_box_keeps_pose_values_moderate():
+    g = track_rows(1, range(30), box=(100, 100, 100, 100))
+    g["x3"] = g["x3"] + 10.0  # one joint 10 px off a zero-size box
+    ts = resample_track(g, fps_src=30.0, frame_h=1080)
+    assert np.abs(ts.feats[:, :34]).max() <= 100.0
