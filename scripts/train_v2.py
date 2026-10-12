@@ -189,6 +189,10 @@ def main() -> None:
                 out_dir = Path(args.out)
                 out_dir.mkdir(parents=True, exist_ok=True)
                 det["sweep"].to_csv(out_dir / f"sweep_{size}_s{seed}.csv", index=False)
+                det_rand["sweep"].to_csv(
+                    out_dir / f"sweep_random_{size}_s{seed}.csv", index=False
+                )
+                alarms.to_parquet(out_dir / f"alarms_{size}_s{seed}.parquet")
                 row["detection"] = det["points"]
                 row["detection_random"] = det_rand["points"]
                 row["detection_events"] = det["events"]
