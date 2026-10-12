@@ -269,3 +269,6 @@ __marimo__/
 # Manifest write lock + atomic-rewrite temp files (ingest/manifest.py)
 data/manifests/*.lock
 data/manifests/*.tmp
+
+# Local Claude Code settings and browser-preview config (personal, never shared)
+.claude/
