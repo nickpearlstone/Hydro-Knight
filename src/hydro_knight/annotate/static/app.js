@@ -65,6 +65,12 @@ const fmt = (t) => {
 // ---------------------------------------------------------------- queue
 
 async function loadQueue(keepClip) {
+  // /?clip=<id> (the Review tab's "Open in Rescue tab") opens that clip, even if it's done.
+  const linked = keepClip ? null : new URLSearchParams(location.search).get("clip");
+  if (linked) {
+    S.filter = "distress";
+    history.replaceState(null, "", "/");
+  }
   $("#filter").value = S.filter;
   const res = await fetch(`/api/clips?filter=${S.filter}`);
   S.clips = await res.json();
@@ -75,7 +81,7 @@ async function loadQueue(keepClip) {
     setSaveState("", "—");
     return;
   }
-  const want = keepClip || localStorage.getItem("hk.clip");
+  const want = keepClip || linked || localStorage.getItem("hk.clip");
   const found = S.clips.findIndex((c) => c.clip_id === want);
   await openClip(found >= 0 ? found : 0);
 }

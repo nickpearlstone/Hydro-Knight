@@ -224,3 +224,41 @@ kbd {
 .frames li.blank .muted { color: var(--warn); }
 .sw.water { background: #ef4444; border-radius: 50%; }
 .sw.deck { background: #3b82f6; border-radius: 50%; }
+
+/* ---------- review tab ---------- */
+.phase { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; }
+.phase.normal { background: var(--seg-normal); }
+.phase.distress { background: var(--seg-distress); }
+.phase.rescue { background: var(--seg-rescue); }
+.phase.after { background: var(--seg-after); }
+.ring { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; border: 2px solid #facc15; }
+.ring.dashed { border-style: dashed; }
+.verdicts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.btn.verdict { padding: 12px; font-size: 15px; font-weight: 600; }
+.btn.verdict.good:hover, .btn.verdict.good.active { background: #14532d; border-color: var(--ok); }
+.btn.verdict.bad:hover, .btn.verdict.bad.active { background: #450a0a; border-color: var(--bad); }
+.btn.verdict.active { color: #fff; }
+.note-label { display: block; color: var(--muted); font-size: 12.5px; margin-bottom: 4px; }
+.note {
+  width: 100%; resize: vertical; background: #151a20; color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px; font: inherit; margin-bottom: 8px;
+}
+.note:focus { outline: 2px solid var(--accent-2); outline-offset: 0; }
+.times { display: grid; gap: 4px; }
+.time-row {
+  display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: center; text-align: left;
+  background: #151a20; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
+  color: var(--text); font: inherit; cursor: pointer;
+}
+.time-row:hover:not(:disabled) { border-color: #3a4350; }
+.time-row:disabled { cursor: default; color: var(--muted); }
+.time-row .dot { width: 10px; height: 10px; border-radius: 50%; }
+.time-row .dot.start { background: var(--seg-distress); }
+.time-row .dot.lastSeen { background: #facc15; }
+.time-row .dot.contact { background: var(--seg-rescue); }
+.time-row .dot.end { background: var(--seg-after); }
+.claude-notes { margin: 0; color: var(--muted); font-size: 12.5px; white-space: pre-wrap; }
+.small { font-size: 12px; font-weight: 400; }
+.frames li .v { font-size: 12px; color: var(--muted); }
+.frames li.good .v { color: var(--ok); }
+.frames li.not_good .v { color: var(--bad); }
