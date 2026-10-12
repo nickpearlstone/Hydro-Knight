@@ -36,7 +36,7 @@ const R = {
   load: 0,         // bumps on every openClip; a stale load's response is dropped
   loading: false,  // true until the new clip's data is on screen
   saves: Promise.resolve(), // verdict saves run one at a time, in order
-  scrub: null,     // {t, dot} while the timeline is pressed or dragged
+  scrub: null,     // {t, dot, x0} while the timeline is pressed or dragged
 };
 
 // ---------------------------------------------------------------- feedback
@@ -353,6 +353,18 @@ function keepInWindow() {
   }
 }
 
+// The per-frame loop. It always schedules the next frame, even if drawing throws, so one
+// error can never freeze the playhead, clock and victim marker for good.
+function loop() {
+  try {
+    if (R.ev) draw(); // nothing to draw until the first clip has loaded
+  } catch (err) {
+    console.error(err);
+  } finally {
+    requestAnimationFrame(loop);
+  }
+}
+
 function draw() {
   if (!video.paused) keepInWindow();
   const t = R.scrub ? R.scrub.t : video.currentTime;
@@ -415,7 +427,6 @@ function draw() {
   }
   const playLabel = video.paused ? "▶ Play <kbd>Space</kbd>" : "❚❚ Pause <kbd>Space</kbd>";
   if ($("#playBtn").innerHTML !== playLabel) $("#playBtn").innerHTML = playLabel;
-  requestAnimationFrame(draw);
 }
 
 // Write the zoom transform only when it changes: rewriting it every frame can blank the video.
@@ -468,12 +479,17 @@ timeline.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   timeline.setPointerCapture(e.pointerId);
   const dot = e.target.closest(".tl-dot");
-  R.scrub = { t: dot ? Number(dot.dataset.t) : timeAtX(e.clientX), dot: !!dot };
+  R.scrub = { t: dot ? Number(dot.dataset.t) : timeAtX(e.clientX), dot: !!dot, x0: e.clientX };
   video.pause();
   seek(R.scrub.t);
 });
 timeline.addEventListener("pointermove", (e) => {
-  if (!R.scrub || R.scrub.dot) return;
+  if (!R.scrub) return;
+  if (R.scrub.dot) {
+    // a press on a dot stays on that click's time unless the pointer really moves
+    if (Math.abs(e.clientX - R.scrub.x0) < 4) return;
+    R.scrub.dot = false;
+  }
   R.scrub.t = timeAtX(e.clientX);
   if (!video.seeking) seek(R.scrub.t); // skip while the last seek is still decoding
 });
@@ -486,6 +502,11 @@ const endScrub = () => {
 timeline.addEventListener("pointerup", endScrub);
 timeline.addEventListener("pointercancel", endScrub);
 video.addEventListener("timeupdate", keepInWindow);
+// each seek decodes from the last keyframe (often 5 s back), so moves arriving meanwhile are
+// skipped; when a seek lands, go straight to wherever the pointer is now
+video.addEventListener("seeked", () => {
+  if (R.scrub && Math.abs(video.currentTime - R.scrub.t) > 1 / R.fps) seek(R.scrub.t);
+});
 video.addEventListener("ended", keepInWindow);
 // a clicked button keeps focus, and Space would then press it as well as toggle play
 document.addEventListener("pointerup", () => {
@@ -514,4 +535,4 @@ document.addEventListener("keydown", (e) => {
 });
 
 loadQueue();
-requestAnimationFrame(draw);
+requestAnimationFrame(loop);
