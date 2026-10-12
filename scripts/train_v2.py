@@ -24,8 +24,10 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from hydro_knight.annotate import review
+from hydro_knight.eval.detection_v2 import alarm_table, clip_evals, operating_points
 from hydro_knight.eval.separation import victim_separation
 from hydro_knight.features.dataset_v2 import build_datasets, victim_windows
 from hydro_knight.features.track_series import RATE_MODES
@@ -77,6 +79,12 @@ def main() -> None:
     p.add_argument(
         "--out", default=None, help="default runs/v2_sizes (runs/v2_smoke with --smoke)"
     )
+    p.add_argument(
+        "--detection",
+        action="store_true",
+        help="also report recall / time to alarm / false alarms per hour (eval/detection_v2.py)",
+    )
+    p.add_argument("--fa-targets", nargs="+", type=float, default=[30, 60, 120, 240])
     p.add_argument("--mlflow", action="store_true")
     p.add_argument(
         "--smoke", action="store_true", help="3 unlabeled clips, 30 steps; not a result"
@@ -163,8 +171,44 @@ def main() -> None:
                 )
                 row.update({k: v for k, v in sep.items() if k != "per_clip_rank"})
                 row["per_clip_rank"] = sep["per_clip_rank"]
+            if args.detection and vic is not None:
+                vs_all = (
+                    score_v2(model, vic, scaler, args.coord_weight, device=args.device)
+                    if len(vic)
+                    else np.empty(0)
+                )
+                alarms = pd.concat([alarm_table(test, held), alarm_table(vic, vs_all)])
+                det = operating_points(
+                    clip_evals(alarms, records, rep), args.fa_targets
+                )
+                rng = np.random.default_rng(seed)
+                alarms_rand = alarms.assign(score=rng.random(len(alarms)))
+                det_rand = operating_points(
+                    clip_evals(alarms_rand, records, rep), args.fa_targets
+                )
+                out_dir = Path(args.out)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                det["sweep"].to_csv(out_dir / f"sweep_{size}_s{seed}.csv", index=False)
+                row["detection"] = det["points"]
+                row["detection_random"] = det_rand["points"]
+                row["detection_events"] = det["events"]
+                row["detection_hours"] = det["hours"]
+                for pt, pr in zip(det["points"], det_rand["points"], strict=True):
+                    print(
+                        f"  <= {pt['fa_target']:g} FA/h: recall {pt['recall']:.2f}"
+                        f" (random {pr['recall']:.2f}), median time to alarm"
+                        f" {pt.get('median_latency_s')} s"
+                    )
             results.append(row)
-            print(json.dumps({k: v for k, v in row.items() if k != "per_clip_rank"}))
+            print(
+                json.dumps(
+                    {
+                        k: v
+                        for k, v in row.items()
+                        if k not in ("per_clip_rank", "detection", "detection_random")
+                    }
+                )
+            )
 
     summary_rows = []
     for size in args.sizes:
