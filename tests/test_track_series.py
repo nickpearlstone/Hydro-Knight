@@ -94,3 +94,25 @@ def test_zero_size_box_keeps_pose_values_moderate():
     g["x3"] = g["x3"] + 10.0  # one joint 10 px off a zero-size box
     ts = resample_track(g, fps_src=30.0, frame_h=1080)
     assert np.abs(ts.feats[:, :34]).max() <= 100.0
+
+
+@pytest.mark.parametrize("mode", ["raw", "capped", "off"])
+def test_rate_modes(mode):
+    from hydro_knight.features.track_series import RATE_CAP, RATE_COLS
+
+    # 40 px/frame at 30 fps with an 80 px box = 15 box heights/s: pure box jump speed.
+    g = track_rows(1, range(30), box=(100, 100, 140, 180), dx_per_frame=40.0)
+    f = resample_track(g, 30.0, 1080, rates=mode).feats
+    vx = f[1:, 56]
+    if mode == "raw":
+        assert np.allclose(vx, 15.0)
+    elif mode == "capped":
+        assert np.allclose(vx, RATE_CAP)
+    else:
+        assert (f[:, RATE_COLS] == 0).all()
+    assert f.shape[1] == N_BASE  # indices never move
+
+
+def test_unknown_rate_mode_is_refused():
+    with pytest.raises(ValueError, match="rates"):
+        resample_track(track_rows(1, range(5)), 30.0, 1080, rates="smooth")

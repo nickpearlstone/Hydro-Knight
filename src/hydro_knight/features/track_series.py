@@ -22,6 +22,12 @@ Feature layout per step (58):
 Rates and velocities are measured between consecutive detected steps, over the time
 between the source frames they sampled, and stored on
 the later one.
+
+Box rates (54, 56-57) are mostly tracker box jitter at the frame-to-frame scale (p99
+about 7 box heights/s, max over 100). `rates` picks how they enter the model: "raw",
+"capped" (clipped to +-RATE_CAP per second: ~3 box heights/s is a fast swim, and a real
+sink shrinks the box over a quarter second or more), or "off" (set to 0, so the
+feature count and every index stay the same).
 """
 
 from __future__ import annotations
@@ -35,6 +41,9 @@ TARGET_FPS = 30.0
 N_POSE = 34
 N_BASE = 58
 DETECTED = 52
+RATE_COLS = [54, 56, 57]  # box area change rate, body velocity x / y
+RATE_CAP = 3.0  # per second, for rates="capped"
+RATE_MODES = ("raw", "capped", "off")
 _XY = [f"{a}{i}" for i in range(17) for a in ("x", "y")]
 _CONF = [f"c{i}" for i in range(17)]
 _BOX = ["bx1", "by1", "bx2", "by2"]
@@ -69,6 +78,7 @@ def resample_track(
     frame_h: float,
     clip_id: str = "",
     joint_velocity: bool = False,
+    rates: str = "raw",
 ) -> TrackSeries:
     """Resample one track's keypoint rows to TARGET_FPS and compute its features.
 
@@ -78,9 +88,13 @@ def resample_track(
         frame_h: video frame height in pixels.
         clip_id: stored on the series for bookkeeping.
         joint_velocity: append the 34 joint velocities (feature count 92).
+        rates: box rate handling, one of RATE_MODES (see module docstring).
     Returns:
         TrackSeries spanning the track's first to last detection.
     """
+    rate_mode = rates  # `rates` is reused below for the computed rate matrix
+    if rate_mode not in RATE_MODES:
+        raise ValueError(f"rates must be one of {RATE_MODES}, got {rate_mode!r}")
     g = g.sort_values("frame").drop_duplicates("frame").set_index("frame")
     t_start = g.index[0] / fps_src
     n = int(np.floor((g.index[-1] - g.index[0]) / fps_src * TARGET_FPS + 1e-9)) + 1
@@ -122,6 +136,13 @@ def resample_track(
             rates[k] = rates[k - 1] if k > 0 else 0.0
         area_rate[b], vel[b, 0], vel[b, 1] = rates[:, 0], rates[:, 1], rates[:, 2]
         jvel[b] = rates[:, 3:]
+    if rate_mode == "capped":
+        area_rate, vel = (
+            np.clip(area_rate, -RATE_CAP, RATE_CAP),
+            np.clip(vel, -RATE_CAP, RATE_CAP),
+        )
+    elif rate_mode == "off":
+        area_rate, vel = np.zeros_like(area_rate), np.zeros_like(vel)
 
     cols = [
         pose,
@@ -146,10 +167,11 @@ def track_series(
     frame_h: float,
     clip_id: str = "",
     joint_velocity: bool = False,
+    rates: str = "raw",
 ) -> list[TrackSeries]:
     """All confirmed tracks (track_id >= 0) of a clip as TrackSeries, by track id."""
     return [
-        resample_track(g, fps_src, frame_h, clip_id, joint_velocity)
+        resample_track(g, fps_src, frame_h, clip_id, joint_velocity, rates)
         for tid, g in df[df["track_id"] >= 0].groupby("track_id")
     ]
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 from v2_fakes import track_rows, write_keypoints
@@ -103,3 +104,23 @@ def test_no_labeled_clips_is_an_error_unless_smoke(kp_dir):
         kp_dir, unlabeled, require_labels=False, test_frac=0.0
     )
     assert rep.used_train == ["unlab"] and len(train) > 0
+
+
+def test_reviewed_wrong_clips_are_skipped(kp_dir):
+    _, _, rep = build_datasets(
+        kp_dir, RECORDS, test_frac=0.5, seed=0, exclude_clips={"lab2"}
+    )
+    assert rep.rejected == ["lab2"]
+    assert "lab2" not in rep.used_train + rep.used_test
+
+
+def test_victim_windows_are_the_removed_tracks_inside_the_event(kp_dir):
+    from hydro_knight.features.dataset_v2 import victim_windows
+
+    _, test, rep = build_datasets(kp_dir, RECORDS, test_frac=0.5, seed=0)
+    vic, in_event = victim_windows(kp_dir, RECORDS, rep)
+    assert len(vic) and {s.track_id for s in vic.series} == {7}
+    starts = np.array([vic.info(i)[2] for i in range(len(vic))])
+    # event onset 1.0 s -> contact 3.0 s; a 3 s window overlaps it if it starts < 3.0
+    assert in_event.any() and (starts[in_event] < 3.0).all()
+    assert not in_event[starts >= 3.0].any()
