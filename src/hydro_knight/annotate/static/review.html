@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hydro-Knight Labeler</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Hydro-Knight labeler</div>
+    <nav class="tabs" aria-label="Labeling task">
+      <a class="tab" href="/">Rescue timeline</a>
+      <a class="tab" href="/count">Swimmer count</a>
+      <a class="tab active" href="/review" aria-current="page">Review</a>
+    </nav>
+    <div class="nav">
+      <button id="prev" class="btn ghost" title="Previous clip">‹ Prev <kbd>←</kbd></button>
+      <span id="counter" class="counter">–</span>
+      <button id="next" class="btn ghost" title="Next clip">Next › <kbd>→</kbd></button>
+      <button id="nextTodo" class="btn" title="Next clip without a verdict">Next unreviewed ›</button>
+    </div>
+    <div id="saveState" class="pill">Loading…</div>
+  </header>
+
+  <main class="layout">
+    <section class="left">
+      <div class="clipline">
+        <span id="clipId" class="mono"></span>
+        <span id="phase" class="phase"></span>
+      </div>
+
+      <div id="stage" class="stage">
+        <div id="zoomer" class="zoomer">
+          <video id="video" preload="auto" playsinline muted></video>
+          <canvas id="overlay"></canvas>
+        </div>
+        <div id="zoomBadge" class="zoom-badge" hidden>Zoomed on victim</div>
+        <div id="emptyState" class="empty-state" hidden>No clips labeled by Claude yet.</div>
+      </div>
+
+      <div id="timeline" class="timeline" title="Click to jump">
+        <div id="tlSegments" class="tl-segments"></div>
+        <div id="tlMarks" class="tl-marks"></div>
+        <div id="tlHead" class="tl-head"></div>
+      </div>
+      <div class="tl-ends mono"><span id="tlStart"></span><span class="muted">Click or drag the bar to move · pauses · Space plays</span><span id="tlEnd"></span></div>
+      <div class="legend">
+        <span><i class="sw normal"></i>Before onset</span>
+        <span><i class="sw distress"></i>Drowning (onset → contact)</span>
+        <span><i class="sw rescue"></i>Rescue (contact → saved)</span>
+        <span><i class="sw after"></i>After save</span>
+        <span><i class="ring solid"></i>Victim click</span>
+        <span><i class="ring dashed"></i>Between clicks</span>
+      </div>
+
+      <div class="transport">
+        <button id="playBtn" class="btn primary wide">❚❚ Pause <kbd>Space</kbd></button>
+        <button id="zoomBtn" class="btn toggle" title="Follow the victim at 3× zoom">Zoom on victim <kbd>Z</kbd></button>
+        <div class="speeds" role="group" aria-label="Playback speed">
+          <button class="btn chip" data-speed="0.5">½×</button>
+          <button class="btn chip active" data-speed="1">1×</button>
+        </div>
+        <div id="clock" class="clock mono">0:00.00</div>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <div class="card">
+        <h2>Is this label right?</h2>
+        <p class="hint">The clip loops from just before onset to just after the save. Check the
+          circle is on the person the guard rescues, and the onset and contact times look right.</p>
+        <div class="verdicts">
+          <button id="goodBtn" class="btn verdict good">✓ Good <kbd>G</kbd></button>
+          <button id="badBtn" class="btn verdict bad">✗ Not good <kbd>N</kbd></button>
+        </div>
+        <label class="note-label" for="note">What's wrong? (optional)</label>
+        <textarea id="note" class="note" rows="3" placeholder="e.g. wrong kid, onset too early"></textarea>
+        <div class="tools">
+          <a id="openRescue" class="btn ghost small" href="/">Open in Rescue tab to fix ↗</a>
+          <button id="clearBtn" class="btn ghost small">Clear verdict</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Times <span class="muted small">(click to jump)</span></h2>
+        <div id="times" class="times"></div>
+      </div>
+
+      <div class="card">
+        <h2>Claude's notes</h2>
+        <p id="claudeNotes" class="claude-notes"></p>
+      </div>
+
+      <div class="card">
+        <h2>Clips</h2>
+        <ul id="clipList" class="frames"></ul>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="/static/review.js"></script>
+</body>
+</html>

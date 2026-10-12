@@ -26,6 +26,9 @@ click with no detection nearby records that the victim was not detected.
 A second tab, Swimmer count (/count), labels every person on a few still frames for
 the pose benchmark; see annotate/count.py for that file's format.
 
+A third tab, Review (/review), plays each clip Claude labeled around the event with the
+victim marked, and records a good / not good verdict; see annotate/review.py.
+
 Times: the manifest stores event and trim times in the source-video timeline.
 For clips downloaded as a section, the local file starts at start_sec, so the
 UI works in file time and converts with `offset` (ClipRecord.file_offset, 0 for
@@ -50,7 +53,7 @@ from ..ingest.download import done_marker, local_path
 from ..ingest.manifest import Label, Manifest
 from ..preprocess.extract_pose import load_detections
 from ..preprocess.tiled_pose import merge_detections
-from . import count
+from . import count, review
 
 STATIC = Path(__file__).parent / "static"
 VICTIM_KINDS = ("onset", "last_seen", "extra")
@@ -157,6 +160,8 @@ def create_app(
     detections_dir: Path = Path("data/detections"),
     blocklist: Blocklist | None = None,
     count_path: Path = count.COUNT_PATH,
+    claude_path: Path = review.CLAUDE_PATH,
+    review_path: Path = review.REVIEW_PATH,
 ) -> Flask:
     """Build the labeler app around one manifest file.
 
@@ -165,6 +170,8 @@ def create_app(
         detections_dir: raw tiled detections (for the optional box overlay).
         blocklist: URL blocklist for clip deletion (default: the project blocklist).
         count_path: swimmer-count label file for the Swimmer count tab.
+        claude_path: list of Claude-labeled clips (read only), for the Review tab.
+        review_path: review verdicts written by the Review tab.
     Returns:
         The Flask app.
     """
@@ -351,6 +358,50 @@ def create_app(
             data["frames"][i].update(points)
             count.save(data, count_path)
         return jsonify({"ok": True})
+
+    # ------------------------------------------------------------ review tab
+
+    @app.get("/review")
+    def review_page():
+        return send_file(STATIC / "review.html")
+
+    @app.get("/api/review")
+    def review_list():
+        claude = review.load(claude_path)
+        verdicts = review.load(review_path)
+        records = {r.clip_id: r for r in manifest.load()}
+        rows = []
+        for clip_id, info in claude.items():  # labeling order
+            r = records.get(clip_id)
+            if r is None or not local_path(r).exists():
+                continue
+            v = verdicts.get(clip_id, {})
+            rows.append(
+                {
+                    "clip_id": clip_id,
+                    "claude_notes": info.get("notes", ""),
+                    "verdict": v.get("verdict"),
+                    "note": v.get("note", ""),
+                }
+            )
+        return jsonify(rows)
+
+    @app.post("/api/review/<clip_id>")
+    def review_save(clip_id: str):
+        if clip_id not in review.load(claude_path):
+            abort(404, f"{clip_id} was not labeled by Claude")
+        try:
+            entry = review.clean_verdict(request.get_json(force=True))
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": str(e)}), 400
+        with lock:
+            verdicts = review.load(review_path)
+            if entry is None:
+                verdicts.pop(clip_id, None)
+            else:
+                verdicts[clip_id] = entry
+            review.save(verdicts, review_path)
+        return jsonify({"ok": True, "review": entry})
 
     return app
 

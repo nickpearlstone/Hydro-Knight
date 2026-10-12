@@ -291,3 +291,70 @@ def test_offset_comes_from_the_download_window_not_from_trims(tmp_path, monkeypa
     ).test_client()
     assert client.get("/api/clip/trimmed").get_json()["offset"] == 0.0
     assert client.get("/api/clip/section").get_json()["offset"] == 14.0
+
+
+# ------------------------------------------------------------ review tab
+
+
+@pytest.fixture
+def review_env(app_env):
+    _, manifest_path, tmp_path, blocklist = app_env
+    claude = tmp_path / "labeled_by_claude.json"
+    claude.write_text(
+        json.dumps(
+            {
+                "done": {"date": "2026-10-12", "notes": "victim on the tube"},
+                "novideo": {"date": "2026-10-12", "notes": ""},
+                "gone": {"date": "2026-10-12", "notes": "not in the manifest"},
+            }
+        )
+    )
+    reviews = tmp_path / "label_reviews.json"
+    app = server.create_app(
+        manifest_path,
+        tmp_path / "detections",
+        blocklist,
+        claude_path=claude,
+        review_path=reviews,
+    )
+    return app.test_client(), reviews
+
+
+def test_review_lists_only_claude_clips_with_video(review_env):
+    client, _ = review_env
+    rows = client.get("/api/review").get_json()
+    assert [r["clip_id"] for r in rows] == ["done"]
+    assert rows[0]["claude_notes"] == "victim on the tube"
+    assert rows[0]["verdict"] is None
+
+
+def test_review_verdict_saved_listed_and_cleared(review_env):
+    client, reviews = review_env
+    r = client.post(
+        "/api/review/done", json={"verdict": "not_good", "note": " wrong kid "}
+    )
+    assert r.status_code == 200
+    saved = json.loads(reviews.read_text())["done"]
+    assert saved["verdict"] == "not_good" and saved["note"] == "wrong kid"
+    row = client.get("/api/review").get_json()[0]
+    assert (row["verdict"], row["note"]) == ("not_good", "wrong kid")
+    client.post("/api/review/done", json={"verdict": None})
+    assert "done" not in json.loads(reviews.read_text())
+
+
+def test_review_refuses_bad_verdicts_and_clips_claude_did_not_label(review_env):
+    client, reviews = review_env
+    assert client.post("/api/review/done", json={"verdict": "meh"}).status_code == 400
+    assert (
+        client.post("/api/review/done", json={"verdict": "good", "note": 5}).status_code
+        == 400
+    )
+    assert client.post("/api/review/done", json=[1]).status_code == 400
+    assert client.post("/api/review/todo", json={"verdict": "good"}).status_code == 404
+    assert not reviews.exists()
+
+
+def test_review_page_and_tab_links(review_env):
+    client, _ = review_env
+    assert b"review.js" in client.get("/review").data
+    assert b'href="/review"' in client.get("/").data
