@@ -66,6 +66,12 @@ def main() -> None:
         action="store_true",
         help="remove only click-matched victim tracks (the old behavior)",
     )
+    p.add_argument(
+        "--min-track-s",
+        type=float,
+        default=None,
+        help="also score tracks this long or longer that are shorter than a window",
+    )
     p.add_argument("--reviews", default=str(review.REVIEW_PATH))
     p.add_argument("--device", default="cpu")
     p.add_argument(
@@ -106,6 +112,7 @@ def main() -> None:
             rates=args.rates,
             exclude_clips=frozenset(rejected),
             path_fragments=not args.no_path_fragments,
+            min_track_s=args.min_track_s,
         )
         reports[seed] = rep.__dict__
         n_frag = sum(len(v) for v in rep.path_fragments.values())
@@ -122,6 +129,7 @@ def main() -> None:
                 rep,
                 joint_velocity=args.joint_velocity,
                 rates=args.rates,
+                min_track_s=args.min_track_s,
             )
         for size in args.sizes:
             model, scaler = train_v2(
