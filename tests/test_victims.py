@@ -79,3 +79,32 @@ def test_is_labeled_needs_contact_and_both_clicks():
     assert is_labeled(_rec([onset, last]))
     assert not is_labeled(_rec([onset]))
     assert not is_labeled(_rec([onset, last], contact=None))
+
+
+def test_fragment_between_clicks_is_found_and_bystander_is_not():
+    # Victim path: (120,140) at 1 s -> (220,140) at 3 s. Track 7 is under the first
+    # click; track 11 is the same victim later (between clicks, never clicked);
+    # track 9 swims far away.
+    from hydro_knight.eval.victims import near_path_tracks
+
+    frag = track_rows(11, range(45, 76), box=(150, 100, 190, 180))
+    df = pd.concat([DF, frag])
+    clicks = [
+        {"t": 1.0, "x": 120.0, "y": 140.0, "kind": "onset"},
+        {"t": 3.0, "x": 220.0, "y": 140.0, "kind": "last_seen"},
+    ]
+    rec = _rec(clicks)
+    m = match_victim_tracks(df, rec, fps=30.0)
+    assert m.tracks == {7}
+    assert near_path_tracks(df, rec, fps=30.0, exclude=m.tracks) == {11}
+
+
+def test_fragment_needs_min_time_near_the_path():
+    from hydro_knight.eval.victims import near_path_tracks
+
+    blip = track_rows(11, range(60, 65), box=(150, 100, 190, 180))  # 5 frames < 0.3 s
+    clicks = [
+        {"t": 1.0, "x": 120.0, "y": 140.0, "kind": "onset"},
+        {"t": 3.0, "x": 220.0, "y": 140.0, "kind": "last_seen"},
+    ]
+    assert near_path_tracks(pd.concat([DF, blip]), _rec(clicks), 30.0, {7}) == set()

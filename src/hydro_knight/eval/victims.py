@@ -74,3 +74,53 @@ def match_victim_tracks(
             else:
                 out.unmatched.append(click)
     return out
+
+
+def near_path_tracks(
+    df: pd.DataFrame,
+    record,
+    fps: float,
+    exclude=frozenset(),
+    radius: float = 1.0,
+    min_s: float = 0.3,
+) -> set[int]:
+    """Tracks that follow the victim between clicks: likely victim fragments.
+
+    The tracker splits one swimmer into ~1 s pieces, and clicks ~1 s apart miss the
+    pieces between them. The victim's path is the straight line between consecutive
+    clicks (first to last click of each event); a track whose box center stays within
+    `radius` box heights of that path, at the same moment, for at least `min_s` seconds
+    is treated as the victim too. A bystander right beside the victim can be caught,
+    which costs a little normal data and never mislabels the victim as normal.
+
+    Args:
+        df: the clip's keypoint table (frame, track_id, bx1..by2).
+        record: the clip's ClipRecord (events with "victim" clicks, source seconds).
+        fps: the clip's source fps (the one tracking used).
+        exclude: track ids already known to be the victim (left out of the result).
+        radius: max distance from the path, in the track's box heights.
+        min_s: min time near the path.
+    Returns:
+        Set of track ids.
+    """
+    det = df[(df["track_id"] >= 0) & ~df["track_id"].isin(exclude)]
+    out: set[int] = set()
+    for ev in record.events:
+        clicks = sorted(ev.get("victim", []), key=lambda c: c["t"])
+        if len(clicks) < 2:
+            continue
+        t = np.array([record.to_file_time(c["t"]) for c in clicks])
+        x = np.array([c["x"] for c in clicks], float)
+        y = np.array([c["y"] for c in clicks], float)
+        sub = det[(det["frame"] >= t[0] * fps) & (det["frame"] <= t[-1] * fps)]
+        if sub.empty:
+            continue
+        ts = sub["frame"].to_numpy() / fps
+        px, py = np.interp(ts, t, x), np.interp(ts, t, y)
+        cx = (sub["bx1"] + sub["bx2"]).to_numpy() / 2
+        cy = (sub["by1"] + sub["by2"]).to_numpy() / 2
+        h = np.maximum((sub["by2"] - sub["by1"]).to_numpy(), 1e-6)
+        near = np.hypot(cx - px, cy - py) <= radius * h
+        counts = sub[near].groupby("track_id").size()
+        out |= {int(k) for k, n in counts.items() if n / fps >= min_s}
+    return out
