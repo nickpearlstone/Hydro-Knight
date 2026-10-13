@@ -137,3 +137,42 @@ for png in sorted(RUN.glob("*.png")):
 - **Tracking churn** still affects window quality — fewer, cleaner long tracks help.
 - If TCN underperforms, **STG-NF** is the SOTA upgrade (lightweight, pose-specific).
 - Rung 4 (per-swimmer resurface state machine) consumes these scores + the track ids.
+
+---
+
+## 3. One-cell batch extraction (new clips only)
+
+For extracting a small batch of new clips without touching the full dataset.
+
+**On the Mac:** the batch zip is built locally (e.g. `scratch/colab_upload/batch2_videos.zip`,
+gitignored). Upload it to Google Drive as `MyDrive/hydroknight/batch2_videos.zip`.
+
+**In Colab:** Runtime > Change runtime type > **T4 GPU**, paste this one cell, run it. It
+is safe to rerun after a disconnect: finished clips are skipped and an interrupted one
+resumes from its last 1000-frame chunk (progress is saved to Drive as it goes).
+
+```python
+BATCH = "batch2"                       # matches the zip name in Drive
+BRANCH = "colab-extract-batch2"        # the branch whose manifest lists these clips
+import os, subprocess, torch
+assert torch.cuda.is_available(), "No GPU: Runtime > Change runtime type > T4 GPU"
+from google.colab import drive; drive.mount("/content/drive")
+D = f"/content/drive/MyDrive/hydroknight"
+os.chdir("/content")
+if not os.path.exists("Hydro-Knight"):
+    !git clone -q -b {BRANCH} https://github.com/nickpearlstone/Hydro-Knight.git
+os.chdir("/content/Hydro-Knight"); !git pull -q
+!pip -q install ultralytics trackers supervision opencv-python pandas pyarrow scikit-learn tqdm
+!pip -q install -e . --no-deps
+!mkdir -p raw_local && unzip -q -n {D}/{BATCH}_videos.zip -d raw_local
+clips = sorted(f[:-4] for f in os.listdir("raw_local") if f.endswith(".mp4"))
+print(len(clips), "clips:", clips)
+!python scripts/extract_dataset.py --device 0 --clips {" ".join(clips)} --out {D}/{BATCH}_detections
+!python scripts/build_tracks.py --detections {D}/{BATCH}_detections --clips {" ".join(clips)} --out {D}/{BATCH}_keypoints
+!cd {D} && zip -q -r -0 {BATCH}_results.zip {BATCH}_detections {BATCH}_keypoints
+print("DONE: download MyDrive/hydroknight/" + BATCH + "_results.zip")
+```
+
+**Back on the Mac:** download `MyDrive/hydroknight/batch2_results.zip` from Drive and put
+it in the repo's `scratch/colab_upload/` folder. Then unpack it into `data/detections/`
+and `data/keypoints_tiled/` (both gitignored).
