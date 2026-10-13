@@ -100,9 +100,10 @@ def cmd_search(args) -> None:
     known |= {r.source_url for r in Manifest(MANIFEST).load()}
     block = Blocklist()
     found = []
-    for ch in collect.DEFAULT_CHANNELS:
-        found += [("channel", m) for m in collect.fetch_channel_videos(ch)]
-    for q in QUERIES:
+    if not args.queries:
+        for ch in collect.DEFAULT_CHANNELS:
+            found += [("channel", m) for m in collect.fetch_channel_videos(ch)]
+    for q in args.queries or QUERIES:
         time.sleep(collect.QUERY_SLEEP_SEC)
         found += [
             (f"search: {q}", m)
@@ -257,6 +258,7 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("search")
     s.add_argument("--per-query", type=int, default=15)
+    s.add_argument("--queries", nargs="+", help="search these instead of the defaults")
     sub.add_parser("next")
     f = sub.add_parser("fetch")
     f.add_argument("id")
