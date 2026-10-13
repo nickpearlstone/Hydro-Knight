@@ -89,7 +89,7 @@ def download_clip(
         "--output",
         str(out_path),
         "--format",
-        "bestvideo[ext=mp4][height<=1080]/bestvideo[height<=1080]/136/135/134",  # mp4 video-only up to 1080p
+        "bestvideo[ext=mp4][height<=1080]/bestvideo[height<=1080]/136/135/134/best[ext=mp4][height<=1080]",  # mp4 video-only up to 1080p; last: combined mp4 (Dailymotion, Vimeo HLS)
         "--js-runtimes",
         "node",  # use installed Node to run YouTube's JS
         # YouTube's upgraded "n challenge" now needs yt-dlp's remote EJS solver
