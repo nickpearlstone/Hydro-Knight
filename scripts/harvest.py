@@ -170,6 +170,10 @@ def _download(rec) -> bool:
 def cmd_fetch(args) -> None:
     rows = _load()
     row = _find(rows, args.id)
+    if row["status"] != "pending":
+        raise SystemExit(
+            f"{args.id} is {row['status']}; only pending candidates are fetched"
+        )
     rec = _record(row)
     ok = local_path(rec).exists() or _download(rec)
     if not ok:
