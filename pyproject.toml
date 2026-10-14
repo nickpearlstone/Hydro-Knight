@@ -10,7 +10,7 @@ license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 dependencies = [
     # --- Data collection ---
-    "yt-dlp>=2024.1.1",        # YouTube metadata search and video download
+    "yt-dlp[curl-cffi]>=2026.8.19",  # video search + download; curl-cffi lets it reach Dailymotion
     "certifi>=2024.0.0",       # CA bundle for SSL verification (yt-dlp HTTPS)
     # --- Annotation tool ---
     "opencv-python>=4.9.0",    # video frame reading / drawing

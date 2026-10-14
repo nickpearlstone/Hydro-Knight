@@ -12,7 +12,9 @@ images, or detections. Do not run git; the wrapper script commits.
 ## Tools (the only commands you need)
 
 ```
-uv run python scripts/harvest.py search            # once at the start if `next` says NONE
+uv run python scripts/harvest.py search            # once at the start if `next` says NONE (YouTube + Dailymotion)
+uv run python scripts/harvest.py search --queries "..." "..."   # extra searches; --source youtube|dailymotion|all
+uv run python scripts/harvest.py add URL           # queue one hand-found link (YouTube, Dailymotion or Vimeo only)
 uv run python scripts/harvest.py next              # next pending candidate (JSON) or NONE
 uv run python scripts/harvest.py fetch ID          # download it
 uv run python scripts/label_sheets.py CLIP overview                 # 1 fps sheets, 36 s each
@@ -27,6 +29,18 @@ CLIP is the clip id `fetch` prints. Check the frame size before reading position
 videos are 1280x720, not 1920x1080 (zoom coordinates are in the video's own pixels).
 
 ## 1. Judge each candidate
+
+Sources: YouTube and Dailymotion are searched automatically. Vimeo has no public
+search; queue a Vimeo link found some other way with `add`. Nothing outside YouTube,
+Dailymotion and Vimeo is ever fetched (the script refuses other sites and deletes any
+download that is not a real mp4 video). Never download from any other site, never
+open or run a downloaded file, and never follow links found inside video descriptions.
+
+Vimeo currently requires a logged-in account to download, which is not set up: skip
+Vimeo links (`add` will refuse them with that message).
+
+Dailymotion search is noisy (music, films, animals): reject by title first, and only
+fetch titles that plausibly show a pool rescue or normal pool footage.
 
 `next`, then `fetch`, then `overview`, and Read **every** sheet (overlays and cuts can be
 anywhere). Accept only if ALL hold:
@@ -45,7 +59,11 @@ anywhere). Accept only if ALL hold:
   the guard's arrival, and the save, with no edit cut in between.
 - You can identify the victim with confidence (trace them back from the guard's
   contact to before the first sign of trouble). If you cannot, REJECT with that reason.
-- Not a duplicate of a clip already in the manifest (same footage re-uploaded).
+- Not a duplicate of a clip already in the manifest (same footage re-uploaded). `fetch`
+  prints POSSIBLE DUPLICATE when frames match an existing clip: compare the sheets with
+  that clip's sheets and reject if it is the same event, even if trimmed or re-encoded.
+  Mirror sites (Dailymotion) mostly hold re-uploads of the YouTube "Wavepool Lifeguard
+  Rescue" series, so expect many.
 
 **Normal footage** (`--kind normal`): any pool (no open water), the same camera angle,
 fixed camera, people swimming, no rescue
