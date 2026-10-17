@@ -133,26 +133,75 @@ was tested with and without its optional NMS step.
 Reproduce: `uv run python scripts/benchmark_pose.py run` (and `sweep`). Labels:
 [`pose_bench_gt.json`](../data/annotations/pose_bench_gt.json).
 
-## 5. Second model (v2): victim separation and model size
+## 5. Second model (v2): above chance at ranking victims, no catches
+
+**Bottom line.** At false-alarm rates a lifeguard could work with, the v2 model catches
+no drownings on held-out clips, and neither does a random scorer. It does rank the
+victim as more unusual than most other swimmers, which is above chance, but the
+signal is far too weak to raise an alarm.
 
 **Setup.** 46 labeled rescue clips (51 labeled, 5 left out because a review found the
 wrong victim clicked). Each swimmer's track becomes a 30 fps series of 58 features per
 step: pose relative to the box (scaled by box height), all 17 keypoint confidences,
-box confidence, a detected flag, box shape and size, and box speed. The model is a
-dilated TCN autoencoder trained on 3 s windows of non-victim swimmers only.
+box confidence, a detected flag, box shape and size, and box speed (capped at 3 box
+heights per second). The model is a dilated TCN autoencoder (small, 35k parameters)
+trained on 3 s windows of non-victim swimmers only. Clips are split whole into train
+and test; each of 3 seeds sets both the split and the initialization. Tracks of at
+least 1 s are scored.
 
-Victim tracks are removed from the normal data: those under a victim click, plus
-"path fragments" (tracks that stay within one box height of the line between clicks
-for at least 0.3 s, because the tracker splits one swimmer into short pieces).
+Victim tracks are removed from the normal data and scored separately: tracks under a
+victim click, plus "path fragments" (tracks that stay within one box height of the line
+between clicks for at least 0.3 s, because the tracker splits one swimmer into short
+pieces).
 
-**Score.** Clips are split whole into train and test. On the test clips, every window
-gets an anomaly score (reconstruction error). The headline number is ROC-AUC between
-victim windows inside the drowning (onset to guard contact) and every other swimmer's
-windows. Random scores give about 0.50. Each setting ran with 3 seeds; a seed sets
-both the clip split and the initialization.
+**Detection.** A catch is an alarm on the victim's own track between drowning onset
+and guard contact. Every alarm episode on any other track is a false alarm. Caught
+rescues out of 25 held-out rescues (8 + 11 + 6 over the 3 seeds), at the best
+threshold that stays within each false-alarm budget:
 
-**Box speed features.** Box speed is mostly tracker jitter (99th percentile about 7
-box heights per second, maximum above 100). Medium model:
+| False alarms per hour, at most | 120 | 240 | 1,000 | 2,000 | 5,000 |
+|---|---|---|---|---|---|
+| v2 model | 0 | 0 | 2 | 9 | 13 |
+| Random scores | 0 | 0 | 1 | 2 | 3 |
+
+The model beats random only at thousands of false alarms per hour. False alarms are
+counted on the rescue clips themselves (about 3 to 5 minutes of footage per seed),
+since there is no long normal footage yet.
+
+**Ranking.** Two numbers measure whether victim moments score higher than everyone
+else's, regardless of any alarm threshold:
+
+- ROC-AUC between victim windows (onset to contact) and all other windows: **0.83**
+  (seeds 0.88 / 0.74 / 0.86), random 0.50.
+- Per-clip rank: the share of a clip's other windows scoring below the victim's best
+  window. Median **0.97**, random 0.90. Random is high because it takes the best of
+  several victim windows.
+
+A high rank is still far from an alarm. In a clip ranked 0.975, the victim's best
+moment was outscored by 157 moments from 25 other swimmers. Victims peak at about 0.8
+to 0.9, and the alarm threshold for 120 false alarms per hour sits at 2 to 4.
+
+**Lifeguards counted as victims.** Watching scores drawn on the video showed that in
+the best-ranked clip, the "victim" tracks were the lifeguard filming in the
+foreground: boxes about 950 px tall among 50 px swimmers. A box that contains the
+victim click always won, and the path-fragment radius grows with box size. The matcher
+now rejects any box more than 3 times taller than the swimmers near the click, either
+at the click or as its track's median over its whole life. Before the fix, real victim
+tracks were at most 2.4 times their neighbors and the wrong ones were 4 to 17 times.
+The fix removed lifeguard or merged boxes from 6 clips.
+
+| Run (small, 3 seeds) | AUC | Rescues caught at 240 FA/h or fewer |
+|---|---|---|
+| Before the fix | 0.846 | 1 of 25 (the lifeguard) |
+| Same models, fixed matcher | 0.829 | 0 of 25 |
+| Retrained with the fixed matcher | 0.829 | 0 of 25 |
+
+**Comparing settings (before the matcher fix).** These runs compare feature and size
+choices by AUC, which is fine for choosing between settings, though the absolute
+values are about 0.02 too high.
+
+Box speed is mostly tracker jitter (99th percentile about 7 box heights per second,
+maximum above 100). Medium model:
 
 | Box speed | AUC, seeds 0 / 1 / 2 | Mean |
 |---|---|---|
@@ -160,25 +209,25 @@ box heights per second, maximum above 100). Medium model:
 | Capped at 3 per second | 0.931 / 0.746 / 0.875 | 0.851 |
 | Removed | 0.887 / 0.726 / 0.854 | 0.822 |
 
-**Model size.** Box speed capped:
+Model size, box speed capped:
 
 | Size | Parameters | AUC, seeds 0 / 1 / 2 | Mean AUC | Held-out normal error (median) |
 |---|---|---|---|---|
-| Small | 35k | 0.914 / 0.774 / 0.871 | **0.853** | 0.276 |
+| Small | 35k | 0.914 / 0.774 / 0.871 | 0.853 | 0.276 |
 | Medium | 122k | 0.931 / 0.746 / 0.875 | 0.851 | 0.225 |
 | Large | 450k | 0.904 / 0.757 / 0.891 | 0.850 | 0.180 |
 
 **Takeaways**
 
-- The model separates victims from other swimmers well above chance (about 0.85 vs
-  0.50).
-- Larger models reconstruct normal swimming better, and all three separate victims
-  equally well. The small model is the default: same separation, 13 times fewer parameters.
-- Capping box speed costs nothing; removing it costs a little in every split.
-- The test split moves AUC from 0.75 to 0.93, far more than any setting. Each split
-  has only 4 to 7 test clips with a scorable victim, so single numbers are not precise.
-- Only victims tracked for at least 3 s straight can be scored, so victims the tracker
-  keeps losing are not in these numbers.
+- No catches at usable false-alarm rates. Detection results lead from now on, with
+  ranking numbers as a secondary check.
+- Watching scores on video is part of evaluation. It found the lifeguard problem, and
+  that in several of the clips watched the victim has no detection box for much of the
+  drowning, and no model built on pose tracks can score a swimmer it never sees.
+- Larger models reconstruct normal swimming better without ranking victims any better.
+- The test split moves AUC from 0.74 to 0.93, far more than any setting. Each split has
+  only 6 to 11 test clips, so single numbers are not precise.
 
-Reproduce: `uv run python scripts/train_v2.py --sizes small medium large --seeds 0 1 2
---rates capped --device mps`.
+Reproduce: `uv run python scripts/train_v2.py --sizes small --seeds 0 1 2 --rates capped
+--min-track-s 1.0 --detection --device mps --out runs/v2_ckpt_after`. Model weights are
+saved per seed as `model_small_s<seed>.pt`; `--load-dir` re-scores a saved run.

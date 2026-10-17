@@ -77,3 +77,17 @@ def test_constant_feature_gets_unit_scale_not_a_blowup():
 
     mean, std = fit_scaler(_tiny_set())
     assert std[52] == 1.0 and np.all(std > 1e-3)
+
+
+def test_checkpoint_round_trip_scores_identically(tmp_path):
+    from hydro_knight.models.tcn_ae_v2 import load_checkpoint, save_checkpoint
+
+    ws = _tiny_set()
+    model, scaler = train_v2(ws, "small", steps=3, batch=16)
+    path = tmp_path / "m.pt"
+    save_checkpoint(path, model, scaler, {"rates": "capped"})
+    loaded, scaler2, meta = load_checkpoint(path)
+    assert meta == {"rates": "capped"}
+    np.testing.assert_allclose(
+        score_v2(model, ws, scaler), score_v2(loaded, ws, scaler2), rtol=1e-6
+    )

@@ -224,3 +224,38 @@ def score_v2(
             ).cpu()
         )
     return torch.cat(out).numpy() if out else np.empty(0, np.float32)
+
+
+def save_checkpoint(path, model: TCNAutoencoderV2, scaler, meta: dict | None = None):
+    """Write weights, architecture, feature scaler and run metadata to one file.
+
+    Args:
+        path: output file (e.g. runs/<name>/model_small_s0.pt).
+        model: a trained TCNAutoencoderV2.
+        scaler: the (mean, std) arrays train_v2 returned.
+        meta: anything needed to score with the model again (feature options, split).
+    """
+    torch.save(
+        {
+            "state_dict": model.state_dict(),
+            "arch": {
+                "n_feat": model.out.out_channels,
+                "width": model.out.in_channels,
+                "bottleneck": model.squeeze[-1].out_channels,
+                "window": model.window,
+            },
+            "scaler": [np.asarray(scaler[0]), np.asarray(scaler[1])],
+            "meta": meta or {},
+        },
+        path,
+    )
+
+
+def load_checkpoint(path, device="cpu"):
+    """Inverse of save_checkpoint: returns (model in eval mode, scaler, meta)."""
+    ck = torch.load(path, map_location=device, weights_only=False)
+    model = TCNAutoencoderV2(**ck["arch"]).to(device)
+    model.load_state_dict(ck["state_dict"])
+    model.eval()
+    mean, std = ck["scaler"]
+    return model, (mean.astype(np.float32), std.astype(np.float32)), ck["meta"]

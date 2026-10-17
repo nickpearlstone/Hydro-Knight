@@ -108,3 +108,53 @@ def test_fragment_needs_min_time_near_the_path():
         {"t": 3.0, "x": 220.0, "y": 140.0, "kind": "last_seen"},
     ]
     assert near_path_tracks(pd.concat([DF, blip]), _rec(clicks), 30.0, {7}) == set()
+
+
+# A crowd of 80-px swimmers around y=140, plus a lifeguard in the foreground whose
+# 900-px box covers the victim clicks (the 7096dfde4791 failure).
+CROWD = pd.concat(
+    [
+        track_rows(20 + i, range(0, 90), box=(400 + 60 * i, 100, 440 + 60 * i, 180))
+        for i in range(4)
+    ]
+)
+GUARD = track_rows(99, range(0, 90), box=(0, 0, 600, 900))
+
+
+def test_oversized_box_containing_the_click_is_not_the_victim():
+    click = {"t": 1.0, "x": 120.0, "y": 140.0, "kind": "onset"}
+    m = match_victim_tracks(pd.concat([DF, CROWD, GUARD]), _rec([click]), fps=30.0)
+    assert m.tracks == {7}
+    assert m.oversize == {99}
+
+
+def test_oversized_box_alone_leaves_the_click_unmatched():
+    # the victim itself was not detected: the guard must not stand in for it
+    click = {"t": 1.0, "x": 120.0, "y": 140.0, "kind": "onset"}
+    m = match_victim_tracks(pd.concat([CROWD, GUARD]), _rec([click]), fps=30.0)
+    assert m.tracks == set() and m.unmatched == [click]
+
+
+def test_oversized_box_along_the_path_is_not_a_fragment():
+    from hydro_knight.eval.victims import near_path_tracks
+
+    clicks = [
+        {"t": 1.0, "x": 120.0, "y": 140.0, "kind": "onset"},
+        {"t": 3.0, "x": 220.0, "y": 140.0, "kind": "last_seen"},
+    ]
+    frag = track_rows(11, range(45, 76), box=(150, 100, 190, 180))
+    df = pd.concat([DF, CROWD, GUARD, frag])
+    assert near_path_tracks(df, _rec(clicks), 30.0, {7}) == {11}
+
+
+def test_track_that_is_oversized_most_of_its_life_is_not_the_victim():
+    # the guard's box shrinks to swimmer size only at the click (e.g. crouching)
+    click = {"t": 2.0, "x": 120.0, "y": 140.0, "kind": "last_seen"}
+    guard = pd.concat(
+        [
+            track_rows(99, range(0, 55), box=(0, 0, 600, 900)),
+            track_rows(99, range(55, 65), box=(100, 100, 140, 180)),
+        ]
+    )
+    m = match_victim_tracks(pd.concat([CROWD, guard]), _rec([click]), fps=30.0)
+    assert m.tracks == set() and 99 in m.oversize
