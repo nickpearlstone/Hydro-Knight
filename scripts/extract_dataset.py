@@ -13,6 +13,8 @@ Usage:
     uv run python scripts/extract_dataset.py --device 0                # full run (GPU)
     uv run python scripts/extract_dataset.py --clips b4b2db5ffb48 --max-frames 50   # smoke test
     uv run python scripts/extract_dataset.py --out /content/drive/MyDrive/hydroknight/detections
+    uv run python scripts/extract_dataset.py --conf 0.05 --target-fps 30 --stop-after-contact 5 \
+        --out data/detections_c05      # low floor, 30 fps, stop 5 s after guard contact
 """
 
 from __future__ import annotations
@@ -48,6 +50,19 @@ def main() -> None:
         "--conf", type=float, default=0.25, help="detection confidence floor"
     )
     ap.add_argument("--max-frames", type=int, default=None, help="debugging only")
+    ap.add_argument(
+        "--target-fps",
+        type=float,
+        default=None,
+        help="process every round(fps / target)-th frame (default: every frame)",
+    )
+    ap.add_argument(
+        "--stop-after-contact",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="stop this long after guard contact (clips with no contact run to the end)",
+    )
     args = ap.parse_args()
     warnings.simplefilter("ignore")
 
@@ -71,6 +86,14 @@ def main() -> None:
     device = int(args.device) if args.device and args.device.isdigit() else args.device
     failed = []
     for i, (r, video) in enumerate(todo, 1):
+        cap = cv2.VideoCapture(str(video))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        cap.release()
+        step = max(1, round(fps / args.target_fps)) if args.target_fps else 1
+        stop = None
+        contact = next((e.get("contact") for e in r.events if e.get("contact")), None)
+        if args.stop_after_contact is not None and contact is not None:
+            stop = round((r.to_file_time(contact) + args.stop_after_contact) * fps)
         try:
             meta = extract_raw(
                 video,
@@ -79,6 +102,8 @@ def main() -> None:
                 conf=args.conf,
                 device=device,
                 max_frames=args.max_frames,
+                frame_step=step,
+                stop_frame=stop,
             )
         except (
             VideoReadError

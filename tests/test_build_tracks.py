@@ -20,6 +20,7 @@ from hydro_knight.preprocess.build_tracks import (
     build_tracks,
     read_provenance,
     track_detections,
+    tracking_fps,
 )
 from hydro_knight.preprocess.extract_pose import DET_COLUMNS, write_chunk
 
@@ -117,3 +118,54 @@ def test_build_tracks_writes_columns_boxes_and_provenance(tmp_path):
     assert np.allclose(back[["bx1", "by1", "bx2", "by2"]].iloc[-1], SWIMMER)
     prov = read_provenance(out)
     assert prov["track_settings"]["merge"] == "ios" and prov["clip_id"] == "clip"
+
+
+def test_tracking_fps_divides_by_the_extraction_frame_step():
+    assert tracking_fps({"video": {"fps": 60.0}, "settings": {"frame_step": 2}}) == 30.0
+    assert (
+        tracking_fps({"video": {"fps": 59.94}, "settings": {}}) == 59.94
+    )  # older folder
+
+
+def test_short_submersion_survives_at_every_second_frame():
+    # 60 fps video processed at frame_step 2: frames 0, 2, 4, ... The swimmer is gone from
+    # frame 40 to 130 (1.5 s real time). At the tracking rate (30 updates/s) a 2 s buffer is
+    # 60 updates and the id holds; at the raw fps it would be 120 updates either way, so this
+    # pins that the rate passed in is the one the tracker counts in.
+    seen = list(range(0, 40, 2)) + list(range(130, 160, 2))
+    rows = [_det(f, SWIMMER) for f in seen]
+    frames = pd.DataFrame({"frame": range(0, 160, 2), "n_dets": 0, "scene_diff": 0.0})
+    s2 = TrackSettings(lost_track_seconds=2.0)
+    held = track_detections(_dets(rows), frames, fps=30, settings=s2)
+    assert held.loc[held.track_id >= 0, "track_id"].nunique() == 1
+    s1 = TrackSettings(lost_track_seconds=1.0)  # 30 updates < 45 missing updates
+    split = track_detections(_dets(rows), frames, fps=30, settings=s1)
+    assert split.loc[split.track_id >= 0, "track_id"].nunique() == 2
+
+
+def test_same_crop_conf_drops_faint_copy_inside_one_tile():
+    faint = [
+        100.0,
+        100.0,
+        140.0,
+        150.0,
+    ]  # top half of SWIMMER, same tile, low confidence
+    rows = [
+        r for f in range(10) for r in (_det(f, SWIMMER, 0.9, 3), _det(f, faint, 0.1, 3))
+    ]
+    off = track_detections(
+        _dets(rows),
+        _frames(10),
+        30,
+        TrackSettings(activation_threshold=0.05, high_conf_threshold=0.05),
+    )
+    on = track_detections(
+        _dets(rows),
+        _frames(10),
+        30,
+        TrackSettings(
+            activation_threshold=0.05, high_conf_threshold=0.05, same_crop_conf=0.25
+        ),
+    )
+    assert off.loc[off.track_id >= 0, "track_id"].nunique() == 2
+    assert on.loc[on.track_id >= 0, "track_id"].nunique() == 1

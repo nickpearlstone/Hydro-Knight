@@ -33,6 +33,18 @@ def main() -> None:
     )
     ap.add_argument("--lost-track-seconds", type=float, default=None)
     ap.add_argument(
+        "--activation", type=float, default=None, help="confidence to start a track"
+    )
+    ap.add_argument(
+        "--high-conf", type=float, default=None, help="first-round matching confidence"
+    )
+    ap.add_argument(
+        "--same-crop-conf",
+        type=float,
+        default=None,
+        help="merge same-tile overlaps below this confidence (for low-floor extractions)",
+    )
+    ap.add_argument(
         "--overwrite", action="store_true", help="replace existing keypoint files"
     )
     args = ap.parse_args()
@@ -40,6 +52,12 @@ def main() -> None:
     settings = LEGACY if args.legacy else TrackSettings()
     if args.lost_track_seconds is not None:
         settings = replace(settings, lost_track_seconds=args.lost_track_seconds)
+    if args.activation is not None:
+        settings = replace(settings, activation_threshold=args.activation)
+    if args.high_conf is not None:
+        settings = replace(settings, high_conf_threshold=args.high_conf)
+    if args.same_crop_conf is not None:
+        settings = replace(settings, same_crop_conf=args.same_crop_conf)
 
     folders = sorted(
         p for p in Path(args.detections).iterdir() if (p / "meta.json").exists()

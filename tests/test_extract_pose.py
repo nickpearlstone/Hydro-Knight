@@ -202,3 +202,48 @@ def test_video_that_stops_early_is_not_marked_complete(monkeypatch, tmp_path):
     monkeypatch.setattr(extract_pose.cv2.VideoCapture, "read", read_first_50)
     with pytest.raises(VideoReadError, match="read 50 of 100"):
         extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=20)
+
+
+def test_frame_step_processes_every_nth_frame(monkeypatch, tmp_path):
+    _install_fakes(monkeypatch, 7)
+    meta = extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", frame_step=2)
+    _, dets, frames = load_detections(tmp_path / "clip")
+    assert meta["complete"] and meta["frames_processed"] == 7
+    assert frames["frame"].tolist() == [0, 2, 4, 6]
+    assert sorted(dets["frame"].tolist()) == [0, 2, 4, 6]
+    assert frames["scene_diff"].iloc[1:].notna().all()
+
+
+def test_stop_frame_ends_early_and_still_counts_as_complete(monkeypatch, tmp_path):
+    _install_fakes(monkeypatch, 10)
+    meta = extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", stop_frame=6)
+    _, _, frames = load_detections(tmp_path / "clip")
+    assert meta["complete"] and frames["frame"].tolist() == list(range(6))
+
+
+def test_resume_with_frame_step_keeps_the_same_frames(monkeypatch, tmp_path):
+    _install_fakes(monkeypatch, 10, crash_at=6)
+    with pytest.raises(RuntimeError):
+        extract_raw(
+            tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=2, frame_step=2
+        )
+    _install_fakes(monkeypatch, 10)
+    extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=2, frame_step=2)
+    _, dets, frames = load_detections(tmp_path / "clip")
+    assert frames["frame"].tolist() == [0, 2, 4, 6, 8]
+    assert sorted(dets["frame"].tolist()) == [0, 2, 4, 6, 8]
+
+
+def test_folder_from_before_frame_step_still_resumes(monkeypatch, tmp_path):
+    _install_fakes(monkeypatch, 6, crash_at=4)
+    with pytest.raises(RuntimeError):
+        extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=2)
+    path = tmp_path / "clip" / "meta.json"
+    meta = json.loads(path.read_text())
+    for k in ("frame_step", "stop_frame"):  # an older meta.json has neither key
+        meta["settings"].pop(k)
+    path.write_text(json.dumps(meta))
+    _install_fakes(monkeypatch, 6)
+    assert extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=2)[
+        "complete"
+    ]
