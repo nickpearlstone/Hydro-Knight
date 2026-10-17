@@ -15,7 +15,10 @@ Each seed picks its own whole-clip train/test split and initialization. For ever
      number for random scores.
 Clips whose labels a review marked "not_good" (data/annotations/label_reviews.json) are
 left out until fixed, and Claude-labeled clips with no review verdict yet are held out
-until reviewed. Writes runs/<out>/summary.json.
+until reviewed. Writes runs/<out>/summary.json and one checkpoint per (size, seed),
+runs/<out>/model_<size>_s<seed>.pt (load with tcn_ae_v2.load_checkpoint).
+--load-dir skips training and re-scores the checkpoints of an earlier run, so an
+evaluation change can be measured on the exact same models.
 """
 
 from __future__ import annotations
@@ -33,7 +36,14 @@ from hydro_knight.eval.separation import victim_separation
 from hydro_knight.features.dataset_v2 import build_datasets, victim_windows
 from hydro_knight.features.track_series import RATE_MODES
 from hydro_knight.ingest.manifest import Manifest
-from hydro_knight.models.tcn_ae_v2 import SIZES, n_params, score_v2, train_v2
+from hydro_knight.models.tcn_ae_v2 import (
+    SIZES,
+    load_checkpoint,
+    n_params,
+    save_checkpoint,
+    score_v2,
+    train_v2,
+)
 
 
 def _clips_of(ws) -> np.ndarray:
@@ -86,6 +96,11 @@ def main() -> None:
         help="also report recall / time to alarm / false alarms per hour (eval/detection_v2.py)",
     )
     p.add_argument("--fa-targets", nargs="+", type=float, default=[30, 60, 120, 240])
+    p.add_argument(
+        "--load-dir",
+        default=None,
+        help="re-score model_<size>_s<seed>.pt from this earlier run instead of training",
+    )
     p.add_argument("--mlflow", action="store_true")
     p.add_argument(
         "--smoke", action="store_true", help="3 unlabeled clips, 30 steps; not a result"
@@ -93,6 +108,13 @@ def main() -> None:
     args = p.parse_args()
     if args.smoke and args.mlflow:
         raise SystemExit("--smoke runs are never logged to MLflow")
+    if (
+        args.load_dir
+        and Path(args.load_dir).resolve() == Path(args.out or "").resolve()
+    ):
+        raise SystemExit(
+            "--load-dir and --out must differ (re-scoring never overwrites)"
+        )
     if args.smoke:
         print("SMOKE TEST: unlabeled clips, victims NOT removed. Not a result.")
         args.steps = 30
@@ -147,16 +169,38 @@ def main() -> None:
                 min_track_s=args.min_track_s,
             )
         for size in args.sizes:
-            model, scaler = train_v2(
-                train,
-                size,
-                args.steps,
-                args.batch,
-                args.lr,
-                seed,
-                args.coord_weight,
-                args.device,
-            )
+            if args.load_dir:
+                model, scaler, _ = load_checkpoint(
+                    Path(args.load_dir) / f"model_{size}_s{seed}.pt", args.device
+                )
+                model.loss_history_ = [float("nan")]
+            else:
+                model, scaler = train_v2(
+                    train,
+                    size,
+                    args.steps,
+                    args.batch,
+                    args.lr,
+                    seed,
+                    args.coord_weight,
+                    args.device,
+                )
+                Path(args.out).mkdir(parents=True, exist_ok=True)
+                save_checkpoint(
+                    Path(args.out) / f"model_{size}_s{seed}.pt",
+                    model,
+                    scaler,
+                    {
+                        "size": size,
+                        "seed": seed,
+                        "rates": args.rates,
+                        "joint_velocity": args.joint_velocity,
+                        "coord_weight": args.coord_weight,
+                        "min_track_s": args.min_track_s,
+                        "train_clips": rep.used_train,
+                        "test_clips": rep.used_test,
+                    },
+                )
             held = score_v2(model, test, scaler, args.coord_weight, device=args.device)
             row = {
                 "size": size,

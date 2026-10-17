@@ -73,12 +73,14 @@ evaluation was rebuilt around the victim's own track, using clicked victim posit
 and the moment the lifeguard makes contact, with a random baseline reported next to
 every result.
 
-**4. The second model separates victims from other swimmers.** On held-out clips,
-victim moments between drowning onset and guard contact score as more unusual than
-everyone else's with a ROC-AUC of about 0.85, where random scores give 0.50. Three model
-sizes (35k to 450k parameters) separate victims equally well, so the smallest is the
-default. Results vary from 0.75 to 0.93 depending on which clips are held out, because
-each test split has only 4 to 7 clips with a scorable victim.
+**4. The second model ranks victims above chance but catches none.** On held-out
+clips, at 240 false alarms per hour or fewer, the autoencoder caught 0 of 25 rescues,
+the same as random scores. It beats random only at thousands of false alarms per hour.
+Victim moments do score as more unusual than other swimmers' (ROC-AUC 0.83, random
+0.50), but far below any usable alarm threshold. Drawing the scores on the video also
+showed that the best-ranked "victim" was the lifeguard filming in the foreground, and
+that victims often have no detection box for much of the drowning. The victim matcher
+now rejects oversized boxes, and detection results come first in every report.
 
 ## Project status
 
@@ -92,8 +94,11 @@ each test split has only 4 to 7 clips with a scorable victim.
   all keypoint confidences, a detected flag, and box shape, size, and speed (58 values
   per step). Missed frames stay in as "not detected" instead of being dropped
 - A dilated temporal convolutional (TCN) autoencoder in three sizes
-- Victim-based scoring: victim windows from onset to guard contact against every other
-  swimmer, on whole held-out clips, next to a random baseline
+- Victim-based scoring on whole held-out clips: catches (an alarm on the victim's own
+  track between onset and guard contact) against false alarms per hour, plus victim vs
+  other-swimmer ranking, each next to a random baseline
+- Saved model weights for every run, and a renderer that draws each swimmer's score on
+  the video for review
 - An earlier evaluation harness that works with any detector (per-event recall,
   detection delay, false alarms per hour, ROC/PR curves)
 - A pose-model benchmark scored against hand-counted swimmers

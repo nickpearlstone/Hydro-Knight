@@ -7,6 +7,11 @@ clip's own clock, and matched to a confirmed track near that frame: a box contai
 the click wins (closest center first), otherwise the nearest box center within
 `radius` box heights. A click with nothing nearby means the victim was not detected
 at that moment; it is reported, never forced onto another swimmer.
+
+Boxes far larger than the swimmers around the click (`max_ratio` times the local
+typical height) are never the victim: a foreground lifeguard or a merged crowd box can
+contain the click, and before this rule it won outright (7096dfde4791's victim was
+the lifeguard's 950-px box among 50-px swimmers).
 """
 
 from __future__ import annotations
@@ -31,10 +36,43 @@ class VictimMatch:
 
     tracks: set[int] = field(default_factory=set)
     unmatched: list[dict] = field(default_factory=list)
+    oversize: set[int] = field(default_factory=set)  # rejected as too large
+
+
+def local_height(det: pd.DataFrame, frame: float, y: float, fps: float, k: int = 9):
+    """Typical box height of the swimmers near a click, or None if too few.
+
+    The median of per-track median heights over the k tracks whose centers are closest
+    to `y` within 1 s of `frame`. Per track, so a long-lived giant box counts once;
+    nearest in y, because perspective makes size depend on distance from the camera.
+    Returns None with fewer than 3 such tracks (no size check is then possible).
+    """
+    win = det[(det["frame"] - frame).abs() <= fps]
+    if win.empty:
+        return None
+    per = (
+        win.assign(h=win["by2"] - win["by1"], cy=(win["by1"] + win["by2"]) / 2)
+        .groupby("track_id")[["h", "cy"]]
+        .median()
+    )
+    if len(per) < 3:
+        return None
+    nearest = np.argsort(np.abs(per["cy"].to_numpy() - y))[:k]
+    return float(per["h"].iloc[nearest].median())
+
+
+def _track_heights(det: pd.DataFrame) -> pd.Series:
+    """Median box height of every track over its whole life."""
+    return (det["by2"] - det["by1"]).groupby(det["track_id"]).median()
 
 
 def match_victim_tracks(
-    df: pd.DataFrame, record, fps: float, frame_tol: int = 2, radius: float = 0.75
+    df: pd.DataFrame,
+    record,
+    fps: float,
+    frame_tol: int = 2,
+    radius: float = 0.75,
+    max_ratio: float = 3.0,
 ) -> VictimMatch:
     """Track ids under the record's victim clicks.
 
@@ -45,16 +83,27 @@ def match_victim_tracks(
         frame_tol: frames either side of the click's frame to search.
         radius: max distance from a box center, in box heights, when no box contains
             the click.
+        max_ratio: boxes taller than this times local_height(), at the click or as
+            their track's median over its whole life, are skipped.
     Returns:
         VictimMatch.
     """
     det = df[df["track_id"] >= 0]
+    track_h = _track_heights(det)
     out = VictimMatch()
     for ev in record.events:
         for click in ev.get("victim", []):
             frame = round(record.to_file_time(click["t"]) * fps)
             # reset_index: the table's index repeats across tracks, idxmin needs one row
             near = det[(det["frame"] - frame).abs() <= frame_tol].reset_index(drop=True)
+            ref = local_height(det, frame, click["y"], fps)
+            if ref is not None:
+                h_now = near["by2"] - near["by1"]
+                big = (
+                    np.maximum(h_now, near["track_id"].map(track_h)) > max_ratio * ref
+                ).to_numpy()
+                out.oversize |= {int(t) for t in near.loc[big, "track_id"]}
+                near = near[~big].reset_index(drop=True)
             if near.empty:
                 out.unmatched.append(click)
                 continue
@@ -83,6 +132,7 @@ def near_path_tracks(
     exclude=frozenset(),
     radius: float = 1.0,
     min_s: float = 0.3,
+    max_ratio: float = 3.0,
 ) -> set[int]:
     """Tracks that follow the victim between clicks: likely victim fragments.
 
@@ -100,6 +150,9 @@ def near_path_tracks(
         exclude: track ids already known to be the victim (left out of the result).
         radius: max distance from the path, in the track's box heights.
         min_s: min time near the path.
+        max_ratio: detections taller than this times the local typical height
+            (local_height() at each click, interpolated along the path), at that moment
+            or as their track's median, never count.
     Returns:
         Set of track ids.
     """
@@ -121,6 +174,14 @@ def near_path_tracks(
         cy = (sub["by1"] + sub["by2"]).to_numpy() / 2
         h = np.maximum((sub["by2"] - sub["by1"]).to_numpy(), 1e-6)
         near = np.hypot(cx - px, cy - py) <= radius * h
+        refs = [
+            local_height(det, ti * fps, yi, fps) for ti, yi in zip(t, y, strict=True)
+        ]
+        ok = [i for i, r in enumerate(refs) if r is not None]
+        if ok:
+            ref = np.interp(ts, t[ok], np.array([refs[i] for i in ok]))
+            th = sub["track_id"].map(_track_heights(det)).to_numpy()
+            near &= np.maximum(h, th) <= max_ratio * ref
         counts = sub[near].groupby("track_id").size()
         out |= {int(k) for k, n in counts.items() if n / fps >= min_s}
     return out
