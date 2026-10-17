@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hydro-Knight Labeler</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Hydro-Knight labeler</div>
+    <nav class="tabs" aria-label="Labeling task">
+      <a class="tab" href="/">Rescue timeline</a>
+      <a class="tab" href="/count">Swimmer count</a>
+      <a class="tab" href="/review">Review</a>
+      <a class="tab active" href="/zones" aria-current="page">Zones</a>
+    </nav>
+    <div class="nav">
+      <button id="prev" class="btn ghost" title="Previous clip">‹ Prev <kbd>←</kbd></button>
+      <span id="counter" class="counter">–</span>
+      <button id="next" class="btn ghost" title="Next clip">Next › <kbd>→</kbd></button>
+    </div>
+    <div id="saveState" class="pill">Loading…</div>
+  </header>
+
+  <main class="layout">
+    <section class="left">
+      <div class="clipline">
+        <span id="clipId" class="mono"></span>
+        <span id="clipNotes" class="muted"></span>
+      </div>
+      <div id="stage" class="stage counting">
+        <div id="zoomer" class="zoomer">
+          <img id="frame" alt="" draggable="false">
+          <canvas id="overlay"></canvas>
+        </div>
+        <div id="zoomBadge" class="zoom-badge" hidden>1.0×</div>
+      </div>
+      <div class="scrub">
+        <button id="back1s" class="btn ghost" title="Back 1 s">−1 s <kbd>,</kbd></button>
+        <input id="frameSlider" type="range" min="0" max="0" value="0" aria-label="Frame">
+        <button id="fwd1s" class="btn ghost" title="Forward 1 s">+1 s <kbd>.</kbd></button>
+        <span id="frameLabel" class="mono muted"></span>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <div class="card">
+        <h2>Draw the coverage zone</h2>
+        <p class="muted">Outline the water this camera can watch well: swimmers you could
+          judge from this view. Leave out the deck, the guard stand, and water too far
+          away to see clearly.</p>
+        <ul class="keys">
+          <li><b>Click</b> to add a corner (the shape closes itself)</li>
+          <li><b>Drag</b> a corner to move it</li>
+          <li><b>Right-click</b> a corner to remove it, <kbd>⌫</kbd> removes the last</li>
+          <li><b>Scroll</b> to zoom, drag empty space to pan</li>
+        </ul>
+      </div>
+
+      <div class="card tools">
+        <button id="movesBtn" class="btn toggle" title="Handheld or panning camera: no fixed zone">Camera moves</button>
+        <button id="clearBtn" class="btn ghost">Clear</button>
+        <button id="undoBtn" class="btn ghost">↶ Undo <kbd>⌘Z</kbd></button>
+        <button id="zoomReset" class="btn ghost">Reset zoom <kbd>0</kbd></button>
+      </div>
+
+      <div class="card">
+        <h2>Clips <span id="doneCount" class="muted"></span></h2>
+        <ul id="clipList" class="frames"></ul>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="/static/zones.js"></script>
+</body>
+</html>

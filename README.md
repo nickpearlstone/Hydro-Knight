@@ -86,8 +86,9 @@ now rejects oversized boxes, and detection results come first in every report.
 
 **Built and tested**
 - Data pipeline: a JSONL manifest of source clips, a download tool, and a browser
-  labeling app with three tabs: each rescue's timeline and where the victim is,
-  counting every swimmer on still frames, and a quick good / not good review of labels
+  labeling app with four tabs: each rescue's timeline and where the victim is,
+  counting every swimmer on still frames, a quick good / not good review of labels,
+  and each camera's coverage zone (the water it can watch well)
 - Pose extraction with YOLO11-pose, SAHI tiling, and ByteTrack, in two steps: raw
   detections on the GPU, then merging and tracking offline
 - Features: each swimmer resampled to 30 fps, with pose relative to its bounding box,
