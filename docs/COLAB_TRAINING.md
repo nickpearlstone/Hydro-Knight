@@ -140,39 +140,50 @@ for png in sorted(RUN.glob("*.png")):
 
 ---
 
-## 3. One-cell batch extraction (new clips only)
+## 3. One-cell extraction run (low confidence floor, all active clips)
 
-For extracting a small batch of new clips without touching the full dataset.
+Re-extracts every active clip (no `[HOLD` in its notes) with the low-floor settings:
+detections down to confidence 0.05, at most 30 frames per second, stopping 5 s after
+guard contact (clips with no contact yet run to the end). A 6-clip pilot showed this
+raises the share of victim clicks covered by a 2 s track from 26% to about 60%
+(details in PR #30). Expect about 10 hours of T4 time for 66 clips, usually over 2 or 3
+sessions.
 
-**On the Mac:** the batch zip is built locally (e.g. `scratch/colab_upload/batch2_videos.zip`,
-gitignored). Upload it to Google Drive as `MyDrive/hydroknight/batch2_videos.zip`.
+Needs the low-floor extraction code on `main` (PR #30) before it runs.
+
+**On the Mac:** build the video zip (gitignored folder) and upload it to Google Drive as
+`MyDrive/hydroknight/videos_active.zip`:
+
+```bash
+uv run python scripts/zip_active_videos.py
+```
 
 **In Colab:** Runtime > Change runtime type > **T4 GPU**, paste this one cell, run it. It
 is safe to rerun after a disconnect: finished clips are skipped and an interrupted one
-resumes from its last 1000-frame chunk (progress is saved to Drive as it goes).
+resumes from its last 1000-frame chunk (progress is saved to Drive as it goes). Keep the
+tab open; an idle tab is disconnected after about 90 minutes.
 
 ```python
-BATCH = "batch2"                       # matches the zip name in Drive
-BRANCH = "colab-extract-batch2"        # the branch whose manifest lists these clips
-import os, subprocess, torch
+RUN = "c05"                            # output folder prefix in Drive
+import os, torch
 assert torch.cuda.is_available(), "No GPU: Runtime > Change runtime type > T4 GPU"
 from google.colab import drive; drive.mount("/content/drive")
-D = f"/content/drive/MyDrive/hydroknight"
+D = "/content/drive/MyDrive/hydroknight"
 os.chdir("/content")
 if not os.path.exists("Hydro-Knight"):
-    !git clone -q -b {BRANCH} https://github.com/nickpearlstone/Hydro-Knight.git
+    !git clone -q https://github.com/nickpearlstone/Hydro-Knight.git
 os.chdir("/content/Hydro-Knight"); !git pull -q
 !pip -q install ultralytics trackers supervision opencv-python pandas pyarrow scikit-learn tqdm
 !pip -q install -e . --no-deps
-!mkdir -p raw_local && unzip -q -n {D}/{BATCH}_videos.zip -d raw_local
-clips = sorted(f[:-4] for f in os.listdir("raw_local") if f.endswith(".mp4"))
-print(len(clips), "clips:", clips)
-!python scripts/extract_dataset.py --device 0 --clips {" ".join(clips)} --out {D}/{BATCH}_detections
-!python scripts/build_tracks.py --detections {D}/{BATCH}_detections --clips {" ".join(clips)} --out {D}/{BATCH}_keypoints
-!cd {D} && zip -q -r -0 {BATCH}_results.zip {BATCH}_detections {BATCH}_keypoints
-print("DONE: download MyDrive/hydroknight/" + BATCH + "_results.zip")
+!mkdir -p raw_local && unzip -q -n {D}/videos_active.zip -d raw_local
+!python scripts/extract_dataset.py --device 0 --conf 0.05 --target-fps 30 --stop-after-contact 5 --out {D}/{RUN}_detections
+!python scripts/build_tracks.py --detections {D}/{RUN}_detections --out {D}/{RUN}_keypoints --same-crop-conf 0.25 --activation 0.25 --high-conf 0.25 --lost-track-seconds 2
+!cd {D} && zip -q -r -0 {RUN}_results.zip {RUN}_detections {RUN}_keypoints
+print("DONE: download MyDrive/hydroknight/" + RUN + "_results.zip")
 ```
 
-**Back on the Mac:** download `MyDrive/hydroknight/batch2_results.zip` from Drive and put
-it in the repo's `scratch/colab_upload/` folder. Then unpack it into `data/detections/`
-and `data/keypoints_tiled/` (both gitignored).
+**Back on the Mac:** download `MyDrive/hydroknight/c05_results.zip` into the repo's
+`scratch/colab_upload/` folder and unpack it into `data/detections_c05/` and
+`data/keypoints_c05/` (both gitignored). The current `data/detections/` and
+`data/keypoints_tiled/` stay as they are for comparison. Tracker settings can be rerun
+on the Mac in minutes with `scripts/build_tracks.py`; only the detections need the GPU.
