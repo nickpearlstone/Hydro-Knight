@@ -58,6 +58,9 @@ class TrackSettings:
     activation_threshold: float = 0.5
     min_consecutive_frames: int = 2
     min_iou: float = 0.1
+    # Also merge same-crop overlaps below this confidence (None = never). Needed at a low
+    # extraction floor, where YOLO adds faint copies of one person inside a tile.
+    same_crop_conf: float | None = None
 
 
 LEGACY = TrackSettings(
@@ -131,6 +134,7 @@ def track_detections(
                 mode=settings.merge,
                 iou_thresh=settings.iou_thresh,
                 ios_thresh=settings.ios_thresh,
+                same_crop_below=settings.same_crop_conf,
             )
             detections = sv.Detections(
                 xyxy=boxes_all[idx].astype(float),
@@ -163,6 +167,15 @@ def track_detections(
     return df.astype({"frame": "int64", "track_id": "int64"} | floats)
 
 
+def tracking_fps(meta: dict) -> float:
+    """Rate of the frames the tracker sees: the video fps divided by the extraction frame step.
+
+    The lost-track buffer is counted in tracker updates, so with every second frame
+    processed, 1 s of real time is fps / 2 updates.
+    """
+    return meta["video"]["fps"] / meta["settings"].get("frame_step", 1)
+
+
 def build_tracks(
     det_dir: Path, out_path: Path, settings: TrackSettings | None = None
 ) -> pd.DataFrame:
@@ -179,7 +192,7 @@ def build_tracks(
     """
     settings = settings or TrackSettings()
     meta, dets, frames = load_detections(det_dir)
-    df = track_detections(dets, frames, meta["video"]["fps"], settings)
+    df = track_detections(dets, frames, tracking_fps(meta), settings)
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

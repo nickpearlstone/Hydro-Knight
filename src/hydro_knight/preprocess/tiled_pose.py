@@ -158,6 +158,7 @@ def merge_detections(
     mode: str = "ios",
     iou_thresh: float = 0.5,
     ios_thresh: float = 0.8,
+    same_crop_below: float | None = None,
 ) -> np.ndarray:
     """Greedy merge of tile-overlap duplicates; returns the indices of detections to keep.
 
@@ -165,7 +166,10 @@ def merge_detections(
     overlaps a kept one by IoU >= iou_thresh or IoS >= ios_thresh — IoS catches the half-body box a
     tile seam produces, which sits inside the full box but has low IoU. Same-crop pairs are left
     alone: YOLO already separated them, so they are usually two real, adjacent people.
-    mode="iou" reproduces the original merge (IoU only, any crop) for comparison.
+    With same_crop_below set, a same-crop box is also dropped when its confidence is under
+    that value: at a low confidence floor YOLO emits faint near-copies of one person inside a
+    tile, which the rule above would keep. mode="iou" reproduces the original merge (IoU only,
+    any crop) for comparison.
     Args:
         boxes: (N,4) xyxy boxes in full-frame pixels.
         confs: (N,) detection confidences.
@@ -173,6 +177,8 @@ def merge_detections(
         mode: "ios" or "iou".
         iou_thresh: IoU at or above which a duplicate is dropped.
         ios_thresh: IoS at or above which a duplicate is dropped (mode="ios" only).
+        same_crop_below: also merge same-crop overlaps whose confidence is below this
+            (mode="ios" only; None = never).
     Returns:
         (K,) int array of kept indices into the inputs, highest confidence first.
     Raises:
@@ -195,8 +201,9 @@ def merge_detections(
         if mode == "iou":
             dup = iou >= iou_thresh
         else:
-            dup = (crops[rest] != crops[i]) & (
-                (iou >= iou_thresh) | (ios >= ios_thresh)
-            )
+            other = crops[rest] != crops[i]
+            if same_crop_below is not None:
+                other |= confs[rest] < same_crop_below
+            dup = other & ((iou >= iou_thresh) | (ios >= ios_thresh))
         alive[rest[dup]] = False
     return np.asarray(kept, dtype=int)

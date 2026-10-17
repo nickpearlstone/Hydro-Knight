@@ -15,7 +15,10 @@ Output, one folder per clip:
       ...                   (one numbered pair per chunk of `chunk_frames` frames)
       meta.json             video facts, settings, tile origins, versions, progress
 
-`frames` has a row for every frame read, including frames with no detections.
+`frames` has a row for every frame processed, including frames with no detections.
+With `frame_step` > 1 only every step-th frame is processed (frame numbers stay the
+video's own), and `stop_frame` ends the clip early on purpose (e.g. a few seconds after
+guard contact); both are recorded in the settings.
 That is what separates "a swimmer vanished" from "that frame was never
 processed", and it is how a finished clip is verified against the video's
 frame count — an empty keypoint file used to be indistinguishable from a clip
@@ -82,7 +85,11 @@ _SETTING_KEYS = (
     "conf",
     "include_full",
     "max_frames",
+    "frame_step",
+    "stop_frame",
 )
+# Values assumed for settings keys that older meta.json files don't have.
+_SETTING_DEFAULTS = {"frame_step": 1, "stop_frame": None}
 
 
 def _code_version() -> str | None:
@@ -208,6 +215,8 @@ def extract_raw(
     device=None,
     chunk_frames: int = 1000,
     max_frames: int | None = None,
+    frame_step: int = 1,
+    stop_frame: int | None = None,
 ) -> dict:
     """Extract raw tiled detections for one clip into `out_dir`, resuming if partly done.
 
@@ -222,8 +231,10 @@ def extract_raw(
         conf: detection confidence floor; detections below it are never saved.
         include_full: also run a whole-frame pass per frame.
         device: torch device for YOLO (e.g. 0 for the first GPU), or None.
-        chunk_frames: frames per chunk file (resume granularity).
+        chunk_frames: processed frames per chunk file (resume granularity).
         max_frames: stop after this many frames (debugging only; real runs extract full clips).
+        frame_step: process every frame_step-th frame (e.g. 2 for 30 fps from a 60 fps clip).
+        stop_frame: stop before this frame and count the clip as complete (None = to the end).
     Returns:
         The final meta dict (also written to out_dir/meta.json).
     Raises:
@@ -244,11 +255,17 @@ def extract_raw(
         "conf": conf,
         "include_full": include_full,
         "max_frames": max_frames,
+        "frame_step": frame_step,
+        "stop_frame": stop_frame,
     }
+    if frame_step < 1:
+        raise ValueError(f"frame_step must be >= 1, got {frame_step}")
 
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else None
     if meta is not None:
-        old = {k: meta["settings"].get(k) for k in _SETTING_KEYS}
+        old = {
+            k: meta["settings"].get(k, _SETTING_DEFAULTS.get(k)) for k in _SETTING_KEYS
+        }
         if old != settings:
             raise ValueError(
                 f"{out_dir} was extracted with different settings {old}; "
@@ -315,11 +332,21 @@ def extract_raw(
     total = meta["video"]["frame_count"] or None
     if max_frames is not None:
         total = max_frames
+    if stop_frame is not None:
+        total = min(total or stop_frame, stop_frame)
     bar = tqdm(total=total, initial=start, desc=f"extract {video_path.stem}")
 
     det_parts, frame_rows = [], []
     frame_idx = start
     while max_frames is None or frame_idx < max_frames:
+        if stop_frame is not None and frame_idx >= stop_frame:
+            break
+        if frame_idx % frame_step:  # skipped frame: advance without decoding a picture
+            if not cap.grab():
+                break
+            frame_idx += 1
+            bar.update(1)
+            continue
         ok, frame = cap.read()
         if not ok:
             break
@@ -348,9 +375,9 @@ def extract_raw(
         frame_idx += 1
         bar.update(1)
 
-        if (frame_idx - start) % chunk_frames == 0:
+        if len(frame_rows) >= chunk_frames:
             _flush(out_dir, meta, det_parts, frame_rows, frame_idx)
-            start, det_parts, frame_rows = frame_idx, [], []
+            det_parts, frame_rows = [], []
 
     if frame_rows:
         _flush(out_dir, meta, det_parts, frame_rows, frame_idx)
@@ -359,6 +386,8 @@ def extract_raw(
 
     # Container frame counts are estimates, so only a gap over 1% is treated as real.
     expected = meta["video"]["frame_count"]
+    if stop_frame is not None and expected:
+        expected = min(expected, stop_frame)
     short = max_frames is None and expected and frame_idx < 0.99 * expected
     if frame_idx == 0 or short:
         meta["error"] = (
@@ -370,7 +399,12 @@ def extract_raw(
     meta.pop("error", None)
     meta["complete"] = True
     meta["finished"] = datetime.now(UTC).isoformat(timespec="seconds")
-    if max_frames is None and expected and frame_idx > 1.01 * expected:
+    if (
+        max_frames is None
+        and stop_frame is None
+        and expected
+        and frame_idx > 1.01 * expected
+    ):
         meta["warning"] = f"read {frame_idx} frames but video reports {expected}"
         print(f"WARNING {video_path.name}: {meta['warning']}")
     _write_json_atomic(meta_path, meta)

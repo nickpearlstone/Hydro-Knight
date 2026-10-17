@@ -58,6 +58,20 @@ def test_ios_merge_keeps_overlapping_people_from_the_same_crop():
     assert sorted(_merge([FULL, HALF], [0.81, 0.55], [3, 3])) == [0, 1]
 
 
+def test_same_crop_low_conf_duplicate_is_merged_when_asked():
+    # At a 0.05 floor YOLO emits faint near-copies inside one tile: drop those, but only
+    # when the weaker box is under same_crop_below.
+    assert _merge([FULL, HALF], [0.81, 0.12], [3, 3], same_crop_below=0.25) == [0]
+    assert sorted(_merge([FULL, HALF], [0.81, 0.55], [3, 3], same_crop_below=0.25)) == [
+        0,
+        1,
+    ]
+    assert sorted(_merge([FULL, HALF], [0.81, 0.12], [3, 3])) == [
+        0,
+        1,
+    ]  # off by default
+
+
 def test_merge_keeps_the_most_confident_duplicate():
     shifted = [771.0, 441.0, 791.0, 491.0]
     assert _merge([FULL, shifted], [0.4, 0.9], [0, FULL_FRAME]) == [1]

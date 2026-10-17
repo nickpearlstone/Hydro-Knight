@@ -34,6 +34,7 @@ data/keypoints_tiled/
 
 # Raw tiled detections from extraction — large, regenerable from video
 data/detections/
+data/detections_*/
 
 # Raw video files are never committed (size, copyright, privacy)
 raw_local/
