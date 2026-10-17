@@ -74,3 +74,13 @@ def test_whole_downloads_are_never_sectioned(ran, rec):
     (cmd,) = ran
     assert "--download-sections" not in cmd
     assert "--force-keyframes-at-cuts" not in cmd
+
+
+def test_format_prefers_h264_and_falls_back(ran):
+    # YouTube puts AV1 inside mp4 too, and Colab's OpenCV can't decode AV1 (the "10 empty
+    # clips"): ask for H.264 (avc1) first, and only then any mp4 / any video.
+    assert download.download_clip(_record())
+    (cmd,) = ran
+    choices = cmd[cmd.index("--format") + 1].split("/")
+    assert "vcodec^=avc1" in choices[0]
+    assert any("vcodec" not in c for c in choices[1:])  # a fallback still exists
