@@ -264,3 +264,7 @@ kbd {
 .frames li.not_good .v { color: var(--bad); }
 .timeline { touch-action: none; user-select: none; } /* dragging the timeline scrubs, never scrolls or selects */
 .tl-ends { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; margin-top: -6px; }
+
+/* Zones tab: frame scrubber under the stage */
+.scrub { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.scrub input[type="range"] { flex: 1; accent-color: var(--accent); }

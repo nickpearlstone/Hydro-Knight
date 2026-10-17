@@ -29,6 +29,9 @@ the pose benchmark; see annotate/count.py for that file's format.
 A third tab, Review (/review), plays each clip Claude labeled around the event with the
 victim marked, and records a good / not good verdict; see annotate/review.py.
 
+A fourth tab, Zones (/zones), draws each clip's coverage zone: the water its camera is
+responsible for. Evaluation scores only what happens inside it; see annotate/zones.py.
+
 Times: the manifest stores event and trim times in the source-video timeline.
 For clips downloaded as a section, the local file starts at start_sec, so the
 UI works in file time and converts with `offset` (ClipRecord.file_offset, 0 for
@@ -53,7 +56,7 @@ from ..ingest.download import done_marker, local_path
 from ..ingest.manifest import Label, Manifest
 from ..preprocess.extract_pose import load_detections
 from ..preprocess.tiled_pose import merge_detections
-from . import count, review
+from . import count, review, zones
 
 STATIC = Path(__file__).parent / "static"
 VICTIM_KINDS = ("onset", "last_seen", "extra")
@@ -162,6 +165,7 @@ def create_app(
     count_path: Path = count.COUNT_PATH,
     claude_path: Path = review.CLAUDE_PATH,
     review_path: Path = review.REVIEW_PATH,
+    zones_path: Path = zones.ZONES_PATH,
 ) -> Flask:
     """Build the labeler app around one manifest file.
 
@@ -172,6 +176,7 @@ def create_app(
         count_path: swimmer-count label file for the Swimmer count tab.
         claude_path: list of Claude-labeled clips (read only), for the Review tab.
         review_path: review verdicts written by the Review tab.
+        zones_path: coverage zones written by the Zones tab.
     Returns:
         The Flask app.
     """
@@ -402,6 +407,74 @@ def create_app(
                 verdicts[clip_id] = entry
             review.save(verdicts, review_path)
         return jsonify({"ok": True, "review": entry})
+
+    # ------------------------------------------------------------ zones tab
+
+    @app.get("/zones")
+    def zones_page():
+        return send_file(STATIC / "zones.html")
+
+    @app.get("/api/zones")
+    def zones_list():
+        saved = zones.load(zones_path)
+        rows = []
+        for r in manifest.load():
+            if "[HOLD" in r.notes or not local_path(r).exists():
+                continue
+            facts = _video_facts(local_path(r))
+            onset = next(
+                (e["start"] for e in r.events if e.get("start") is not None), None
+            )
+            if onset is not None and facts["fps"]:
+                default = round(r.to_file_time(onset) * facts["fps"])
+            else:
+                default = facts["frames"] // 2
+            rows.append(
+                {
+                    "clip_id": r.clip_id,
+                    "label": r.label.value,
+                    "notes": r.notes,
+                    "frames": facts["frames"],
+                    "fps": facts["fps"],
+                    "default_frame": max(0, min(default, facts["frames"] - 1)),
+                    "zone": saved.get(r.clip_id),
+                }
+            )
+        return jsonify(rows)
+
+    @app.get("/api/zones/<clip_id>/image")
+    def zones_image(clip_id: str):
+        path = local_path(get_record(clip_id))
+        frame = int(request.args.get("frame", 0))
+        cap = cv2.VideoCapture(str(path))
+        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        ok, img = False, None
+        if 0 <= frame < n:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
+            ok, img = cap.read()
+        cap.release()
+        if not ok:
+            abort(404, f"can't read frame {frame} of {clip_id}")
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        return app.response_class(buf.tobytes(), mimetype="image/jpeg")
+
+    @app.post("/api/zones/<clip_id>")
+    def zones_save(clip_id: str):
+        get_record(clip_id)  # 404 for an unknown clip
+        body = request.get_json(force=True)
+        with lock:
+            data = zones.load(zones_path)
+            if isinstance(body, dict) and body.get("clear"):
+                data.pop(clip_id, None)
+                entry = None
+            else:
+                try:
+                    entry = zones.clean_zone(body)
+                except (ValueError, TypeError) as e:
+                    return jsonify({"error": str(e)}), 400
+                data[clip_id] = entry
+            zones.save(data, zones_path)
+        return jsonify({"ok": True, "zone": entry})
 
     return app
 
