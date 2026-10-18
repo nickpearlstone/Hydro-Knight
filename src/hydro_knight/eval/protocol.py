@@ -58,6 +58,9 @@ class EventTruth:
     victim_tracks: frozenset[int]
     onset_alt: float | None = None  # independent labeller's onset, if any
     silent: bool = False  # no visible struggle before going under
+    # tracks scored as nothing: their rows are dropped before scoring (no catch, no false
+    # alarm, not in the AUC, not a rival in the rank), e.g. unconfirmed victim fragments
+    ignore_tracks: frozenset[int] = frozenset()
 
     @property
     def onset_lo(self) -> float:
@@ -104,6 +107,7 @@ def truths_from_records(
     victim_tracks: dict[str, Sequence[int]],
     onset_alt: dict[str, float] | None = None,
     silent: Iterable[str] = (),
+    ignore_tracks: dict[str, Sequence[int]] | None = None,
 ) -> dict[str, EventTruth]:
     """EventTruth per clip from manifest records (first event of each clip).
 
@@ -113,11 +117,13 @@ def truths_from_records(
         victim_tracks: clip_id -> matched victim track ids (eval.victims).
         onset_alt: clip_id -> an independent onset in SOURCE seconds (converted here).
         silent: clip ids whose drowning shows no visible struggle.
+        ignore_tracks: clip_id -> track ids whose rows are dropped before scoring.
     Returns:
         clip_id -> EventTruth; clips without onset or contact are left out.
     """
     by_id = {r.clip_id: r for r in records}
     onset_alt = onset_alt or {}
+    ignore_tracks = ignore_tracks or {}
     silent = set(silent)
     out = {}
     for cid in clip_ids:
@@ -134,6 +140,7 @@ def truths_from_records(
             victim_tracks=frozenset(int(t) for t in victim_tracks.get(cid, [])),
             onset_alt=None if alt is None else r.to_file_time(alt),
             silent=cid in silent,
+            ignore_tracks=frozenset(int(t) for t in ignore_tracks.get(cid, [])),
         )
     return out
 
@@ -253,6 +260,18 @@ def randomize(table: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
 
 def _by_clip(table: pd.DataFrame) -> dict[str, pd.DataFrame]:
     return {str(c): g.sort_values("t") for c, g in table.groupby("clip_id", sort=False)}
+
+
+def _drop_ignored(
+    groups: dict[str, pd.DataFrame], truths: dict[str, EventTruth]
+) -> dict[str, pd.DataFrame]:
+    """Remove each clip's ignore_tracks rows, so those tracks count as nothing at all."""
+    out = dict(groups)
+    for cid, t in truths.items():
+        if t.ignore_tracks and cid in out:
+            g = out[cid]
+            out[cid] = g[~g["track_id"].isin(t.ignore_tracks)]
+    return out
 
 
 def _empty() -> pd.DataFrame:
@@ -508,13 +527,13 @@ def tier1(
         n_random noise tables), "proxy": proxy_operating_points, "proxy_random": [...]}.
     """
     cfg = cfg or ProtocolConfig()
-    groups = _by_clip(table)
+    groups = _drop_ignored(_by_clip(table), truths)
     per_clip = _tier1_per_clip(groups, truths, cfg)
     rng = np.random.default_rng(cfg.seed)
     rand_runs, proxy_rand = [], []
     quick = ProtocolConfig(**{**cfg.__dict__, "n_boot": 1})
     for _ in range(cfg.n_random):
-        rg = _by_clip(randomize(table, rng))
+        rg = _drop_ignored(_by_clip(randomize(table, rng)), truths)
         rand_runs.append(_tier1_summary(_tier1_per_clip(rg, truths, cfg), quick))
         proxy_rand.append(proxy_operating_points(rg, truths, quick)["points"])
     keys = (
@@ -560,7 +579,7 @@ def tier2(
         its alarm rate is within the budget.
     """
     cfg = cfg or ProtocolConfig()
-    groups = _by_clip(table)
+    groups = _drop_ignored(_by_clip(table), truths)
     hours = sum(max(s.end - s.start, 0) for s in normal) / 3600
 
     def span_scores(sp: NormalSpan) -> np.ndarray:
@@ -705,6 +724,22 @@ def _ci(d: dict, pct: bool = False) -> str:
     if not np.isfinite(d.get("value", math.nan)):
         return "n/a"
     return f"{f(d['value'])} [{f(d['lo'])}, {f(d['hi'])}]"
+
+
+def format_variants(variants: dict[str, dict], cfg: ProtocolConfig) -> str:
+    """One row per victim definition (name -> tier1 result): how much the result depends on that choice."""
+    k = 3 if 3 in cfg.top_k else cfg.top_k[0]
+    lines = [
+        f"| Victim definition | Clips | Visible | Same-clip AUC | Time in top {k} | Reach top {k} | Reach top {k}, random |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for name, t1 in variants.items():
+        s, r = t1["summary"], t1["random"]
+        lines.append(
+            f"| {name} | {s['clips']} | {_ci(s['coverage'], True)} | {_ci(s['within_clip_auc'])} "
+            f"| {_ci(s[f'time_in_top{k}'], True)} | {_ci(s[f'reach_top{k}'], True)} | {100 * r[f'reach_top{k}']:.0f}% |"
+        )
+    return "\n".join(lines)
 
 
 def format_report(

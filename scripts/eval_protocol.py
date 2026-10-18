@@ -81,7 +81,28 @@ def evaluate_seed(
         )
     t1 = P.tier1(table, truths, cfg)
     t2 = P.tier2(table, truths, normal, cfg)
-    return {"truths": truths, "t1": t1, "t2": t2, "normal_label": label}
+    # Second victim definition (Nick, 2026-10-18): click-matched tracks only; the path
+    # fragments' rows are dropped from scoring, so they are neither catches nor rivals.
+    frags = rep.get("path_fragments", {})
+    click_only = {
+        c: sorted(set(v) - set(frags.get(c, [])))
+        for c, v in rep["victim_tracks"].items()
+    }
+    truths_click = P.truths_from_records(
+        records,
+        test,
+        click_only,
+        onset_alt=load_onset_alt(args.onset_alt),
+        ignore_tracks=frags,
+    )
+    t1_click = P.tier1(table, truths_click, cfg)
+    return {
+        "truths": truths,
+        "t1": t1,
+        "t2": t2,
+        "t1_click": t1_click,
+        "normal_label": label,
+    }
 
 
 def _clip_mean(pc: pd.DataFrame, col: str):
@@ -160,9 +181,21 @@ def main() -> None:
         md = md.replace(
             "(false alarms on normal footage)", f"(false alarms on {r['normal_label']})"
         )
+        variants = {
+            "Click-matched tracks + path fragments (headline)": r["t1"],
+            "Click-matched tracks only, fragment rows dropped": r["t1_click"],
+        }
+        md += (
+            "\n## How much the result depends on the victim definition\n\n"
+            + P.format_variants(variants, cfg)
+            + "\n"
+        )
         (out / f"report_{args.size}_s{seed}.md").write_text(md)
         r["t1"]["per_clip"].to_csv(
             out / f"tier1_per_clip_{args.size}_s{seed}.csv", index=False
+        )
+        r["t1_click"]["per_clip"].to_csv(
+            out / f"tier1_per_clip_click_only_{args.size}_s{seed}.csv", index=False
         )
         r["t2"]["amoc"].to_csv(out / f"tier2_amoc_{args.size}_s{seed}.csv", index=False)
         (out / f"summary_{args.size}_s{seed}.json").write_text(

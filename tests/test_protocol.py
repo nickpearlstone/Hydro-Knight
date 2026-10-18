@@ -213,3 +213,48 @@ def test_format_report_renders_both_tiers():
     t2 = P.tier2(table, {"c1": truth()}, [], FAST)
     md = P.format_report("demo", t1, t2, FAST)
     assert "Tier 1" in md and "Tier 2" in md and "Lowest alarm rate" in md
+
+
+def test_ignored_tracks_count_as_nothing():
+    """A fragment track that fires hard is neither a false alarm, a rival in the rank, nor in the AUC."""
+    table = make_table(victim_score=0.9)
+    frag = make_table(n_tracks=1).assign(track_id=99, score=1.0)
+    both = pd.concat([table, frag])
+    keep = {"c1": truth()}
+    drop = {
+        "c1": P.EventTruth(
+            "c1", 0.0, 20.0, 30.0, frozenset({1}), ignore_tracks=frozenset({99})
+        )
+    }
+    plain, ignored = P.tier1(both, keep, FAST), P.tier1(both, drop, FAST)
+    # the fragment outranks the victim everywhere unless it is ignored
+    assert plain["summary"]["time_in_top1"]["value"] == 0.0
+    assert ignored["summary"]["time_in_top1"]["value"] > 0.9
+    assert (
+        ignored["summary"]["within_clip_auc"]["value"]
+        > plain["summary"]["within_clip_auc"]["value"]
+    )
+    span = [P.NormalSpan("c1", 0.0, 10.0)]
+    g_keep = P._drop_ignored(P._by_clip(both), keep)["c1"]
+    g_drop = P._drop_ignored(P._by_clip(both), drop)["c1"]
+    assert P.false_alarms(g_keep, 0.95, span=span[0]) == 1
+    assert P.false_alarms(g_drop, 0.95, span=span[0]) == 0
+
+
+def test_truths_from_records_carries_ignored_tracks():
+    rec = SimpleNamespace(
+        clip_id="c1",
+        trim_start=None,
+        events=[{"start": 5.0, "contact": 9.0}],
+        to_file_time=lambda t: t,
+    )
+    out = P.truths_from_records(
+        [rec], ["c1"], {"c1": [1]}, ignore_tracks={"c1": [7, 8]}
+    )
+    assert out["c1"].ignore_tracks == frozenset({7, 8})
+
+
+def test_format_variants_one_row_per_definition():
+    t1 = P.tier1(make_table(), {"c1": truth()}, FAST)
+    md = P.format_variants({"headline": t1, "click only": t1}, FAST)
+    assert md.count("\n") == 3 and "click only" in md

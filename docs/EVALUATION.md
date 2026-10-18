@@ -14,6 +14,10 @@ deployable system has to meet, and it needs hours of incident-free footage we do
 - **Catch.** A score at or above the alarm threshold on the victim's own track, between the
   onset and guard contact. Onsets are a range: the earlier of our label and an independent
   labeller's (median gap 2.4 s), minus a 5 s tolerance. Alarms after guard contact are ignored.
+- **Who the victim is.** The headline counts the tracks matched to the victim clicks plus the
+  short fragments along the victim's path between clicks. A second row scores only the
+  click-matched tracks and drops the fragments' rows entirely (neither catches, false alarms,
+  nor rivals), showing how much a result leans on fragments that could be bystanders.
 - **False alarm.** Any other run of alarms, counted per swimmer, so twenty swimmers firing at
   once are twenty false alarms.
 - **Baselines and intervals.** Every number is shown next to the same number for random
