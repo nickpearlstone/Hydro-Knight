@@ -9,6 +9,7 @@ table and a JSON summary into --out.
     uv run python scripts/eval_protocol.py runs/v2_ckpt_after --pseudo-normal      # tier 2 on pre-onset footage
     uv run python scripts/eval_protocol.py runs/v2_ckpt_after --onset-alt scratch/z5cc/label_compare.json
     uv run python scripts/eval_protocol.py runs/RUN_B --compare runs/RUN_A          # is B better than A?
+    uv run --extra tracking python scripts/eval_protocol.py runs/RUN --mlflow       # also log to MLflow
 
 --onset-alt takes either {clip_id: onset in source seconds} or the Z5cc label comparison
 rows (clip_id, his_onset, our_onset); only onsets within 30 s of ours are used.
@@ -29,6 +30,7 @@ import pandas as pd
 
 from hydro_knight.eval import protocol as P
 from hydro_knight.ingest.manifest import Manifest
+from hydro_knight.preprocess.build_tracks import read_provenance
 
 
 def load_onset_alt(path: Path | None) -> dict[str, float]:
@@ -55,6 +57,29 @@ def load_normal(path: Path | None) -> list[P.NormalSpan]:
     ]
 
 
+def load_tracks(clip_ids, tracks_dir: Path) -> dict[str, pd.DataFrame]:
+    """The track table each clip's model was fed, as (t in file seconds, track_id), confirmed tracks only.
+
+    Any track file with columns frame and track_id and a video fps in its provenance works,
+    so head tracks can replace the default pose keypoint tracks later.
+    """
+    out = {}
+    for cid in clip_ids:
+        pq = tracks_dir / f"{cid}.parquet"
+        if not pq.exists():
+            continue
+        fps = read_provenance(pq)["video"]["fps"]
+        df = pd.read_parquet(pq, columns=["frame", "track_id"])
+        df = df[df["track_id"] >= 0]
+        out[cid] = pd.DataFrame(
+            {
+                "t": df["frame"].to_numpy(float) / fps,
+                "track_id": df["track_id"].to_numpy(),
+            }
+        )
+    return out
+
+
 def seeds_in(run: Path, size: str) -> list[int]:
     return sorted(
         int(p.stem.split("_s")[-1]) for p in run.glob(f"alarms_{size}_s*.parquet")
@@ -79,7 +104,8 @@ def evaluate_seed(
             P.pre_onset_spans(truths, cfg.onset_tol_s),
             "PSEUDO-normal (pre-onset rescue footage)",
         )
-    t1 = P.tier1(table, truths, cfg)
+    tracks = load_tracks(test, args.tracks_dir)
+    t1 = P.tier1(table, truths, cfg, tracks)
     t2 = P.tier2(table, truths, normal, cfg)
     # Second victim definition (Nick, 2026-10-18): click-matched tracks only; the path
     # fragments' rows are dropped from scoring, so they are neither catches nor rivals.
@@ -95,7 +121,7 @@ def evaluate_seed(
         onset_alt=load_onset_alt(args.onset_alt),
         ignore_tracks=frags,
     )
-    t1_click = P.tier1(table, truths_click, cfg)
+    t1_click = P.tier1(table, truths_click, cfg, tracks)
     return {
         "truths": truths,
         "t1": t1,
@@ -126,7 +152,7 @@ def compare(run_a: Path, run_b: Path, size: str, records, args, cfg) -> str:
             "per_clip"
         ].set_index("clip_id")
         shared = sorted(set(a.index) & set(b.index))
-        for col in ("within_clip_auc", "time_in_top3", "coverage"):
+        for col in ("within_clip_auc", "time_in_top3", "scored", "detected"):
             stat = partial(_clip_mean, col=col)
             d = P.paired_difference(
                 shared, stat(a), stat(b), cfg.n_boot, cfg.seed, cfg.conf
@@ -142,13 +168,74 @@ def jsonable(t1: dict, t2: dict) -> dict:
         "tier1": {
             "summary": t1["summary"],
             "random": t1["random"],
+            "shuffled": t1["shuffled"],
             "proxy": t1["proxy"],
             "proxy_random_caught": {
                 str(k): v for k, v in t1["proxy_random_caught"].items()
             },
+            "proxy_shuffled_caught": {
+                str(k): v for k, v in t1["proxy_shuffled_caught"].items()
+            },
         },
         "tier2": {k: v for k, v in t2.items() if k != "amoc"},
     }
+
+
+def headline_metrics(r: dict) -> dict[str, float]:
+    """Flat metric dict for MLflow: tier-1 values with intervals, both baselines, both victim rows."""
+    out: dict[str, float] = {}
+    for prefix, t1 in (("headline", r["t1"]), ("click_only", r["t1_click"])):
+        for k, v in t1["summary"].items():
+            if isinstance(v, dict):
+                out[f"{prefix}.{k}"] = v["value"]
+                out[f"{prefix}.{k}.lo"] = v["lo"]
+                out[f"{prefix}.{k}.hi"] = v["hi"]
+        for base in ("random", "shuffled"):
+            for k, v in t1[base].items():
+                out[f"{prefix}.{base}.{k}"] = v
+    for pt in r["t1"]["proxy"]["points"]:
+        out[f"headline.proxy_caught_at_{pt['budget_per_hour']:g}_per_h"] = pt.get(
+            "caught", 0
+        )
+    out["tier2.normal_hours"] = r["t2"]["normal_hours"]
+    out["tier2.min_verifiable_per_hour"] = r["t2"]["min_verifiable_per_hour"]
+    return {k: float(v) for k, v in out.items() if v is not None and np.isfinite(v)}
+
+
+def log_to_mlflow(
+    args, seed: int, cfg: P.ProtocolConfig, r: dict, files: list[Path]
+) -> None:
+    """One MLflow run per (run folder, size, seed). mlflow is imported only here (optional extra)."""
+    import hashlib
+    import subprocess
+
+    from hydro_knight.eval import tracking  # imports mlflow
+
+    manifest = Path("data/manifests/pool_footage.jsonl")
+    commit = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    params = {
+        "run_folder": str(args.run),
+        "size": args.size,
+        "seed": seed,
+        "onset_alt": str(args.onset_alt),
+        "tracks_dir": str(args.tracks_dir),
+        "normal": r["normal_label"],
+        "dropped_clips": ",".join(args.drop) or "none",
+        "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest()[:12]
+        if manifest.exists()
+        else "missing",
+        "git_commit": commit or "unknown",
+        **{f"cfg.{k}": str(v) for k, v in cfg.__dict__.items()},
+    }
+    with tracking.run(
+        f"{args.run.name}-{args.size}-s{seed}", experiment=args.mlflow_experiment
+    ):
+        tracking.log_config(params)
+        tracking.log_metrics(headline_metrics(r))
+        for f in files:
+            tracking.log_artifact(f)
 
 
 def main() -> None:
@@ -163,6 +250,18 @@ def main() -> None:
     ap.add_argument("--compare", type=Path, help="baseline run A; reports run - A")
     ap.add_argument("--n-boot", type=int, default=1000)
     ap.add_argument("--n-random", type=int, default=20)
+    ap.add_argument(
+        "--tracks-dir",
+        type=Path,
+        default=Path("data/keypoints_tiled"),
+        help="the track tables the model was fed (for the model-free 'victim detected' row)",
+    )
+    ap.add_argument(
+        "--mlflow",
+        action="store_true",
+        help="log each seed as an MLflow run (needs --extra tracking)",
+    )
+    ap.add_argument("--mlflow-experiment", default="eval-protocol")
     args = ap.parse_args()
     cfg = P.ProtocolConfig(n_boot=args.n_boot, n_random=args.n_random)
     records = Manifest(Path("data/manifests/pool_footage.jsonl")).load()
@@ -201,6 +300,9 @@ def main() -> None:
         (out / f"summary_{args.size}_s{seed}.json").write_text(
             json.dumps(jsonable(r["t1"], r["t2"]), indent=1, default=str)
         )
+        if args.mlflow:
+            files = sorted(out.glob(f"*_{args.size}_s{seed}.*"))
+            log_to_mlflow(args, seed, cfg, r, files)
         print(md)
     print(f"wrote {out}")
 

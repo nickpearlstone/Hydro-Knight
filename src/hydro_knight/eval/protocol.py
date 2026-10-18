@@ -255,6 +255,46 @@ def randomize(table: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
     return table.assign(score=rng.random(len(table)))
 
 
+def shuffle_within_clip(
+    groups: dict[str, pd.DataFrame], rng: np.random.Generator
+) -> dict[str, pd.DataFrame]:
+    """Each clip's whole track score sequences handed to random tracks of the same clip.
+
+    The zero-skill rival with the model's own habits (a surrogate in the sense of Theiler
+    et al. 1992: keep everything unrelated to victim identity). It keeps ties, firing rate,
+    each track's rhythm in time (a 3 s alarm stays one 3 s alarm) and where in a track the
+    scores fall, and changes only WHO gets them:
+    - sequences move between any two tracks in the clip, not stratified by track length,
+      since track breakup is itself a distress signal the baseline must not get for free;
+    - each borrowed sequence starts at the start of its new track (offset 0), because
+      window models warm up and Plan A rules run timers from track start;
+    - a longer source is cut, a shorter one repeated from its start (keeps the firing
+      rate, at the cost of a small rhythm artifact where it restarts);
+    - the only randomness is the permutation. A victim track may get its own or another
+      victim track's sequence, which is a valid draw of the null.
+
+    Only the any-moment and budget metrics depend on this surrogate (reach_top{k}, the
+    proxy and tier-2 budget curves); within-clip AUC (chance 0.5) and time_in_top{k}
+    (chance k/N, ties split) have exact chance levels.
+    """
+    out = {}
+    for c, g in groups.items():
+        tid = g["track_id"].to_numpy()
+        order = np.lexsort((g["t"].to_numpy(float), tid))  # by track, then time
+        sc = g["score"].to_numpy(float)[order]
+        _, starts, counts = np.unique(tid[order], return_index=True, return_counts=True)
+        seqs = [sc[a : a + n] for a, n in zip(starts, counts, strict=True)]
+        src = rng.permutation(len(seqs))
+        new = np.empty(len(sc))
+        for k, (a, n) in enumerate(zip(starts, counts, strict=True)):
+            s = seqs[src[k]]
+            new[a : a + n] = s[np.arange(n) % len(s)]
+        score = np.empty(len(sc))
+        score[order] = new  # back to the clip's original row order
+        out[c] = g.assign(score=score)
+    return out
+
+
 # ---------------------------------------------------------------- per-clip primitives
 
 
@@ -328,11 +368,16 @@ def victim_rank_timeline(
 ) -> pd.DataFrame:
     """The victim's rank among the swimmers in view, every `step_s` across the catch window.
 
-    A track's score at time t is its max over (t - rank_window_s, t]; rank 1 = the most
-    suspicious track in the clip at that moment.
+    A track's score at time t is its max over (t - rank_window_s, t]. Ties with other
+    swimmers are handled two ways, and every metric says which one it uses:
+    - rank is the OUTRIGHT rank, 1 + (others >= victim): ties count against the victim,
+      so a detector that gives everyone the same score never "reaches" the top k;
+    - p_top{k} is the chance of being in the top k when ties are broken at random
+      (McSherry & Najork 2008; the same idea as AUC counting a tie as half):
+      clip((k - higher) / tied, 0, 1), with `tied` including the victim.
     Returns:
         DataFrame t, victim_score (nan = victim not scored then), rank (nan likewise),
-        n_tracks (tracks scored in that slice).
+        n_tracks (tracks scored in that slice), p_top{k} per cfg.top_k (0 when not scored).
     """
     t0, t1 = truth.onset_lo - cfg.onset_tol_s, truth.contact
     times = np.arange(t0, t1 + 1e-9, cfg.step_s)
@@ -340,21 +385,28 @@ def victim_rank_timeline(
     tids = rows["track_id"].to_numpy()
     sc = rows["score"].to_numpy(float)
     vic = np.isin(tids, list(truth.victim_tracks))
+    ks = cfg.top_k
     out = []
     for t in times:
         m = (tt > t - cfg.rank_window_s) & (tt <= t)
         if not m.any():
-            out.append((t, math.nan, math.nan, 0))
+            out.append((t, math.nan, math.nan, 0, *[0.0] * len(ks)))
             continue
         best = pd.Series(sc[m]).groupby(tids[m]).max()
         vm = vic[m]
         if not vm.any():
-            out.append((t, math.nan, math.nan, len(best)))
+            out.append((t, math.nan, math.nan, len(best), *[0.0] * len(ks)))
             continue
         v = sc[m][vm].max()
-        others = best[~best.index.isin(list(truth.victim_tracks))]
-        out.append((t, float(v), float(1 + (others > v).sum()), len(best)))
-    return pd.DataFrame(out, columns=["t", "victim_score", "rank", "n_tracks"])
+        others = best[~best.index.isin(list(truth.victim_tracks))].to_numpy(float)
+        higher = int((others > v).sum())
+        tied = (
+            int((others == v).sum()) + 1
+        )  # the victim plus swimmers with the same score
+        p = [min(max((k - higher) / tied, 0.0), 1.0) for k in ks]
+        out.append((t, float(v), float(higher + tied), len(best), *p))
+    cols = ["t", "victim_score", "rank", "n_tracks", *[f"p_top{k}" for k in ks]]
+    return pd.DataFrame(out, columns=cols)
 
 
 def within_clip_auc(rows: pd.DataFrame, truth: EventTruth, onset_tol_s: float) -> float:
@@ -374,8 +426,41 @@ def within_clip_auc(rows: pd.DataFrame, truth: EventTruth, onset_tol_s: float) -
 # ---------------------------------------------------------------- tier 1
 
 
+def victim_detected_share(
+    tracks: pd.DataFrame, truth: EventTruth, cfg: ProtocolConfig
+) -> float:
+    """Share of catch-window moments where the INPUT tracks hold the victim (model-free).
+
+    Same moments and trailing window as victim_rank_timeline, so it sits directly beside
+    "scored": the gap between the two is the model's own blind spot (window, warm-up,
+    minimum track length), not the detector's.
+    Args:
+        tracks: the track table the model was given, columns t (file s) and track_id.
+    Returns:
+        Share in [0, 1].
+    """
+    times = np.arange(
+        truth.onset_lo - cfg.onset_tol_s, truth.contact + 1e-9, cfg.step_s
+    )
+    if not len(times):
+        return 0.0
+    vt = np.sort(
+        tracks["t"].to_numpy(float)[
+            tracks["track_id"].isin(truth.victim_tracks).to_numpy()
+        ]
+    )
+    if not len(vt):
+        return 0.0
+    lo = np.searchsorted(vt, times - cfg.rank_window_s, side="right")
+    hi = np.searchsorted(vt, times, side="right")
+    return float(np.mean(hi > lo))
+
+
 def _tier1_per_clip(
-    groups: dict[str, pd.DataFrame], truths: dict[str, EventTruth], cfg: ProtocolConfig
+    groups: dict[str, pd.DataFrame],
+    truths: dict[str, EventTruth],
+    cfg: ProtocolConfig,
+    tracks: dict[str, pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     rows = []
     for cid, truth in truths.items():
@@ -384,14 +469,20 @@ def _tier1_per_clip(
         seen = tl["rank"].notna()
         rec = {
             "clip_id": cid,
-            "coverage": float(seen.mean()) if len(tl) else 0.0,
+            "detected": victim_detected_share(tracks[cid], truth, cfg)
+            if tracks is not None and cid in tracks
+            else math.nan,
+            "scored": float(seen.mean()) if len(tl) else 0.0,
             "median_tracks": float(tl["n_tracks"].median()) if len(tl) else 0.0,
             "best_rank": float(tl["rank"].min()) if seen.any() else math.nan,
             "within_clip_auc": within_clip_auc(g, truth, cfg.onset_tol_s),
         }
         for k in cfg.top_k:
-            top = (tl["rank"] <= k).to_numpy()
-            rec[f"time_in_top{k}"] = float(top.mean()) if len(tl) else 0.0
+            top = (
+                tl["rank"] <= k
+            ).to_numpy()  # outright: ties count against the victim
+            # ties split by chance; moments without a victim score count as 0
+            rec[f"time_in_top{k}"] = float(tl[f"p_top{k}"].mean()) if len(tl) else 0.0
             rec[f"first_top{k}_s"] = (
                 float(tl["t"].to_numpy()[top][0] - truth.onset)
                 if top.any()
@@ -407,9 +498,11 @@ def _tier1_summary(per_clip: pd.DataFrame, cfg: ProtocolConfig) -> dict:
     ids = list(pc.index)
 
     def mean_of(col):
-        return lambda s: (
-            float(np.nanmean(pc.loc[s, col].to_numpy(float))) if len(s) else math.nan
-        )
+        def stat(s):
+            x = pc.loc[s, col].to_numpy(float) if len(s) else np.array([])
+            return float(np.nanmean(x)) if np.isfinite(x).any() else math.nan
+
+        return stat
 
     def share_reaching(k):
         return lambda s: (
@@ -420,8 +513,11 @@ def _tier1_summary(per_clip: pd.DataFrame, cfg: ProtocolConfig) -> dict:
 
     out = {
         "clips": len(ids),
-        "coverage": bootstrap_clips(
-            ids, mean_of("coverage"), cfg.n_boot, cfg.seed, cfg.conf
+        "detected": bootstrap_clips(
+            ids, mean_of("detected"), cfg.n_boot, cfg.seed, cfg.conf
+        ),
+        "scored": bootstrap_clips(
+            ids, mean_of("scored"), cfg.n_boot, cfg.seed, cfg.conf
         ),
         "within_clip_auc": bootstrap_clips(
             ids, mean_of("within_clip_auc"), cfg.n_boot, cfg.seed, cfg.conf
@@ -516,19 +612,24 @@ def tier1(
     table: pd.DataFrame,
     truths: dict[str, EventTruth],
     cfg: ProtocolConfig | None = None,
+    tracks: dict[str, pd.DataFrame] | None = None,
 ) -> dict:
-    """Direction check from rescue clips alone: victim rank among swimmers in view, coverage, proxy budget curve.
+    """Direction check from rescue clips alone: victim detected and scored, rank among swimmers in view, proxy budget curve.
 
     Args:
         table: score table (SCORE_COLUMNS).
         truths: clip_id -> EventTruth for the evaluated rescue clips.
+        tracks: clip_id -> the input track table (columns t, track_id) for the model-free
+            "victim detected" row; None leaves that row empty.
     Returns:
-        {"per_clip": DataFrame, "summary": {...}, "random": {...} (same keys, mean over
-        n_random noise tables), "proxy": proxy_operating_points, "proxy_random": [...]}.
+        {"per_clip": DataFrame, "summary": {...}, "random": {...} and "shuffled": {...}
+        (summary values averaged over n_random noise / within-clip shuffle tables),
+        "proxy": proxy_operating_points, "proxy_random_caught" and "proxy_shuffled_caught"
+        (budget -> mean events caught)}.
     """
     cfg = cfg or ProtocolConfig()
     groups = _drop_ignored(_by_clip(table), truths)
-    per_clip = _tier1_per_clip(groups, truths, cfg)
+    per_clip = _tier1_per_clip(groups, truths, cfg, tracks)
     rng = np.random.default_rng(cfg.seed)
     rand_runs, proxy_rand = [], []
     quick = ProtocolConfig(**{**cfg.__dict__, "n_boot": 1})
@@ -536,25 +637,42 @@ def tier1(
         rg = _drop_ignored(_by_clip(randomize(table, rng)), truths)
         rand_runs.append(_tier1_summary(_tier1_per_clip(rg, truths, cfg), quick))
         proxy_rand.append(proxy_operating_points(rg, truths, quick)["points"])
-    keys = (
-        [k for k in rand_runs[0] if isinstance(rand_runs[0][k], dict)]
-        if rand_runs
-        else []
-    )
-    random = {k: float(np.nanmean([r[k]["value"] for r in rand_runs])) for k in keys}
+    rng_s = np.random.default_rng(cfg.seed + 1)
+    shuf_runs, proxy_shuf = [], []
+    for _ in range(cfg.n_random):
+        sg = shuffle_within_clip(groups, rng_s)
+        shuf_runs.append(_tier1_summary(_tier1_per_clip(sg, truths, cfg), quick))
+        proxy_shuf.append(proxy_operating_points(sg, truths, quick)["points"])
     return {
         "per_clip": per_clip,
         "summary": _tier1_summary(per_clip, cfg),
-        "random": random,
+        "random": _mean_summary(rand_runs),
+        "shuffled": _mean_summary(shuf_runs),
         "proxy": proxy_operating_points(groups, truths, cfg),
-        "proxy_random_caught": {
-            p["budget_per_hour"]: float(
-                np.mean([run[i].get("caught", 0) for run in proxy_rand])
-            )
-            for i, p in enumerate(proxy_rand[0])
-        }
-        if proxy_rand
-        else {},
+        "proxy_random_caught": _mean_caught(proxy_rand),
+        "proxy_shuffled_caught": _mean_caught(proxy_shuf),
+    }
+
+
+def _mean_summary(runs: list[dict]) -> dict[str, float]:
+    """Average each headline value over baseline runs."""
+    if not runs:
+        return {}
+    keys = [k for k in runs[0] if isinstance(runs[0][k], dict)]
+    vals = {k: np.array([r[k]["value"] for r in runs], float) for k in keys}
+    return {
+        k: float(np.nanmean(v)) if np.isfinite(v).any() else math.nan
+        for k, v in vals.items()
+    }
+
+
+def _mean_caught(runs: list[list[dict]]) -> dict[float, float]:
+    """Budget -> events caught, averaged over baseline runs."""
+    if not runs:
+        return {}
+    return {
+        p["budget_per_hour"]: float(np.mean([run[i].get("caught", 0) for run in runs]))
+        for i, p in enumerate(runs[0])
     }
 
 
@@ -719,6 +837,10 @@ def _s(x: float, fmt: str = "{:.1f} s") -> str:
     return fmt.format(x) if np.isfinite(x) else "-"
 
 
+def _pct(x: float | None) -> str:
+    return "-" if x is None or not np.isfinite(x) else f"{100 * x:.0f}%"
+
+
 def _ci(d: dict, pct: bool = False) -> str:
     f = (lambda x: f"{100 * x:.0f}%") if pct else (lambda x: f"{x:.2f}")
     if not np.isfinite(d.get("value", math.nan)):
@@ -730,14 +852,15 @@ def format_variants(variants: dict[str, dict], cfg: ProtocolConfig) -> str:
     """One row per victim definition (name -> tier1 result): how much the result depends on that choice."""
     k = 3 if 3 in cfg.top_k else cfg.top_k[0]
     lines = [
-        f"| Victim definition | Clips | Visible | Same-clip AUC | Time in top {k} | Reach top {k} | Reach top {k}, random |",
-        "|---|---|---|---|---|---|---|",
+        f"| Victim definition | Clips | Detected (input tracks) | Scored by this model | Same-clip AUC | Time in top {k} (ties split by chance) | Reaches top {k} outright | Reaches top {k} outright: random / shuffled |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for name, t1 in variants.items():
-        s, r = t1["summary"], t1["random"]
+        s, r, sh = t1["summary"], t1["random"], t1.get("shuffled", {})
         lines.append(
-            f"| {name} | {s['clips']} | {_ci(s['coverage'], True)} | {_ci(s['within_clip_auc'])} "
-            f"| {_ci(s[f'time_in_top{k}'], True)} | {_ci(s[f'reach_top{k}'], True)} | {100 * r[f'reach_top{k}']:.0f}% |"
+            f"| {name} | {s['clips']} | {_ci(s['detected'], True)} | {_ci(s['scored'], True)} | {_ci(s['within_clip_auc'])} "
+            f"| {_ci(s[f'time_in_top{k}'], True)} | {_ci(s[f'reach_top{k}'], True)} "
+            f"| {_pct(r.get(f'reach_top{k}'))} / {_pct(sh.get(f'reach_top{k}'))} |"
         )
     return "\n".join(lines)
 
@@ -748,28 +871,34 @@ def format_report(
     """Markdown summary of tier 1 and tier 2 results (brackets = 95% clip-bootstrap or exact interval)."""
     lines = [f"# Evaluation protocol: {name}", ""]
     if t1:
-        s, r = t1["summary"], t1["random"]
+        s, r, sh = t1["summary"], t1["random"], t1.get("shuffled", {})
         lines += [
             "## Tier 1: direction check (rescue clips only)",
             "",
             f"{s['clips']} rescue clips; catch window = earliest onset - {cfg.onset_tol_s:g} s to guard contact.",
+            "Zero-skill comparisons: Random = every score replaced by noise; Shuffled = the model's own",
+            "score sequences handed to random swimmers in the same clip (same ties, firing rate and rhythm).",
+            "The first two rows don't depend on score values, so they have no zero-skill version (-).",
             "",
-            "| Measure | Model | Random |",
-            "|---|---|---|",
-            f"| Victim visible to the model (share of catch window) | {_ci(s['coverage'], True)} | (not score-based) |",
-            f"| Victim vs other swimmers, same clip (AUC) | {_ci(s['within_clip_auc'])} | {r['within_clip_auc']:.2f} |",
+            "| Measure | Model | Random | Shuffled |",
+            "|---|---|---|---|",
+            f"| Victim detected (input tracks; share of catch window) | {_ci(s['detected'], True)} | - | - |",
+            f"| Victim scored by this model (needs the model's window and warm-up) | {_ci(s['scored'], True)} | - | - |",
+            f"| Victim vs other swimmers, same clip (AUC) | {_ci(s['within_clip_auc'])} | {r['within_clip_auc']:.2f} | {sh.get('within_clip_auc', math.nan):.2f} |",
         ]
         for k in cfg.top_k:
             lines.append(
-                f"| Share of catch window victim is top {k} | {_ci(s[f'time_in_top{k}'], True)} | {100 * r[f'time_in_top{k}']:.0f}% |"
+                f"| Share of catch window victim is top {k} (ties split by chance) | {_ci(s[f'time_in_top{k}'], True)} "
+                f"| {_pct(r.get(f'time_in_top{k}'))} | {_pct(sh.get(f'time_in_top{k}'))} |"
             )
         for k in cfg.top_k:
             lines.append(
-                f"| Clips where victim reaches top {k} before contact | {_ci(s[f'reach_top{k}'], True)} | {100 * r[f'reach_top{k}']:.0f}% |"
+                f"| Clips where victim reaches top {k} outright before contact | {_ci(s[f'reach_top{k}'], True)} "
+                f"| {_pct(r.get(f'reach_top{k}'))} | {_pct(sh.get(f'reach_top{k}'))} |"
             )
         lines += [
             "",
-            f"Median time from onset to first top-3: {_s(s.get('median_first_top3_s', math.nan))}.",
+            f"Median time from onset to first outright top-3: {_s(s.get('median_first_top3_s', math.nan))}.",
             "",
         ]
         p = t1["proxy"]
@@ -777,18 +906,19 @@ def format_report(
             f"**Proxy budget curve** (false alarms counted on {p['hours'] * 60:.0f} min of rescue footage, crowded and "
             "next to a rescue; not normal footage):",
             "",
-            "| Budget / h | Caught (95%) | Random caught | Alarms / h (95%) | Median delay |",
-            "|---|---|---|---|---|",
+            "| Budget / h | Caught (95%) | Random caught | Shuffled caught | Alarms / h (95%) | Median delay |",
+            "|---|---|---|---|---|---|",
         ]
         for pt in p["points"]:
             if "recall" not in pt:
                 lines.append(
-                    f"| {pt['budget_per_hour']:g} | 0/{pt['events']} | - | - | - |"
+                    f"| {pt['budget_per_hour']:g} | 0/{pt['events']} | - | - | - | - |"
                 )
                 continue
             lines.append(
                 f"| {pt['budget_per_hour']:g} | {pt['caught']}/{pt['events']} ({100 * pt['recall_lo']:.0f}-{100 * pt['recall_hi']:.0f}%) "
                 f"| {t1['proxy_random_caught'].get(pt['budget_per_hour'], math.nan):.1f} "
+                f"| {t1.get('proxy_shuffled_caught', {}).get(pt['budget_per_hour'], math.nan):.1f} "
                 f"| {pt['fa_per_hour']:.1f} ({pt['fa_lo']:.1f}-{pt['fa_hi']:.1f}) | {_s(pt['median_latency_s'])} |"
             )
         lines.append("")
