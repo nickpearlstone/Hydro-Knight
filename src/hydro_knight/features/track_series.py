@@ -79,6 +79,7 @@ def resample_track(
     clip_id: str = "",
     joint_velocity: bool = False,
     rates: str = "raw",
+    frame_step: int = 1,
 ) -> TrackSeries:
     """Resample one track's keypoint rows to TARGET_FPS and compute its features.
 
@@ -89,6 +90,7 @@ def resample_track(
         clip_id: stored on the series for bookkeeping.
         joint_velocity: append the 34 joint velocities (feature count 92).
         rates: box rate handling, one of RATE_MODES (see module docstring).
+        frame_step: extraction frame step; only multiples of it were ever processed.
     Returns:
         TrackSeries spanning the track's first to last detection.
     """
@@ -99,7 +101,10 @@ def resample_track(
     t_start = g.index[0] / fps_src
     n = int(np.floor((g.index[-1] - g.index[0]) / fps_src * TARGET_FPS + 1e-9)) + 1
     times = t_start + np.arange(n) / TARGET_FPS
-    src = np.rint(times * fps_src).astype(np.int64)  # nearest source frame per step
+    # Nearest processed source frame per step. At 59.94 fps with frame_step 2 the plain
+    # nearest frame drifts onto odd frames, which were never processed and would read
+    # as missing.
+    src = (np.rint(times * fps_src / frame_step) * frame_step).astype(np.int64)
     r = g.reindex(src)
     det = r["box_conf"].notna().to_numpy()
     box = r[_BOX].ffill().to_numpy(np.float64)
@@ -168,10 +173,11 @@ def track_series(
     clip_id: str = "",
     joint_velocity: bool = False,
     rates: str = "raw",
+    frame_step: int = 1,
 ) -> list[TrackSeries]:
     """All confirmed tracks (track_id >= 0) of a clip as TrackSeries, by track id."""
     return [
-        resample_track(g, fps_src, frame_h, clip_id, joint_velocity, rates)
+        resample_track(g, fps_src, frame_h, clip_id, joint_velocity, rates, frame_step)
         for tid, g in df[df["track_id"] >= 0].groupby("track_id")
     ]
 

@@ -22,7 +22,7 @@ import pandas as pd
 
 from ..eval.split import split_clips
 from ..eval.victims import is_labeled, match_victim_tracks, near_path_tracks
-from ..preprocess.build_tracks import read_provenance
+from ..preprocess.build_tracks import provenance_frame_step, read_provenance
 from .track_series import TARGET_FPS, TrackSeries, track_series, trim_series
 from .windows_v2 import WindowSet, make_window_set
 
@@ -56,7 +56,8 @@ def clip_series(
         exclude_tracks: track ids to leave out (the victim, for normal data).
         only_tracks: if given, keep only these track ids (the victim, for scoring).
     """
-    video = read_provenance(path)["video"]
+    prov = read_provenance(path)
+    video = prov["video"]
     df = pd.read_parquet(path)
     df = df[~df["track_id"].isin(exclude_tracks)]
     if only_tracks is not None:
@@ -65,7 +66,13 @@ def clip_series(
     t1 = np.inf if record.trim_end is None else record.to_file_time(record.trim_end)
     out = []
     for ts in track_series(
-        df, video["fps"], video["height"], record.clip_id, joint_velocity, rates
+        df,
+        video["fps"],
+        video["height"],
+        record.clip_id,
+        joint_velocity,
+        rates,
+        provenance_frame_step(prov),
     ):
         kept = trim_series(ts, t0, t1)
         if kept is not None:
@@ -129,10 +136,15 @@ def build_datasets(
             df = pd.read_parquet(
                 path, columns=["frame", "track_id", "bx1", "by1", "bx2", "by2"]
             )
-            fps = read_provenance(path)["video"]["fps"]
+            prov = read_provenance(path)
+            fps = prov["video"]["fps"]
             match = match_victim_tracks(df, r, fps)
             frags = (
-                near_path_tracks(df, r, fps, match.tracks) if path_fragments else set()
+                near_path_tracks(
+                    df, r, fps, match.tracks, frame_step=provenance_frame_step(prov)
+                )
+                if path_fragments
+                else set()
             )
             exclude = frozenset(match.tracks | frags)
             rep.victim_tracks[r.clip_id] = sorted(exclude)

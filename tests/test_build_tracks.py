@@ -169,3 +169,11 @@ def test_same_crop_conf_drops_faint_copy_inside_one_tile():
     )
     assert off.loc[off.track_id >= 0, "track_id"].nunique() == 2
     assert on.loc[on.track_id >= 0, "track_id"].nunique() == 1
+
+
+def test_provenance_frame_step_defaults_to_every_frame():
+    from hydro_knight.preprocess.build_tracks import provenance_frame_step
+
+    assert provenance_frame_step({"extraction_settings": {"frame_step": 2}}) == 2
+    assert provenance_frame_step({"extraction_settings": {}}) == 1
+    assert provenance_frame_step({}) == 1
