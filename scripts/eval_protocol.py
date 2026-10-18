@@ -21,6 +21,7 @@ that no budget can be verified, and --pseudo-normal gives a clearly labelled sto
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 from functools import partial
 from pathlib import Path
@@ -123,6 +124,7 @@ def evaluate_seed(
     )
     t1_click = P.tier1(table, truths_click, cfg, tracks)
     return {
+        "table": table,
         "truths": truths,
         "t1": t1,
         "t2": t2,
@@ -202,19 +204,28 @@ def headline_metrics(r: dict) -> dict[str, float]:
     return {k: float(v) for k, v in out.items() if v is not None and np.isfinite(v)}
 
 
-def log_to_mlflow(
-    args, seed: int, cfg: P.ProtocolConfig, r: dict, files: list[Path]
-) -> None:
-    """One MLflow run per (run folder, size, seed). mlflow is imported only here (optional extra)."""
-    import hashlib
-    import subprocess
+def training_run_id(tracking, ckpt: Path, experiment: str) -> str:
+    """Id of the train_v2 run that wrote this checkpoint (matched by file hash), or "none found".
 
-    from hydro_knight.eval import tracking  # imports mlflow
+    Re-scoring runs (--load-dir) carry the same hash; the earliest run is the one that trained it.
+    """
+    from hydro_knight.eval import run_meta
 
-    manifest = Path("data/manifests/pool_footage.jsonl")
-    commit = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True
-    ).stdout.strip()
+    sha = run_meta.file_sha256(ckpt)
+    if sha == "missing":
+        return "none found"
+    runs = tracking.find_runs(experiment, f"tags.checkpoint_sha256 = '{sha}'")
+    return runs[-1].info.run_id if runs else "none found"
+
+
+def log_seed(
+    tracking, args, seed: int, cfg: P.ProtocolConfig, r: dict, files: list[Path]
+) -> dict[str, float]:
+    """One nested MLflow child run per seed: params, the 94 headline metrics, three figures, the report files."""
+    from hydro_knight.eval import figures as F
+    from hydro_knight.eval import run_meta
+
+    ckpt = args.run / f"model_{args.size}_s{seed}.pt"
     params = {
         "run_folder": str(args.run),
         "size": args.size,
@@ -223,19 +234,51 @@ def log_to_mlflow(
         "tracks_dir": str(args.tracks_dir),
         "normal": r["normal_label"],
         "dropped_clips": ",".join(args.drop) or "none",
-        "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest()[:12]
-        if manifest.exists()
-        else "missing",
-        "git_commit": commit or "unknown",
         **{f"cfg.{k}": str(v) for k, v in cfg.__dict__.items()},
     }
-    with tracking.run(
-        f"{args.run.name}-{args.size}-s{seed}", experiment=args.mlflow_experiment
-    ):
+    tags = run_meta.standard_tags(
+        "eval_protocol",
+        model_family="tcn_ae_v2",
+        size=args.size,
+        seed=seed,
+        run_folder=args.run.name,
+        checkpoint_sha256=run_meta.file_sha256(ckpt),
+        trained_by_run_id=training_run_id(tracking, ckpt, args.train_experiment),
+        trained_by_experiment=args.train_experiment,
+    )
+    metrics = headline_metrics(r)
+    t1 = r["t1"]
+    with tracking.run(f"s{seed}", nested=True, tags=tags):
         tracking.log_config(params)
-        tracking.log_metrics(headline_metrics(r))
+        tracking.log_metrics(metrics)
+        tracking.log_figure(
+            F.victim_timelines(r["table"], r["truths"], cfg, t1["per_clip"]),
+            "figures/victim_timelines.png",
+        )
+        tracking.log_figure(
+            F.catch_vs_false_alarms(
+                t1["proxy"], t1["proxy_random_caught"], t1["proxy_shuffled_caught"]
+            ),
+            "figures/catch_vs_false_alarms.png",
+        )
+        tracking.log_figure(
+            F.per_clip_results(t1["per_clip"]), "figures/per_clip_results.png"
+        )
         for f in files:
-            tracking.log_artifact(f)
+            tracking.log_artifact(f, "report")
+    return metrics
+
+
+def log_parent_summary(tracking, args, seed_metrics: list[dict]) -> None:
+    """Parent run: mean and SD over seeds, plus a comparison against every evaluated run so far."""
+    from hydro_knight.eval import figures as F
+    from hydro_knight.eval import run_meta
+
+    tracking.log_metrics(run_meta.mean_sd_metrics(seed_metrics))
+    runs = run_meta.flatten_search_runs(tracking.runs_frame(args.mlflow_experiment))
+    tracking.log_figure(
+        F.cross_run_comparison(runs), "figures/cross_run_within_clip_auc.png"
+    )
 
 
 def main() -> None:
@@ -259,9 +302,14 @@ def main() -> None:
     ap.add_argument(
         "--mlflow",
         action="store_true",
-        help="log each seed as an MLflow run (needs --extra tracking)",
+        help="log a parent run + one child per seed (needs --extra tracking)",
     )
     ap.add_argument("--mlflow-experiment", default="eval-protocol")
+    ap.add_argument(
+        "--train-experiment",
+        default="train-v2",
+        help="where to look up the training run of each checkpoint",
+    )
     args = ap.parse_args()
     cfg = P.ProtocolConfig(n_boot=args.n_boot, n_random=args.n_random)
     records = Manifest(Path("data/manifests/pool_footage.jsonl")).load()
@@ -272,6 +320,40 @@ def main() -> None:
         (out / f"compare_vs_{args.compare.name}.md").write_text(md)
         print(md)
         return
+    with contextlib.ExitStack() as stack:
+        tracking = None
+        if args.mlflow:
+            from hydro_knight.eval import run_meta, tracking  # imports mlflow
+
+            stack.enter_context(
+                tracking.run(
+                    f"{args.run.name}-{args.size}",
+                    experiment=args.mlflow_experiment,
+                    tags=run_meta.standard_tags(
+                        "eval_protocol",
+                        model_family="tcn_ae_v2",
+                        size=args.size,
+                        run_folder=args.run.name,
+                    ),
+                    note=(
+                        f"**eval_protocol** on `{args.run}` ({args.size}): one child "
+                        "run per seed with tier-1/tier-2 metrics, the victim rank "
+                        "timelines, catch vs false alarms against the random and "
+                        "track-shuffled baselines, and per-clip results. Each child's "
+                        "`trained_by_run_id` tag points at the train_v2 run that made "
+                        "its checkpoint."
+                    ),
+                )
+            )
+        seed_metrics = run_seeds(args, records, cfg, out, tracking)
+        if tracking is not None and seed_metrics:
+            log_parent_summary(tracking, args, seed_metrics)
+    print(f"wrote {out}")
+
+
+def run_seeds(args, records, cfg, out: Path, tracking) -> list[dict]:
+    """Evaluate, write and (optionally) log every seed in the run folder; returns each seed's metrics."""
+    seed_metrics = []
     for seed in seeds_in(args.run, args.size):
         r = evaluate_seed(args.run, args.size, seed, records, args, cfg)
         md = P.format_report(
@@ -300,11 +382,11 @@ def main() -> None:
         (out / f"summary_{args.size}_s{seed}.json").write_text(
             json.dumps(jsonable(r["t1"], r["t2"]), indent=1, default=str)
         )
-        if args.mlflow:
+        if tracking is not None:
             files = sorted(out.glob(f"*_{args.size}_s{seed}.*"))
-            log_to_mlflow(args, seed, cfg, r, files)
+            seed_metrics.append(log_seed(tracking, args, seed, cfg, r, files))
         print(md)
-    print(f"wrote {out}")
+    return seed_metrics
 
 
 if __name__ == "__main__":
