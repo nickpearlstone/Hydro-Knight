@@ -29,6 +29,11 @@ def log_artifacts(run_dir) -> None:
     mlflow.log_artifacts(str(run_dir))
 
 
+def log_artifact(path) -> None:
+    """Log one file as an artifact of the active run."""
+    mlflow.log_artifact(str(path))
+
+
 @contextlib.contextmanager
 def run(name, tracking_uri=DEFAULT_TRACKING_URI, experiment=DEFAULT_EXPERIMENT):
     """open an MLflow run (sets URI + experiment), auto-closing on exit"""

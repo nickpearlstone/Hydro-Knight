@@ -117,7 +117,7 @@ def test_tier1_perfect_model_beats_random():
     table = make_table(victim_score=1.0)
     out = P.tier1(table, {"c1": truth()}, FAST)
     s, r = out["summary"], out["random"]
-    assert s["coverage"]["value"] == pytest.approx(1.0)
+    assert s["scored"]["value"] == pytest.approx(1.0)
     assert s["within_clip_auc"]["value"] > 0.9
     assert s["time_in_top1"]["value"] > 0.9
     assert r["time_in_top1"] < 0.5
@@ -129,7 +129,7 @@ def test_tier1_per_clip_has_one_row_per_truth_even_without_scores():
     table = make_table(clip="c1")
     out = P.tier1(table, {"c1": truth("c1"), "c2": truth("c2")}, FAST)
     pc = out["per_clip"].set_index("clip_id")
-    assert pc.loc["c2", "coverage"] == 0.0
+    assert pc.loc["c2", "scored"] == 0.0
     assert math.isnan(pc.loc["c2", "best_rank"])
 
 
@@ -258,3 +258,204 @@ def test_format_variants_one_row_per_definition():
     t1 = P.tier1(make_table(), {"c1": truth()}, FAST)
     md = P.format_variants({"headline": t1, "click only": t1}, FAST)
     assert md.count("\n") == 3 and "click only" in md
+
+
+def _tied_table(n_tracks, score=0.0, clip="c1"):
+    rows = [
+        (clip, tid, float(t), score)
+        for tid in range(1, n_tracks + 1)
+        for t in np.arange(0, 40, 0.5)
+    ]
+    return pd.DataFrame(rows, columns=P.SCORE_COLUMNS)
+
+
+@pytest.mark.parametrize("n", [2, 20])
+def test_all_tied_scores_give_chance_not_a_free_win(n):
+    """A detector that scores everyone the same is chance on time-in-top-k and never reaches it outright."""
+    out = P.tier1(_tied_table(n), {"c1": truth()}, FAST)
+    s = out["summary"]
+    assert s["time_in_top3"]["value"] == pytest.approx(min(3 / n, 1.0))
+    assert s["time_in_top1"]["value"] == pytest.approx(1 / n)
+    assert s["reach_top3"]["value"] == (
+        1.0 if n <= 2 else 0.0
+    )  # with 2 swimmers, rank 2 <= 3 outright
+    assert out["per_clip"].loc[0, "best_rank"] == n
+
+
+def test_partial_tie_worked_example():
+    """2 swimmers higher, victim tied with 5 others: chance of top 3 = (3 - 2) / 6."""
+    rows = [("c1", 1, 25.0, 0.5)]
+    rows += [("c1", tid, 25.0, 0.9) for tid in (2, 3)]
+    rows += [("c1", tid, 25.0, 0.5) for tid in (4, 5, 6, 7, 8)]
+    rows += [("c1", tid, 25.0, 0.1) for tid in (9, 10)]
+    tl = P.victim_rank_timeline(
+        pd.DataFrame(rows, columns=P.SCORE_COLUMNS), truth(), FAST
+    )
+    at = tl[(tl.t >= 25.0) & (tl.t < 27.0)].iloc[0]
+    assert at["p_top3"] == pytest.approx(1 / 6)
+    assert at["p_top1"] == 0.0 and at["p_top5"] == pytest.approx(3 / 6)
+    assert at["rank"] == 8  # outright: 2 higher + 5 tied ahead + the victim
+
+
+def test_distinct_scores_unchanged_by_tie_handling():
+    rows = [("c1", tid, 25.0, s) for tid, s in [(1, 0.7), (2, 0.9), (3, 0.5), (4, 0.3)]]
+    tl = P.victim_rank_timeline(
+        pd.DataFrame(rows, columns=P.SCORE_COLUMNS), truth(), FAST
+    )
+    at = tl[(tl.t >= 25.0) & (tl.t < 27.0)].iloc[0]
+    assert at["rank"] == 2 and at["p_top1"] == 0.0 and at["p_top3"] == 1.0
+
+
+def _binary_rule(fires_on_victim_only: bool, rate=0.05, n_tracks=10, seed=3, clip="c1"):
+    """A 0/1 detector: fires only on the victim during distress, or on random swimmer-moments."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for tid in range(1, n_tracks + 1):
+        for t in np.arange(0, 40, 0.5):
+            if fires_on_victim_only:
+                s = 1.0 if (tid == 1 and 18.0 <= t <= 30.0) else 0.0
+            else:
+                s = float(rng.random() < rate)
+            rows.append((clip, tid, float(t), s))
+    return pd.DataFrame(rows, columns=P.SCORE_COLUMNS)
+
+
+def test_shuffle_moves_whole_track_sequences_at_offset_zero():
+    """Equal-length tracks: each track gets exactly one other track's whole sequence, from its start."""
+    table = pd.concat([make_table(clip="c1"), make_table(clip="c2", seed=1)])
+    groups = P._by_clip(table)
+    sh = P.shuffle_within_clip(groups, np.random.default_rng(0))
+    for c, g in groups.items():
+        out = sh[c]
+        assert np.array_equal(out["t"].to_numpy(), g["t"].to_numpy())  # rows untouched
+        orig = {
+            k: v.sort_values("t")["score"].to_numpy() for k, v in g.groupby("track_id")
+        }
+        used = []
+        for _, v in out.groupby("track_id"):
+            new = v.sort_values("t")["score"].to_numpy()
+            match = [j for j, o in orig.items() if np.array_equal(new, o)]
+            assert len(match) == 1, "not one source sequence, unshifted"
+            used.append(match[0])
+        assert sorted(used) == sorted(orig)  # a permutation: every sequence used once
+        assert any(u != k for u, k in zip(used, sorted(orig), strict=True))
+
+
+def test_shuffle_cuts_long_and_repeats_short_sequences():
+    """Two tracks of different lengths swapped: the long one is cut, the short one repeated from its start."""
+    rows = [("c1", 1, float(t), float(t)) for t in range(6)]  # track 1: 0..5
+    rows += [("c1", 2, float(t), 100.0 + t) for t in range(3)]  # track 2: 100..102
+    groups = P._by_clip(pd.DataFrame(rows, columns=P.SCORE_COLUMNS))
+    for seed in range(20):  # find a draw that swaps the two tracks
+        out = P.shuffle_within_clip(groups, np.random.default_rng(seed))["c1"]
+        t1 = out[out.track_id == 1].sort_values("t")["score"].to_numpy()
+        if t1[0] == 100.0:
+            break
+    t2 = out[out.track_id == 2].sort_values("t")["score"].to_numpy()
+    assert t1.tolist() == [100, 101, 102, 100, 101, 102]  # short source repeated
+    assert t2.tolist() == [0, 1, 2]  # long source cut, from its start
+
+
+def test_rule_that_fires_on_the_victim_beats_its_shuffle():
+    # with offset 0 the victim gets its own sequence back in about 1 draw in 10, so average many
+    cfg = P.ProtocolConfig(n_boot=20, n_random=50, n_thresholds=20)
+    out = P.tier1(_binary_rule(True), {"c1": truth()}, cfg)
+    assert out["summary"]["time_in_top1"]["value"] > 0.8
+    assert out["shuffled"]["time_in_top1"] < 0.3
+
+
+def test_rule_that_fires_at_random_matches_its_shuffle_but_not_noise():
+    """A sparse 0/1 rule with no skill: its shuffle agrees with it, noise does not.
+
+    Noise never ties, so by luck it puts the victim in the top 3 outright at some moment in
+    almost every clip; a 0/1 rule mostly ties everyone at 0 and only gets there when it fires.
+    """
+    clips = [f"c{i}" for i in range(20)]
+    table = pd.concat(
+        [_binary_rule(False, rate=0.02, seed=i, clip=c) for i, c in enumerate(clips)]
+    )
+    out = P.tier1(
+        table,
+        {c: truth(c) for c in clips},
+        P.ProtocolConfig(n_boot=20, n_random=10, n_thresholds=20),
+    )
+    model = out["summary"]["reach_top3"]["value"]
+    assert abs(model - out["shuffled"]["reach_top3"]) < 0.15
+    assert out["random"]["reach_top3"] - model > 0.3
+
+
+def test_victim_detected_but_too_short_to_be_scored():
+    """The input holds a 1 s victim track, but the model never scored it (shorter than its warm-up)."""
+    scores = make_table()
+    scores = scores[scores.track_id != 1]  # the model emitted nothing for the victim
+    tracks = pd.DataFrame({"t": np.arange(22.0, 23.0, 1 / 30), "track_id": 1})
+    out = P.tier1(scores, {"c1": truth()}, FAST, tracks={"c1": tracks})
+    s = out["summary"]
+    assert s["detected"]["value"] > 0  # 1 s of track inside a 2 s trailing window
+    assert s["scored"]["value"] == 0.0  # "scored by this model"
+    # 1 s track at 22-23 s, trailing 2 s window: moments 22.0 .. 24.5 see it (6 of 31)
+    assert s["detected"]["value"] == pytest.approx(6 / 31)
+
+
+def test_detected_is_empty_without_a_track_table():
+    out = P.tier1(make_table(), {"c1": truth()}, FAST)
+    assert math.isnan(out["summary"]["detected"]["value"])
+    assert "Victim detected (input tracks" in P.format_report("x", out, None, FAST)
+
+
+def _burst_rule(seed, clip, n_tracks=10, burst_steps=6, on_share=0.02):
+    """A no-skill 0/1 rule that alarms in 3 s bursts (6 steps) on random swimmers."""
+    rng = np.random.default_rng(seed)
+    times = np.arange(0, 40, 0.5)
+    rows = []
+    for tid in range(1, n_tracks + 1):
+        on = np.zeros(len(times))
+        for st in np.flatnonzero(rng.random(len(times)) < on_share / burst_steps):
+            on[st : st + burst_steps] = 1.0
+        rows += [
+            (clip, tid, float(t), float(v)) for t, v in zip(times, on, strict=True)
+        ]
+    return pd.DataFrame(rows, columns=P.SCORE_COLUMNS)
+
+
+def _smooth_scores(seed, clip, n_tracks=10, width=20):
+    """A no-skill continuous detector whose scores drift slowly (moving average of noise)."""
+    rng = np.random.default_rng(seed)
+    times = np.arange(0, 40, 0.5)
+    rows = []
+    for tid in range(1, n_tracks + 1):
+        x = np.convolve(
+            rng.normal(size=len(times) + width), np.ones(width) / width, "valid"
+        )[: len(times)]
+        rows += [(clip, tid, float(t), float(v)) for t, v in zip(times, x, strict=True)]
+    return pd.DataFrame(rows, columns=P.SCORE_COLUMNS)
+
+
+@pytest.mark.parametrize("make", [_burst_rule, _smooth_scores])
+def test_clumpy_no_skill_detectors_match_their_track_shuffle(make):
+    """A row shuffle would scatter each alarm into many blips and look far luckier than these
+    detectors; the track shuffle keeps their rhythm, so it agrees with them."""
+    clips = [f"c{i}" for i in range(30)]
+    table = pd.concat([make(i, c) for i, c in enumerate(clips)])
+    out = P.tier1(
+        table,
+        {c: truth(c) for c in clips},
+        P.ProtocolConfig(n_boot=20, n_random=10, n_thresholds=20),
+    )
+    model = out["summary"]["reach_top3"]["value"]
+    assert abs(model - out["shuffled"]["reach_top3"]) <= 0.12
+    if (
+        make is _burst_rule
+    ):  # the old row shuffle, averaged like the protocol does, for contrast
+        rng = np.random.default_rng(0)
+        groups = P._by_clip(table)
+        truths = {c: truth(c) for c in clips}
+        old = []
+        for _ in range(10):
+            rowshuf = {
+                c: g.assign(score=rng.permutation(g["score"].to_numpy()))
+                for c, g in groups.items()
+            }
+            pc = P._tier1_per_clip(rowshuf, truths, FAST)
+            old.append(P._tier1_summary(pc, FAST)["reach_top3"]["value"])
+        assert np.mean(old) - model > 0.15
