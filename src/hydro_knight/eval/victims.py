@@ -133,6 +133,7 @@ def near_path_tracks(
     radius: float = 1.0,
     min_s: float = 0.3,
     max_ratio: float = 3.0,
+    frame_step: int = 1,
 ) -> set[int]:
     """Tracks that follow the victim between clicks: likely victim fragments.
 
@@ -153,6 +154,7 @@ def near_path_tracks(
         max_ratio: detections taller than this times the local typical height
             (local_height() at each click, interpolated along the path), at that moment
             or as their track's median, never count.
+        frame_step: extraction frame step; each row stands for frame_step frames of time.
     Returns:
         Set of track ids.
     """
@@ -183,5 +185,5 @@ def near_path_tracks(
             th = sub["track_id"].map(_track_heights(det)).to_numpy()
             near &= np.maximum(h, th) <= max_ratio * ref
         counts = sub[near].groupby("track_id").size()
-        out |= {int(k) for k, n in counts.items() if n / fps >= min_s}
+        out |= {int(k) for k, n in counts.items() if n * frame_step / fps >= min_s}
     return out

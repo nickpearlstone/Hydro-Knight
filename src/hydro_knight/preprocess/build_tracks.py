@@ -214,3 +214,8 @@ def read_provenance(path: Path) -> dict | None:
     """The "hydro_knight" metadata written by build_tracks, or None for older keypoint files."""
     raw = (pq.read_schema(path).metadata or {}).get(b"hydro_knight")
     return json.loads(raw) if raw else None
+
+
+def provenance_frame_step(provenance: dict) -> int:
+    """Extraction frame step recorded in a keypoint file's provenance (1 = every frame)."""
+    return (provenance.get("extraction_settings") or {}).get("frame_step", 1)

@@ -116,3 +116,20 @@ def test_rate_modes(mode):
 def test_unknown_rate_mode_is_refused():
     with pytest.raises(ValueError, match="rates"):
         resample_track(track_rows(1, range(5)), 30.0, 1080, rates="smooth")
+
+
+def test_frame_step_2_at_59_94_fps_never_reads_a_skipped_frame():
+    # 60 s of a 59.94 fps clip extracted at frame_step 2: only even frames exist, all
+    # detected. Nearest-frame rounding drifts onto odd (never processed) frames, which
+    # must not read as "missing".
+    fps = 59.94
+    g = track_rows(1, range(0, int(60 * fps), 2))
+    ts = resample_track(g, fps_src=fps, frame_h=1080, frame_step=2)
+    assert len(ts) > 1700 and ts.detected.all()
+
+
+def test_frame_step_2_still_marks_real_gaps_missing():
+    g = track_rows(1, [f for f in range(0, 240, 2) if not 100 <= f <= 140])
+    ts = resample_track(g, fps_src=59.94, frame_h=1080, frame_step=2)
+    gone = ~ts.detected
+    assert gone.any() and not gone[:45].any() and not gone[-45:].any()

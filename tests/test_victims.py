@@ -158,3 +158,17 @@ def test_track_that_is_oversized_most_of_its_life_is_not_the_victim():
     )
     m = match_victim_tracks(pd.concat([CROWD, guard]), _rec([click]), fps=30.0)
     assert m.tracks == set() and 99 in m.oversize
+
+
+def test_fragment_time_counts_skipped_frames():
+    # frame_step 2: 5 processed frames span ~0.33 s of real time, enough for min_s 0.3.
+    from hydro_knight.eval.victims import near_path_tracks
+
+    frag = track_rows(11, range(60, 70, 2), box=(150, 100, 190, 180))
+    clicks = [
+        {"t": 1.0, "x": 120.0, "y": 140.0, "kind": "onset"},
+        {"t": 3.0, "x": 220.0, "y": 140.0, "kind": "last_seen"},
+    ]
+    df, rec = pd.concat([DF, frag]), _rec(clicks)
+    assert near_path_tracks(df, rec, 30.0, {7}) == set()
+    assert near_path_tracks(df, rec, 30.0, {7}, frame_step=2) == {11}
