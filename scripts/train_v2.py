@@ -24,6 +24,7 @@ evaluation change can be measured on the exact same models.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 from pathlib import Path
 
@@ -31,7 +32,9 @@ import numpy as np
 import pandas as pd
 
 from hydro_knight.annotate import review
+from hydro_knight.eval import run_meta
 from hydro_knight.eval.detection_v2 import alarm_table, clip_evals, operating_points
+from hydro_knight.eval.figures import loss_curves
 from hydro_knight.eval.separation import victim_separation
 from hydro_knight.features.dataset_v2 import build_datasets, victim_windows
 from hydro_knight.features.track_series import RATE_MODES
@@ -101,7 +104,19 @@ def main() -> None:
         default=None,
         help="re-score model_<size>_s<seed>.pt from this earlier run instead of training",
     )
-    p.add_argument("--mlflow", action="store_true")
+    p.add_argument(
+        "--mlflow",
+        action="store_true",
+        help="log a parent run + one child per (size, seed) (needs --extra tracking)",
+    )
+    p.add_argument("--mlflow-experiment", default="train-v2")
+    p.add_argument(
+        "--video",
+        action="store_true",
+        help="with --detection: render a best/worst held-out demo video per (size, seed)"
+        " (unblurred footage, local only, never commit)",
+    )
+    p.add_argument("--videos-dir", default="raw_local")
     p.add_argument(
         "--smoke", action="store_true", help="3 unlabeled clips, 30 steps; not a result"
     )
@@ -136,7 +151,179 @@ def main() -> None:
         print(f"leaving out {len(unreviewed)} Claude-labeled clips not reviewed yet")
     rejected |= unreviewed
 
+    out = Path(args.out)
+    tracking = None
+    with contextlib.ExitStack() as stack:
+        if args.mlflow:
+            from hydro_knight.eval import tracking  # imports mlflow (optional extra)
+
+            stack.enter_context(
+                tracking.run(
+                    out.name,
+                    experiment=args.mlflow_experiment,
+                    tags=run_meta.standard_tags(
+                        "train_v2",
+                        Path(args.manifest),
+                        model_family="tcn_ae_v2",
+                        run_folder=out.name,
+                        load_dir=args.load_dir,
+                    ),
+                    note=_parent_note(args, rejected),
+                )
+            )
+            tracking.log_config(_flat_args(args))
+        results, reports, histories = _train_all(args, records, rejected, tracking)
+        summary_rows = _summarize(args, results)
+
+        out.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "smoke": args.smoke,
+            "args": vars(args),
+            "rejected_clips": sorted(rejected),
+            "reports": reports,
+            "results": results,
+            "summary": summary_rows,
+        }
+        (out / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
+        print(f"wrote {out / 'summary.json'}")
+
+        if tracking is not None:
+            for agg in summary_rows:
+                tracking.log_metrics(run_meta.numeric_items(agg, f"{agg['size']}."))
+            tracking.log_figure(loss_curves(histories), "figures/loss_curves.png")
+            tracking.log_artifact(out / "summary.json")
+
+
+def _flat_args(args) -> dict:
+    """Command-line settings as MLflow params (lists joined, so sizes/seeds read as one value)."""
+    return {
+        k: " ".join(map(str, v)) if isinstance(v, list) else v
+        for k, v in vars(args).items()
+    }
+
+
+def _parent_note(args, rejected) -> str:
+    return (
+        f"**train_v2** `{Path(args.out).name}`: sizes {' '.join(args.sizes)}, "
+        f"seeds {' '.join(map(str, args.seeds))}, {args.steps} steps, rates `{args.rates}`"
+        + (f", re-scoring `{args.load_dir}`" if args.load_dir else "")
+        + (", with detection tables" if args.detection else "")
+        + f". {len(rejected)} clips left out (rejected or unreviewed labels).\n\n"
+        "One child run per (size, seed): per-step `train_loss`, train/test clip lists "
+        "under Datasets, the checkpoint under Artifacts. Mean and SD across seeds here."
+    )
+
+
+def _child(tracking, args, size: str, seed: int):
+    """Nested MLflow run for one (size, seed), or a no-op without --mlflow."""
+    if tracking is None:
+        return contextlib.nullcontext()
+    return tracking.run(
+        f"{size}-s{seed}",
+        nested=True,
+        tags=run_meta.standard_tags(
+            "train_v2",
+            Path(args.manifest),
+            model_family="tcn_ae_v2",
+            size=size,
+            seed=seed,
+            run_folder=Path(args.out).name,
+        ),
+    )
+
+
+def _log_child(tracking, args, row, model, rep, train, test, ckpt: Path) -> None:
+    """Everything one (size, seed) child run carries: params, loss per step, metrics, datasets, files."""
+    out = Path(args.out)
+    size, seed = row["size"], row["seed"]
+    tracking.set_tags({"checkpoint_sha256": run_meta.file_sha256(ckpt)})
+    tracking.log_config(_flat_args(args) | {"sizes": size, "seeds": seed})
+    tracking.log_series("train_loss", model.loss_history_)
+    metrics = run_meta.numeric_items(row)
+    for key in ("detection", "detection_random"):
+        for pt in row.get(key, []):
+            metrics |= run_meta.numeric_items(pt, f"{key}.fa{pt['fa_target']:g}.")
+    tracking.log_metrics(metrics)
+    tracking.log_dataset(
+        run_meta.split_table(rep.used_train, _clips_of(train)),
+        f"train-s{seed}",
+        "training",
+        args.manifest,
+    )
+    tracking.log_dataset(
+        run_meta.split_table(rep.used_test, _clips_of(test)),
+        f"test-s{seed}",
+        "evaluation",
+        args.manifest,
+    )
+    tracking.log_artifact(ckpt, "checkpoint")
+    for name in (
+        f"sweep_{size}_s{seed}.csv",
+        f"sweep_random_{size}_s{seed}.csv",
+        f"alarms_{size}_s{seed}.parquet",
+    ):
+        if (out / name).exists():
+            tracking.log_artifact(out / name, "detection")
+    demo = out / f"demo_{size}_s{seed}.mp4"
+    if args.video and demo.exists():
+        tracking.log_artifact(demo, "demo")
+        tracking.set_tags({"private_footage": "true"})
+
+
+def _demo_video(args, records, rep, alarms, det, held, size, seed) -> None:
+    """Best and worst held-out clip with boxes coloured by score -> runs/<out>/demo_<size>_s<seed>.mp4 (local only)."""
+    from hydro_knight.eval import demo_video
+    from hydro_knight.eval import protocol as P
+
+    truths = P.truths_from_records(records, rep.used_test, rep.victim_tracks)
+    groups = dict(tuple(alarms.groupby("clip_id")))
+    auc = {
+        c: P.within_clip_auc(groups[c], t, P.ProtocolConfig().onset_tol_s)
+        for c, t in truths.items()
+        if c in groups
+    }
+    lo, hi = demo_video.score_scale(
+        {"test_median": float(np.median(held)) if len(held) else None}
+        | {"detection": det["points"]},
+        alarms["score"].to_numpy(),
+    )
+    path = demo_video.render_demo(
+        Path(args.out) / f"demo_{size}_s{seed}.mp4",
+        alarms,
+        truths,
+        demo_video.pick_best_worst(auc),
+        Path(args.keypoints),
+        Path(args.videos_dir),
+        lo,
+        hi,
+        subtitle=f"{Path(args.out).name}: {size}, seed {seed}, never trained on",
+    )
+    print(f"  demo video: {path or 'skipped (no ffmpeg, scored clips or video files)'}")
+
+
+def _summarize(args, results: list[dict]) -> list[dict]:
+    summary_rows = []
+    for size in args.sizes:
+        rows = [r for r in results if r["size"] == size]
+        agg = {"size": size, "params": rows[0]["params"], "seeds": len(rows)}
+        for key in (
+            "test_median",
+            "test_p90",
+            "auc",
+            "auc_random",
+            "clip_rank_median",
+            "clip_rank_median_random",
+        ):
+            agg[key], agg[key + "_sd"] = _mean_sd(rows, key)
+        summary_rows.append(agg)
+        print("SUMMARY", json.dumps(agg))
+    return summary_rows
+
+
+def _train_all(args, records, rejected, tracking):
+    """Train (or re-load) and score every (size, seed); returns (result rows, dataset reports, loss histories)."""
     results, reports = [], {}
+    histories: dict[str, dict[int, list[float]]] = {s: {} for s in args.sizes}
     for seed in args.seeds:
         train, test, rep = build_datasets(
             args.keypoints,
@@ -169,147 +356,119 @@ def main() -> None:
                 min_track_s=args.min_track_s,
             )
         for size in args.sizes:
-            if args.load_dir:
-                model, scaler, _ = load_checkpoint(
-                    Path(args.load_dir) / f"model_{size}_s{seed}.pt", args.device
-                )
-                model.loss_history_ = [float("nan")]
-            else:
-                model, scaler = train_v2(
-                    train,
-                    size,
-                    args.steps,
-                    args.batch,
-                    args.lr,
-                    seed,
-                    args.coord_weight,
-                    args.device,
-                )
-                Path(args.out).mkdir(parents=True, exist_ok=True)
-                save_checkpoint(
-                    Path(args.out) / f"model_{size}_s{seed}.pt",
-                    model,
-                    scaler,
-                    {
-                        "size": size,
-                        "seed": seed,
-                        "rates": args.rates,
-                        "joint_velocity": args.joint_velocity,
-                        "coord_weight": args.coord_weight,
-                        "min_track_s": args.min_track_s,
-                        "train_clips": rep.used_train,
-                        "test_clips": rep.used_test,
-                    },
-                )
-            held = score_v2(model, test, scaler, args.coord_weight, device=args.device)
-            row = {
-                "size": size,
-                "seed": seed,
-                "params": n_params(model),
-                "train_loss_final": float(np.mean(model.loss_history_[-20:])),
-                "test_windows": int(len(held)),
-                "test_median": float(np.median(held)) if len(held) else None,
-                "test_p90": float(np.percentile(held, 90)) if len(held) else None,
-            }
-            if vic is not None and len(vic):
-                vs = score_v2(model, vic, scaler, args.coord_weight, device=args.device)
-                sep = victim_separation(
-                    held,
-                    _clips_of(test),
-                    vs[in_event],
-                    _clips_of(vic)[in_event],
-                    seed=seed,
-                )
-                row.update({k: v for k, v in sep.items() if k != "per_clip_rank"})
-                row["per_clip_rank"] = sep["per_clip_rank"]
-            if args.detection and vic is not None:
-                vs_all = (
-                    score_v2(model, vic, scaler, args.coord_weight, device=args.device)
-                    if len(vic)
-                    else np.empty(0)
-                )
-                alarms = pd.concat([alarm_table(test, held), alarm_table(vic, vs_all)])
-                det = operating_points(
-                    clip_evals(alarms, records, rep), args.fa_targets
-                )
-                rng = np.random.default_rng(seed)
-                alarms_rand = alarms.assign(score=rng.random(len(alarms)))
-                det_rand = operating_points(
-                    clip_evals(alarms_rand, records, rep), args.fa_targets
-                )
-                out_dir = Path(args.out)
-                out_dir.mkdir(parents=True, exist_ok=True)
-                det["sweep"].to_csv(out_dir / f"sweep_{size}_s{seed}.csv", index=False)
-                det_rand["sweep"].to_csv(
-                    out_dir / f"sweep_random_{size}_s{seed}.csv", index=False
-                )
-                alarms.to_parquet(out_dir / f"alarms_{size}_s{seed}.parquet")
-                row["detection"] = det["points"]
-                row["detection_random"] = det_rand["points"]
-                row["detection_events"] = det["events"]
-                row["detection_hours"] = det["hours"]
-                for pt, pr in zip(det["points"], det_rand["points"], strict=True):
-                    print(
-                        f"  <= {pt['fa_target']:g} FA/h: recall {pt['recall']:.2f}"
-                        f" (random {pr['recall']:.2f}), median time to alarm"
-                        f" {pt.get('median_latency_s')} s"
+            with _child(tracking, args, size, seed):
+                if args.load_dir:
+                    ckpt = Path(args.load_dir) / f"model_{size}_s{seed}.pt"
+                    model, scaler, _ = load_checkpoint(ckpt, args.device)
+                    model.loss_history_ = [float("nan")]
+                else:
+                    model, scaler = train_v2(
+                        train,
+                        size,
+                        args.steps,
+                        args.batch,
+                        args.lr,
+                        seed,
+                        args.coord_weight,
+                        args.device,
                     )
-            results.append(row)
-            print(
-                json.dumps(
-                    {
-                        k: v
-                        for k, v in row.items()
-                        if k not in ("per_clip_rank", "detection", "detection_random")
-                    }
+                    Path(args.out).mkdir(parents=True, exist_ok=True)
+                    ckpt = Path(args.out) / f"model_{size}_s{seed}.pt"
+                    save_checkpoint(
+                        ckpt,
+                        model,
+                        scaler,
+                        {
+                            "size": size,
+                            "seed": seed,
+                            "rates": args.rates,
+                            "joint_velocity": args.joint_velocity,
+                            "coord_weight": args.coord_weight,
+                            "min_track_s": args.min_track_s,
+                            "train_clips": rep.used_train,
+                            "test_clips": rep.used_test,
+                        },
+                    )
+                held = score_v2(
+                    model, test, scaler, args.coord_weight, device=args.device
                 )
-            )
-
-    summary_rows = []
-    for size in args.sizes:
-        rows = [r for r in results if r["size"] == size]
-        agg = {"size": size, "params": rows[0]["params"], "seeds": len(rows)}
-        for key in (
-            "test_median",
-            "test_p90",
-            "auc",
-            "auc_random",
-            "clip_rank_median",
-            "clip_rank_median_random",
-        ):
-            agg[key], agg[key + "_sd"] = _mean_sd(rows, key)
-        summary_rows.append(agg)
-        print("SUMMARY", json.dumps(agg))
-
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
-    summary = {
-        "smoke": args.smoke,
-        "args": vars(args),
-        "rejected_clips": sorted(rejected),
-        "reports": reports,
-        "results": results,
-        "summary": summary_rows,
-    }
-    (out / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
-    print(f"wrote {out / 'summary.json'}")
-
-    if args.mlflow:
-        from hydro_knight.eval import tracking
-
-        for row in results:
-            with tracking.run(name=f"{out.name}-{row['size']}-s{row['seed']}"):
-                tracking.log_config(
-                    {k: v for k, v in vars(args).items() if k not in ("sizes", "seeds")}
-                    | {"size": row["size"], "seed": row["seed"]}
+                row = {
+                    "size": size,
+                    "seed": seed,
+                    "params": n_params(model),
+                    "train_loss_final": float(np.mean(model.loss_history_[-20:])),
+                    "test_windows": int(len(held)),
+                    "test_median": float(np.median(held)) if len(held) else None,
+                    "test_p90": float(np.percentile(held, 90)) if len(held) else None,
+                }
+                if vic is not None and len(vic):
+                    vs = score_v2(
+                        model, vic, scaler, args.coord_weight, device=args.device
+                    )
+                    sep = victim_separation(
+                        held,
+                        _clips_of(test),
+                        vs[in_event],
+                        _clips_of(vic)[in_event],
+                        seed=seed,
+                    )
+                    row.update({k: v for k, v in sep.items() if k != "per_clip_rank"})
+                    row["per_clip_rank"] = sep["per_clip_rank"]
+                if args.detection and vic is not None:
+                    vs_all = (
+                        score_v2(
+                            model, vic, scaler, args.coord_weight, device=args.device
+                        )
+                        if len(vic)
+                        else np.empty(0)
+                    )
+                    alarms = pd.concat(
+                        [alarm_table(test, held), alarm_table(vic, vs_all)]
+                    )
+                    det = operating_points(
+                        clip_evals(alarms, records, rep), args.fa_targets
+                    )
+                    rng = np.random.default_rng(seed)
+                    alarms_rand = alarms.assign(score=rng.random(len(alarms)))
+                    det_rand = operating_points(
+                        clip_evals(alarms_rand, records, rep), args.fa_targets
+                    )
+                    out_dir = Path(args.out)
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    det["sweep"].to_csv(
+                        out_dir / f"sweep_{size}_s{seed}.csv", index=False
+                    )
+                    det_rand["sweep"].to_csv(
+                        out_dir / f"sweep_random_{size}_s{seed}.csv", index=False
+                    )
+                    alarms.to_parquet(out_dir / f"alarms_{size}_s{seed}.parquet")
+                    if args.video:
+                        _demo_video(args, records, rep, alarms, det, held, size, seed)
+                    row["detection"] = det["points"]
+                    row["detection_random"] = det_rand["points"]
+                    row["detection_events"] = det["events"]
+                    row["detection_hours"] = det["hours"]
+                    for pt, pr in zip(det["points"], det_rand["points"], strict=True):
+                        print(
+                            f"  <= {pt['fa_target']:g} FA/h: recall {pt['recall']:.2f}"
+                            f" (random {pr['recall']:.2f}), median time to alarm"
+                            f" {pt.get('median_latency_s')} s"
+                        )
+                histories[size][seed] = list(model.loss_history_)
+                if tracking is not None:
+                    _log_child(tracking, args, row, model, rep, train, test, ckpt)
+                results.append(row)
+                print(
+                    json.dumps(
+                        {
+                            k: v
+                            for k, v in row.items()
+                            if k
+                            not in ("per_clip_rank", "detection", "detection_random")
+                        }
+                    )
                 )
-                tracking.log_metrics(
-                    {
-                        k: v
-                        for k, v in row.items()
-                        if isinstance(v, (int, float)) and not isinstance(v, bool)
-                    }
-                )
+    return results, reports, histories
 
 
 if __name__ == "__main__":

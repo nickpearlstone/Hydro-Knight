@@ -42,7 +42,6 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from hydro_knight.eval import tracking
 from hydro_knight.eval.data_health import (
     dataset_census,
     frame_coverage_in_events,
@@ -275,9 +274,34 @@ def main() -> None:
     print(f"report written: {summary}")
 
     if args.mlflow:
-        with tracking.run(name=Path(args.out).name):
+        from hydro_knight.eval import (
+            run_meta,
+            tracking,
+        )  # imports mlflow (optional extra)
+
+        with tracking.run(
+            Path(args.out).name,
+            tags=run_meta.standard_tags(
+                "eval_report",
+                Path(args.manifest) if args.manifest else run_meta.MANIFEST,
+                model_family="tcn_ae_v1",
+                run_folder=Path(args.out).name,
+            ),
+            note=(
+                f"**eval_report (v1)** `{Path(args.out).name}`: "
+                + (
+                    "fresh training"
+                    if args.train_fresh
+                    else f"checkpoint `{args.ckpt}`"
+                )
+                + ". Old time-scoped evaluation (any swimmer counts); see eval_protocol "
+                "for the victim-only protocol."
+            ),
+        ):
             tracking.log_config(params)
             tracking.log_metrics(metrics)
+            if loss_history:
+                tracking.log_series("train_loss", loss_history)
             tracking.log_artifacts(args.out)
 
 

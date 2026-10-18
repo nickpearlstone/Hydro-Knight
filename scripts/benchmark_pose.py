@@ -8,6 +8,7 @@ Steps, in order:
     uv run python -m hydro_knight.annotate            # Swimmer count tab: click every person
     uv run python scripts/benchmark_pose.py run      # score every backend, write results
     uv run python scripts/benchmark_pose.py sweep    # recall vs false positives across cutoffs
+    uv run python scripts/benchmark_pose.py log      # push results on disk to MLflow (or run/sweep --mlflow)
 
 Ground truth is one click per person, in the water or out of it (deck, stairs, guard stand);
 the file format lives in hydro_knight/annotate/count.py. A detection is matched to a click that lies inside
@@ -336,6 +337,8 @@ def cmd_run(args) -> None:
         )
     (out / "summary.md").write_text("\n".join(lines) + "\n")
     print(f"\nwrote {out}/summary.md, summary.csv, per_frame.csv")
+    if args.mlflow:
+        log_benchmark("run", pd.DataFrame(rows), out, vars(args))
 
 
 def cmd_sweep(args) -> None:
@@ -378,6 +381,120 @@ def cmd_sweep(args) -> None:
         ].to_string(index=False)
     )
     print(f"\nwrote {out}/sweep.csv")
+    if args.mlflow:
+        log_benchmark("sweep", df, out, vars(args))
+
+
+# ---------------------------------------------------------------- MLflow
+
+
+def cmd_log(args) -> None:
+    """Log results already on disk (summary.csv and/or sweep.csv) without re-running any model."""
+    import pandas as pd
+
+    out = Path(args.out)
+    done = False
+    for kind, name in (("run", "summary.csv"), ("sweep", "sweep.csv")):
+        if (out / name).exists():
+            log_benchmark(kind, pd.read_csv(out / name), out, {"logged_from": str(out)})
+            done = True
+    if not done:
+        raise SystemExit(f"no summary.csv or sweep.csv in {out}")
+
+
+def log_benchmark(kind: str, df, out: Path, settings: dict) -> None:
+    """Parent run per command, one child per model (and mode for `run`); mlflow is imported only here.
+
+    `sweep` children log recall / false positives / duplicates with step = confidence
+    floor x 1000, so the MLflow UI can plot them against the cutoff.
+    """
+    import pandas as pd
+
+    from hydro_knight.eval import figures as F
+    from hydro_knight.eval import run_meta, tracking  # imports mlflow
+
+    gt = json.loads(GT_PATH.read_text())["frames"]
+    frames = pd.DataFrame(
+        [
+            {
+                "clip_id": f["clip_id"],
+                "frame": f["frame"],
+                "water": len(f["water"]),
+                "deck": len(f["deck"]),
+            }
+            for f in gt
+            if f["water"] or f["deck"]
+        ]
+    )
+    base = run_meta.standard_tags(
+        "benchmark_pose",
+        MANIFEST,
+        model_family="pose_backend",
+        benchmark=kind,
+        gt_sha256=run_meta.file_sha256(GT_PATH),
+        run_folder=out.name,
+    )
+    fixed = {"tile": TILE, "overlap": OVERLAP, "imgsz": IMGSZ, "box_pad": BOX_PAD}
+    params = fixed | {
+        k: " ".join(map(str, v)) if isinstance(v, list) else v
+        for k, v in settings.items()
+        if k != "cmd"
+    }
+    if kind == "run":
+        params["conf"] = CONF
+    note = (
+        f"**benchmark_pose {kind}**: {len(frames)} hand-clicked frames, "
+        f"{int(frames['water'].sum())} swimmers in the water. "
+        + (
+            "One child per model and mode (whole frame / tiled)."
+            if kind == "run"
+            else "One child per model; metrics are stepped by confidence floor x 1000."
+        )
+    )
+    with tracking.run(
+        f"pose-{kind}-{out.name}",
+        experiment="pose-benchmark",
+        tags=base,
+        note=note,
+    ):
+        tracking.log_config(params)
+        tracking.log_dataset(frames, "pose_bench_gt", "evaluation", GT_PATH)
+        if kind == "run":
+            for _, r in df.iterrows():
+                with tracking.run(
+                    f"{r['model']}-{r['mode']}",
+                    nested=True,
+                    tags=base | {"model": r["model"], "mode": r["mode"]},
+                ):
+                    tracking.log_config(
+                        params | {"model": r["model"], "mode": r["mode"]}
+                    )
+                    tracking.log_metrics(
+                        run_meta.numeric_items(r.drop(["model", "mode"]).to_dict())
+                    )
+            tracking.log_figure(F.pose_benchmark(df), "figures/recall_vs_false_pos.png")
+            files = ("summary.csv", "summary.md", "per_frame.csv")
+        else:
+            for model, g in df.groupby("model", sort=False):
+                with tracking.run(
+                    str(model), nested=True, tags=base | {"model": model}
+                ):
+                    tracking.log_config(params | {"model": model})
+                    for _, r in g.iterrows():
+                        step = int(round(float(r["threshold"]) * 1000))
+                        tracking.log_metrics(
+                            run_meta.numeric_items(
+                                r.drop(["model", "threshold"]).to_dict()
+                            ),
+                            step=step,
+                        )
+            tracking.log_figure(
+                F.pose_sweep(df), "figures/sweep_recall_vs_false_pos.png"
+            )
+            files = ("sweep.csv",)
+        for name in files:
+            if (out / name).exists():
+                tracking.log_artifact(out / name, "results")
 
 
 def main() -> None:
@@ -395,6 +512,7 @@ def main() -> None:
     r.add_argument("--no-mediapipe", action="store_true")
     r.add_argument("--batch", type=int, default=4, help="crops per YOLO call")
     r.add_argument("--out", default=str(OUT_DIR))
+    r.add_argument("--mlflow", action="store_true", help="needs --extra tracking")
     sw = sub.add_parser("sweep", help="tiled recall vs false positives across cutoffs")
     sw.add_argument("--device", default="mps")
     sw.add_argument("--models", nargs="+", default=["yolo11n-pose", "yolo26n-pose"])
@@ -403,8 +521,13 @@ def main() -> None:
         "--floor", type=float, default=0.05, help="lowest cutoff detected at"
     )
     sw.add_argument("--out", default=str(OUT_DIR))
+    sw.add_argument("--mlflow", action="store_true", help="needs --extra tracking")
+    lg = sub.add_parser("log", help="log results already in --out to MLflow")
+    lg.add_argument("--out", default=str(OUT_DIR))
     args = p.parse_args()
-    {"frames": cmd_frames, "run": cmd_run, "sweep": cmd_sweep}[args.cmd](args)
+    {"frames": cmd_frames, "run": cmd_run, "sweep": cmd_sweep, "log": cmd_log}[
+        args.cmd
+    ](args)
 
 
 if __name__ == "__main__":

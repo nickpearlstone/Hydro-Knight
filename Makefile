@@ -1,12 +1,13 @@
 # Short commands for common tasks. `make help` lists them.
 N ?= 5
 
-.PHONY: help harvest harvest-status labeler test check
+.PHONY: help harvest harvest-status labeler mlflow test check
 
 help:
 	@echo "make harvest [N=5]   find, judge, label and extract up to N new clips, then open a PR"
 	@echo "make harvest-status  candidate queue and accepted clips"
 	@echo "make labeler         restart the browser labeler (http://127.0.0.1:8765)"
+	@echo "make mlflow          open the MLflow dashboard (http://127.0.0.1:5001)"
 	@echo "make test            run the tests"
 	@echo "make check           tests + lint + format check (what CI runs)"
 
@@ -19,6 +20,9 @@ harvest-status:
 labeler:
 	-pkill -f hydro_knight.annotate
 	uv run python -m hydro_knight.annotate
+
+mlflow:
+	uv run --extra tracking mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5001
 
 test:
 	uv run python -m pytest -q

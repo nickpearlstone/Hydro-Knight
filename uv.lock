@@ -1111,6 +1111,7 @@ source = { editable = "." }
 dependencies = [
     { name = "certifi" },
     { name = "flask" },
+    { name = "matplotlib" },
     { name = "numpy" },
     { name = "opencv-python" },
     { name = "pandas" },
@@ -1141,6 +1142,7 @@ dev = [
 requires-dist = [
     { name = "certifi", specifier = ">=2024.0.0" },
     { name = "flask", specifier = ">=3.0" },
+    { name = "matplotlib", specifier = ">=3.8.0" },
     { name = "mediapipe", marker = "extra == 'spike'", specifier = ">=0.10.0" },
     { name = "mlflow", marker = "extra == 'tracking'", specifier = ">=2.9.0" },
     { name = "numpy", specifier = ">=1.26.0" },
