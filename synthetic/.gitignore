@@ -1,0 +1,6 @@
+# Rendered frames, labels, scores and comparison images: regenerable from the scripts + configs
+renders/
+# Local Blender install (per machine; see README)
+blender-bin
+# MPFB extension + CC0 MakeHuman asset pack (download per machine; see README)
+mpfb/
