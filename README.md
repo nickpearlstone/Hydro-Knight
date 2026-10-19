@@ -1,6 +1,7 @@
 # Hydro-Knight
 
 [![CI](https://github.com/nickpearlstone/Hydro-Knight/actions/workflows/ci.yml/badge.svg)](https://github.com/nickpearlstone/Hydro-Knight/actions/workflows/ci.yml)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/nickpearlstone/Hydro-Knight)
 
 Hydro-Knight is a computer vision project that watches swimming pool footage and
 flags swimmers who may be drowning. It tracks each swimmer, turns their body pose
@@ -123,6 +124,9 @@ review found wrong are left out of training until corrected.
 ## Quickstart
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+To try it without installing anything, open the repo in GitHub Codespaces (badge
+above) and run `make test` once setup finishes. Codespaces has no GPU, so this is for
+the tests and the code, not pose extraction.
 
 ```bash
 uv sync                          # install dependencies
@@ -148,6 +152,24 @@ labels (event times and clicked victim positions). Publicly posted footage isn't
 redistribution, and it shows identifiable people, often children. Labels are based
 on outcomes: if a lifeguard stepped in, the clip counts as a distress event. More in
 [docs/DATA_SOURCING.md](docs/DATA_SOURCING.md).
+
+## Acknowledgements
+
+Hydro-Knight builds on:
+- [Ultralytics YOLO](https://github.com/ultralytics/ultralytics) for pose estimation
+- [ByteTrack](https://arxiv.org/abs/2110.06864) (Zhang et al., 2022) for tracking, through
+  Roboflow's [trackers](https://github.com/roboflow/trackers) and
+  [supervision](https://github.com/roboflow/supervision) packages
+- [SAHI](https://arxiv.org/abs/2202.06934) (Akyon et al., 2022), whose sliced inference
+  is the basis for the tiled detection
+- [MediaPipe](https://github.com/google-ai-edge/mediapipe), the pose backend YOLO was
+  compared against
+- [Blender](https://www.blender.org) and [MPFB](https://github.com/makehumancommunity/mpfb2)
+  with the CC0 MakeHuman assets, for the synthetic renders
+- [uv](https://github.com/astral-sh/uv) and [ruff](https://github.com/astral-sh/ruff)
+
+Thanks to the people who post lifeguard rescue footage publicly. The clips are linked
+from the manifest and are not copied into this repo.
 
 ## License
 

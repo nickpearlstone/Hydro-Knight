@@ -1,0 +1,22 @@
+// GitHub Codespaces setup: "Code" > "Codespaces" > "Create codespace on main",
+// then `make test`. CPU only (no GPU in a Codespace); tests use fake data.
+{
+  "name": "hydro-knight",
+  // Microsoft's Python image, same Python as .python-version.
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "containerEnv": {
+    // The uv cache and the repo sit on different disks here; copy instead of
+    // hard-linking so uv doesn't warn on every install.
+    "UV_LINK_MODE": "copy"
+  },
+  // Runs once after the machine starts: install uv (pipx ships with this image),
+  // then the locked dependencies exactly as CI does. torch is large, so the
+  // first start takes a few minutes.
+  "postCreateCommand": "pipx install uv && uv sync --frozen",
+  "customizations": {
+    "vscode": {
+      // Ruff for lint and format in the editor, and the Python extension.
+      "extensions": ["charliermarsh.ruff", "ms-python.python"]
+    }
+  }
+}
