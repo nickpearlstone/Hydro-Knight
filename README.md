@@ -21,15 +21,15 @@ size, box confidence, missing frames) and holds up when every clip is tested onc
 ## How it works
 
 ```mermaid
-flowchart TD
-    A[Pool video, 720p or 1080p] --> B[YOLO11n-pose on overlapping 480px tiles<br/>each run at 1280px, plus the whole frame]
+flowchart LR
+    A[Pool video] --> B[YOLO11n-pose<br/>480px tiles at 1280px<br/>plus the whole frame]
     B --> C[ByteTrack<br/>one ID per swimmer]
-    C --> D[Per-swimmer time series at 30 fps<br/>pose, confidences, box shape and speed]
-    D --> E[TCN autoencoder<br/>anomaly score per 3 s window]
-    E --> F[Alarm on the swimmer's track]
-    A -.-> G[Head detector inside each camera's<br/>water zone <i>planned</i>]
-    G -.-> H[Tracking through submersion <i>planned</i>]
-    H -.-> I[Time under, forward progress, bobbing<br/>per swimmer <i>planned</i>]
+    C --> D[30 fps time series<br/>per swimmer]
+    D --> E[TCN autoencoder<br/>score per 3 s window]
+    E --> F[Alarm]
+    A -.-> G[Head detector in each<br/>camera's water zone<br/><i>planned</i>]
+    G -.-> H[Tracking through<br/>submersion<br/><i>planned</i>]
+    H -.-> I[Time under, progress,<br/>bobbing per swimmer<br/><i>planned</i>]
     I -.-> F
 ```
 
