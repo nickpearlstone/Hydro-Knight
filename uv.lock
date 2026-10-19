@@ -1636,7 +1636,7 @@ wheels = [
 
 [[package]]
 name = "mediapipe"
-version = "0.10.35"
+version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "absl-py" },
@@ -1648,10 +1648,11 @@ dependencies = [
     { name = "sounddevice" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/aa/c2/439e948d2a9a542498aee5d8fa3fb91ac6f4478be5d502f0c78ca3fb2333/mediapipe-0.10.35-py3-none-macosx_11_0_arm64.whl", hash = "sha256:3b31376f34ca3665e34b834565996464cd66c9c91316e914fa7f149c891ce7ac", size = 17782605, upload-time = "2026-04-27T17:45:29.457Z" },
-    { url = "https://files.pythonhosted.org/packages/32/8f/1bc57dbc9b7b03c8f875aac23380ec57e9002cc02fe6720045fb263f3966/mediapipe-0.10.35-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:db9a579df48cffe9570cd3e93f6a5d2dd089a1103b846c60c5b5de8a21c38db0", size = 12400490, upload-time = "2026-04-27T17:45:31.848Z" },
-    { url = "https://files.pythonhosted.org/packages/5b/f6/763477e9aeed98accc984ed6ee3f11a21a0c5fd1d1c6586b8d07067748ff/mediapipe-0.10.35-py3-none-win_amd64.whl", hash = "sha256:b08f001cf3c3cd0d88d9ed68f3368dc8a4913f568281a93117f083115aa672ba", size = 10905503, upload-time = "2026-04-27T17:45:33.946Z" },
-    { url = "https://files.pythonhosted.org/packages/07/b3/5c7fa594c731e8dafab9f1a46ab6cef670fa62dbbfb6248cc70e42ec6fc5/mediapipe-0.10.35-py3-none-win_arm64.whl", hash = "sha256:46255326a6213118aaa518a7aa25e35f93337e82677960cc2a945f117bff8444", size = 9992331, upload-time = "2026-04-27T17:45:36.193Z" },
+    { url = "https://files.pythonhosted.org/packages/e0/7c/e5e1b0fd0a43a8f71db9062c94731a3de196186d392ce0c4417d7923a1a0/mediapipe-1.1.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:8d262c745a4432c69c47fba664e2f9210acaca0af4eca2ad9fed42db494f3e12", size = 42559246, upload-time = "2026-10-06T17:36:17.493Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/92/76a6b2760af7c09da1d3d79f6c13d3cddfc5e84d5ededf5aca64aeb93e05/mediapipe-1.1.0-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:25d746bad6d16a46eb2f36f0e16ea69d3ece197be47a1f9caec1e92722df56e1", size = 38486302, upload-time = "2026-10-06T17:36:21.29Z" },
+    { url = "https://files.pythonhosted.org/packages/10/1d/ae070817ebc1b9500cec3f83faeeed1a405dcb764c23738a87726d96432c/mediapipe-1.1.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:f6830aa5fbe87ab49e5eacd36a66611f9788819b45999fb76e9f5beb4638762b", size = 40649000, upload-time = "2026-10-06T17:36:24.699Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/95/14e45f779280d2cc9d7495cb149a67f8a44d5beb801df7f662353976d0ae/mediapipe-1.1.0-py3-none-win_amd64.whl", hash = "sha256:955ac7934825aa8c8ff78fd1e47bf1f2b78fcafc95a8ebc010f6ee977c2eaf53", size = 22448355, upload-time = "2026-10-06T17:36:28.036Z" },
+    { url = "https://files.pythonhosted.org/packages/76/03/7e5bf35e07a47ef64c888910f4339dd0352e20663a317c0ebf6afa199e43/mediapipe-1.1.0-py3-none-win_arm64.whl", hash = "sha256:7fdb8c3b248a11c023e6c993acc9dceb63986a21e010e3e90f0df501ce7e86e3", size = 19860109, upload-time = "2026-10-06T17:36:31.219Z" },
 ]
 
 [[package]]
