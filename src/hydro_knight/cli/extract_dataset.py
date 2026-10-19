@@ -10,10 +10,10 @@ A clip whose video cannot be decoded is reported at the end and left incomplete,
 so it is retried on the next run.
 
 Usage:
-    uv run python scripts/extract_dataset.py --device 0                # full run (GPU)
-    uv run python scripts/extract_dataset.py --clips b4b2db5ffb48 --max-frames 50   # smoke test
-    uv run python scripts/extract_dataset.py --out /content/drive/MyDrive/hydroknight/detections
-    uv run python scripts/extract_dataset.py --conf 0.05 --target-fps 30 --stop-after-contact 5 \
+    uv run hydroknight extract --device 0                # full run (GPU)
+    uv run hydroknight extract --clips b4b2db5ffb48 --max-frames 50   # smoke test
+    uv run hydroknight extract --out /content/drive/MyDrive/hydroknight/detections
+    uv run hydroknight extract --conf 0.05 --target-fps 30 --stop-after-contact 5 \
         --out data/detections_c05      # low floor, 30 fps, stop 5 s after guard contact
 """
 
@@ -119,7 +119,7 @@ def main() -> None:
     if failed:
         raise SystemExit(
             f"{len(failed)} clip(s) could not be read: {' '.join(failed)}. "
-            "AV1 videos: run scripts/transcode_av1.py, then rerun this command."
+            "AV1 videos: run hydroknight transcode-av1, then rerun this command."
         )
 
 

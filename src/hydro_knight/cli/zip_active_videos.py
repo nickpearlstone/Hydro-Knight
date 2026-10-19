@@ -1,7 +1,7 @@
 """
 Zip the videos of every active clip (no "[HOLD" in its notes) for upload to Google Drive.
 
-    uv run python scripts/zip_active_videos.py      # -> scratch/colab_upload/videos_active.zip
+    uv run hydroknight zip-videos      # -> scratch/colab_upload/videos_active.zip
 
 Videos are stored uncompressed in the zip (they are already compressed), and the zip
 lands in scratch/, which is gitignored: footage never enters the repo.

@@ -1,7 +1,7 @@
 """
 Write one Claude label to the manifest from a small JSON spec, then log it.
 
-    uv run python scripts/write_label.py SPEC.json
+    uv run hydroknight write-label SPEC.json
 
 Rescue spec (times are FILE seconds; converted to source seconds and frame-snapped):
     {"clip": ID, "onset": t, "contact": t, "saved": t | null,
@@ -19,10 +19,10 @@ If keypoints exist, the victim clicks are matched to tracks as a check.
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import datetime
 import json
-import sys
 from pathlib import Path
 
 import cv2
@@ -38,7 +38,9 @@ MANIFEST = Path("data/manifests/pool_footage.jsonl")
 
 
 def main() -> None:
-    spec = json.loads(Path(sys.argv[1]).read_text())
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0].strip())
+    ap.add_argument("spec", type=Path, help="label spec JSON (format above)")
+    spec = json.loads(ap.parse_args().spec.read_text())
     clip = spec["clip"]
     kind = spec.get("kind", "rescue")
     m = Manifest(MANIFEST)

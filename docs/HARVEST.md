@@ -12,17 +12,17 @@ images, or detections. Do not run git; the wrapper script commits.
 ## Tools (the only commands you need)
 
 ```
-uv run python scripts/harvest.py search            # once at the start if `next` says NONE (YouTube + Dailymotion)
-uv run python scripts/harvest.py search --queries "..." "..."   # extra searches; --source youtube|dailymotion|all
-uv run python scripts/harvest.py add URL           # queue one hand-found link (YouTube, Dailymotion or Vimeo only)
-uv run python scripts/harvest.py next              # next pending candidate (JSON) or NONE
-uv run python scripts/harvest.py fetch ID          # download it
-uv run python scripts/label_sheets.py CLIP overview                 # 1 fps sheets, 36 s each
-uv run python scripts/label_sheets.py CLIP zoom T0 T1 X0 Y0 X1 Y1 [STEP]
-uv run python scripts/harvest.py accept ID --kind rescue|normal [--section A B]
-uv run python scripts/harvest.py reject ID --reason "..."
-uv run python scripts/write_label.py scratch/specs/CLIP.json
-uv run python scripts/harvest.py status
+uv run hydroknight harvest search            # once at the start if `next` says NONE (YouTube + Dailymotion)
+uv run hydroknight harvest search --queries "..." "..."   # extra searches; --source youtube|dailymotion|all
+uv run hydroknight harvest add URL           # queue one hand-found link (YouTube, Dailymotion or Vimeo only)
+uv run hydroknight harvest next              # next pending candidate (JSON) or NONE
+uv run hydroknight harvest fetch ID          # download it
+uv run hydroknight sheets CLIP overview                 # 1 fps sheets, 36 s each
+uv run hydroknight sheets CLIP zoom T0 T1 X0 Y0 X1 Y1 [STEP]
+uv run hydroknight harvest accept ID --kind rescue|normal [--section A B]
+uv run hydroknight harvest reject ID --reason "..."
+uv run hydroknight write-label scratch/specs/CLIP.json
+uv run hydroknight harvest status
 ```
 
 CLIP is the clip id `fetch` prints. Check the frame size before reading positions: some
@@ -52,7 +52,7 @@ anywhere). Accept only if ALL hold:
   or pole height), looking across the pool at a slant. Reject straight-down overhead or
   drone views, water-level or underwater shots, and far-away or very high views where
   swimmers are tiny. When unsure, compare with a frame from an existing clip
-  (e.g. `scripts/label_sheets.py 829a5075e439 overview`).
+  (e.g. `hydroknight sheets 829a5075e439 overview`).
 - Fixed camera: no panning, zooming, or handheld movement during the event. A camera
   that only cuts between fixed views is OK only if the whole event is in one view.
 - The rescue is fully on camera: you can see the victim before the guard reaches them,

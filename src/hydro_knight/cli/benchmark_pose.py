@@ -4,11 +4,11 @@ against hand-clicked swimmer positions.
 
 Steps, in order:
 
-    uv run python scripts/benchmark_pose.py frames   # pick reference frames from local clips
+    uv run hydroknight benchmark pose frames   # pick reference frames from local clips
     uv run python -m hydro_knight.annotate            # Swimmer count tab: click every person
-    uv run python scripts/benchmark_pose.py run      # score every backend, write results
-    uv run python scripts/benchmark_pose.py sweep    # recall vs false positives across cutoffs
-    uv run python scripts/benchmark_pose.py log      # push results on disk to MLflow (or run/sweep --mlflow)
+    uv run hydroknight benchmark pose run      # score every backend, write results
+    uv run hydroknight benchmark pose sweep    # recall vs false positives across cutoffs
+    uv run hydroknight benchmark pose log      # push results on disk to MLflow (or run/sweep --mlflow)
 
 Ground truth is one click per person, in the water or out of it (deck, stairs, guard stand);
 the file format lives in hydro_knight/annotate/count.py. A detection is matched to a click that lies inside
@@ -29,16 +29,14 @@ import argparse
 import json
 import random
 import statistics
-import sys
 import time
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from hydro_knight.annotate import count  # noqa: E402
-from hydro_knight.preprocess.tiled_pose import (  # noqa: E402
+from hydro_knight.annotate import count
+from hydro_knight.preprocess.tiled_pose import (
     FULL_FRAME,
     merge_detections,
     tile_grid,

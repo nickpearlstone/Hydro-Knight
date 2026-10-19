@@ -29,7 +29,7 @@ give both normal and distress.
 ## 2. Notebook cells
 
 The flow is: **setup → restore data → (extract only if needed) → one report
-command**. The old manual train/eval cells are gone — `scripts/eval_report.py`
+command**. The old manual train/eval cells are gone — `hydroknight legacy eval-report`
 does windowing, training/loading, metrics, and figures in one call.
 
 ### Cell 1 — setup (repo + deps + Drive), idempotent
@@ -53,7 +53,7 @@ from pathlib import Path
 !mkdir -p raw_local
 !unzip -q -n {DRIVE}/videos.zip -d raw_local
 # Colab's OpenCV cannot decode AV1. The 10 AV1 clips were re-encoded to H.264 with
-# scripts/transcode_av1.py (frame-exact) and uploaded to videos_h264/; they replace the zip's copies.
+# hydroknight transcode-av1 (frame-exact) and uploaded to videos_h264/; they replace the zip's copies.
 !cp -f {DRIVE}/videos_h264/*.mp4 raw_local/
 !for f in raw_local/*.mp4; do [ "$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$f")" = av1 ] && echo "STILL AV1: $f"; done
 RAW = Path("raw_local"); KP = Path("data/keypoints")
@@ -67,7 +67,7 @@ assert torch.cuda.is_available(), "No GPU! Runtime > Change runtime type > T4 GP
 print("GPU:", torch.cuda.get_device_name(0))
 # Writes straight to Drive in 1000-frame chunks. After a disconnect, rerun this
 # same cell: finished clips are skipped and the interrupted one resumes.
-!python scripts/extract_dataset.py --device 0 --out {DRIVE}/detections
+!hydroknight extract --device 0 --out {DRIVE}/detections
 ```
 > This is the only GPU step. It runs YOLO11n-pose over 480px tiles at imgsz 1280
 > plus a whole-frame pass, and saves every raw detection before any merging or
@@ -77,7 +77,7 @@ print("GPU:", torch.cuda.get_device_name(0))
 
 ### Cell 3b — merge + track into keypoint files (CPU, minutes)
 ```python
-!python scripts/build_tracks.py --detections {DRIVE}/detections --out data/keypoints --overwrite
+!hydroknight tracks --detections {DRIVE}/detections --out data/keypoints --overwrite
 !cp -r data/keypoints {DRIVE}/keypoints_tiled   # so Cell 2 can restore them next time
 ```
 > Rerun this cell any time the merge or tracker settings change; no GPU or video
@@ -87,14 +87,14 @@ print("GPU:", torch.cuda.get_device_name(0))
 
 **Mode A — saved weights** (score the existing checkpoint, e.g. the 0.539 baseline):
 ```python
-!python scripts/eval_report.py \
+!hydroknight legacy eval-report \
     --keypoints data/keypoints --manifest data/manifests/pool_footage.jsonl \
     --videos raw_local --ckpt {DRIVE}/tcn_ae.pt --out runs/tcn_baseline
 ```
 
 **Mode B — fresh train** (new model; holds out 20% of normal windows; saves weights):
 ```python
-!python scripts/eval_report.py \
+!hydroknight legacy eval-report \
     --keypoints data/keypoints --manifest data/manifests/pool_footage.jsonl \
     --videos raw_local --train-fresh --epochs 300 \
     --save-ckpt {DRIVE}/tcn_fresh.pt --out runs/tcn_fresh
@@ -107,7 +107,7 @@ false-alarms-per-hour**, latency, per-event catch/miss board, pose coverage
 inside events, track lengths), plus `sweep.parquet` / `event_catches.parquet`.
 
 Notes that keep the numbers honest:
-- Each clip's **true fps** comes from the manifest (`scripts/backfill_fps.py`);
+- Each clip's **true fps** comes from the manifest (`hydroknight backfill-fps`);
   event windows are in seconds, so latency/overlap need it (a 60 fps clip at an
   assumed 30 would double every latency).
 - In Mode B, window-level ROC/PR/percentiles use **only held-out** normals —
@@ -155,7 +155,7 @@ Needs the low-floor extraction code on `main` (PR #30) before it runs.
 `MyDrive/hydroknight/videos_active.zip`:
 
 ```bash
-uv run python scripts/zip_active_videos.py
+uv run hydroknight zip-videos
 ```
 
 **In Colab:** Runtime > Change runtime type > **T4 GPU**, paste this one cell, run it. It
@@ -176,8 +176,8 @@ os.chdir("/content/Hydro-Knight"); !git pull -q
 !pip -q install ultralytics trackers supervision opencv-python pandas pyarrow scikit-learn tqdm
 !pip -q install -e . --no-deps
 !mkdir -p raw_local && unzip -q -n {D}/videos_active.zip -d raw_local
-!python scripts/extract_dataset.py --device 0 --conf 0.05 --target-fps 30 --stop-after-contact 5 --out {D}/{RUN}_detections
-!python scripts/build_tracks.py --detections {D}/{RUN}_detections --out {D}/{RUN}_keypoints --same-crop-conf 0.25 --activation 0.25 --high-conf 0.25 --lost-track-seconds 2
+!hydroknight extract --device 0 --conf 0.05 --target-fps 30 --stop-after-contact 5 --out {D}/{RUN}_detections
+!hydroknight tracks --detections {D}/{RUN}_detections --out {D}/{RUN}_keypoints --same-crop-conf 0.25 --activation 0.25 --high-conf 0.25 --lost-track-seconds 2
 !cd {D} && zip -q -r -0 {RUN}_results.zip {RUN}_detections {RUN}_keypoints
 print("DONE: download MyDrive/hydroknight/" + RUN + "_results.zip")
 ```
@@ -186,4 +186,4 @@ print("DONE: download MyDrive/hydroknight/" + RUN + "_results.zip")
 `scratch/colab_upload/` folder and unpack it into `data/detections_c05/` and
 `data/keypoints_c05/` (both gitignored). The current `data/detections/` and
 `data/keypoints_tiled/` stay as they are for comparison. Tracker settings can be rerun
-on the Mac in minutes with `scripts/build_tracks.py`; only the detections need the GPU.
+on the Mac in minutes with `hydroknight tracks`; only the detections need the GPU.

@@ -12,8 +12,8 @@ downloaded, and one process avoids the rate limiting that repeated queries hit).
 Local clips fall back to reading the file with OpenCV, when it is present.
 
 Usage:
-    uv run python scripts/backfill_fps.py --dry-run   # show what would change
-    uv run python scripts/backfill_fps.py             # write it
+    uv run hydroknight backfill-fps --dry-run   # show what would change
+    uv run hydroknight backfill-fps             # write it
 """
 
 from __future__ import annotations

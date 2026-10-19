@@ -92,7 +92,7 @@ def download_clip(
         # Video-only up to 1080p, H.264 (avc1) first: YouTube also serves AV1 inside mp4,
         # and OpenCV builds without an AV1 decoder (Colab's) read those as zero frames.
         # Fallbacks keep a video with no H.264 version downloadable (convert it with
-        # scripts/transcode_av1.py); 136/135/134 are YouTube's H.264 720p/480p/360p;
+        # hydroknight transcode-av1); 136/135/134 are YouTube's H.264 720p/480p/360p;
         # last: combined mp4 (Dailymotion, Vimeo HLS).
         "bestvideo[ext=mp4][vcodec^=avc1][height<=1080]/bestvideo[ext=mp4][height<=1080]"
         "/bestvideo[height<=1080]/136/135/134/best[ext=mp4][height<=1080]",

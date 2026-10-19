@@ -11,10 +11,10 @@ on normal motion windows, then reports mean reconstruction error on:
 If 'time-shuffled' scores clearly above 'held-out REAL', the model is using
 temporal order, not just per-frame pose — the whole point of Rung 3.
 
-Run: PYTHONPATH=src .venv/bin/python scripts/rung3_demo.py <keypoints.parquet>
+Run: uv run hydroknight legacy rung3-demo <keypoints.parquet>
 """
 
-import sys
+import argparse
 
 import numpy as np
 import pandas as pd
@@ -25,8 +25,11 @@ from hydro_knight.models.tcn_autoencoder import reconstruction_error, train_tcn
 WINDOW = 32
 
 
-def main(parquet_path: str):
+def main() -> None:
     """Train the TCN on a clip's windows, then print recon-error on real vs corrupted test sets."""
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0].strip())
+    ap.add_argument("parquet", nargs="?", default="raw_local/long.parquet")
+    parquet_path = ap.parse_args().parquet
     np.random.seed(0)
     W, _ = make_windows(pd.read_parquet(parquet_path), window=WINDOW, stride=8)
     if len(W) < 20:
@@ -57,4 +60,4 @@ def main(parquet_path: str):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "raw_local/long.parquet")
+    main()

@@ -14,10 +14,10 @@ The roadmap and decisions of record. For the project overview see the
   person on still frames for the pose benchmark. Trims (`trim_start`/`trim_end`) are
   stored separately from the downloaded window (`start_sec`/`end_sec`), so trimming
   never shifts labels.
-- **Pose extraction, two steps.** `scripts/extract_dataset.py` (GPU) runs YOLO11n-pose
+- **Pose extraction, two steps.** `hydroknight extract` (GPU) runs YOLO11n-pose
   over 480px tiles at imgsz 1280 plus a whole-frame pass and saves every raw detection,
   un-merged and un-tracked, in resumable chunks with per-frame records and provenance.
-  `scripts/build_tracks.py` (CPU) merges tile duplicates and runs ByteTrack into the
+  `hydroknight tracks` (CPU) merges tile duplicates and runs ByteTrack into the
   keypoint files. Merge and tracker changes never need another GPU pass.
 - **Features:** hip-centered, torso-scaled poses (34 values) plus keypoint and body
   velocity, for 70 values per frame, in 32-frame sliding windows per track.
@@ -29,9 +29,9 @@ The roadmap and decisions of record. For the project overview see the
   (box-normalized pose, every keypoint confidence, a detected flag, box shape, size
   and area change, body velocity), with missing frames kept. 3-second windows read
   real frames beyond their edges instead of padding. A dilated residual TCN
-  autoencoder comes in three sizes; `scripts/train_v2.py` trains only on swimmers
+  autoencoder comes in three sizes; `hydroknight train tcn-v2` trains only on swimmers
   who are not the victim, so it waits on victim labels.
-- **Pose benchmark:** `scripts/benchmark_pose.py` scores pose models against
+- **Pose benchmark:** `hydroknight benchmark pose` scores pose models against
   hand-counted swimmers (found, missed, duplicates, false positives, speed) and compares
   them at equal false positives.
 - **Tooling:** MLflow tracking (SQLite), CI running pytest, ruff lint, and ruff format.

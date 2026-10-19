@@ -1,7 +1,7 @@
 # Evaluation protocol
 
 How every Hydro-Knight model is scored. Code: `src/hydro_knight/eval/protocol.py`;
-command: `uv run python scripts/eval_protocol.py runs/<run>`.
+command: `uv run hydroknight eval protocol runs/<run>`.
 
 The protocol has two tiers because the data does. Tier 1 works today with the labelled rescue
 clips alone and answers "is this change heading the right way?". Tier 2 is the standard a

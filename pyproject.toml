@@ -28,6 +28,10 @@ dependencies = [
     "matplotlib>=3.8.0",       # report + MLflow run figures (was only pulled in by ultralytics)
 ]
 
+# `uv run hydroknight --help` lists every command (src/hydro_knight/cli/).
+[project.scripts]
+hydroknight = "hydro_knight.cli:main"
+
 [project.optional-dependencies]
 # Alt pose backend, only needed to reproduce the YOLO-vs-MediaPipe spike.
 # The backend decision (YOLO) is made, so this is kept out of the default install.

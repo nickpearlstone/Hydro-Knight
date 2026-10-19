@@ -4,6 +4,8 @@ N ?= 5
 .PHONY: help harvest harvest-status labeler mlflow test check
 
 help:
+	@echo "Every pipeline command: uv run hydroknight --help"
+	@echo
 	@echo "make harvest [N=5]   find, judge, label and extract up to N new clips, then open a PR"
 	@echo "make harvest-status  candidate queue and accepted clips"
 	@echo "make labeler         restart the browser labeler (http://127.0.0.1:8765)"
@@ -15,11 +17,11 @@ harvest:
 	bash scripts/harvest.sh $(N)
 
 harvest-status:
-	uv run python scripts/harvest.py status
+	uv run hydroknight harvest status
 
 labeler:
-	-pkill -f hydro_knight.annotate
-	uv run python -m hydro_knight.annotate
+	-pkill -f "hydroknight labeler|hydro_knight.annotate"
+	uv run hydroknight labeler
 
 mlflow:
 	uv run --extra tracking mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5001

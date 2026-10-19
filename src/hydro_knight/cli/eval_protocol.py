@@ -1,15 +1,15 @@
 """
 Score a saved run with the two-tier evaluation protocol (src/hydro_knight/eval/protocol.py).
 
-Reads the per-window alarm tables and dataset reports that `scripts/train_v2.py --detection`
+Reads the per-window alarm tables and dataset reports that `hydroknight train tcn-v2 --detection`
 saves, so nothing is retrained. Writes, per seed, a markdown report, the tier-1 per-clip
 table and a JSON summary into --out.
 
-    uv run python scripts/eval_protocol.py runs/v2_ckpt_after
-    uv run python scripts/eval_protocol.py runs/v2_ckpt_after --pseudo-normal      # tier 2 on pre-onset footage
-    uv run python scripts/eval_protocol.py runs/v2_ckpt_after --onset-alt scratch/z5cc/label_compare.json
-    uv run python scripts/eval_protocol.py runs/RUN_B --compare runs/RUN_A          # is B better than A?
-    uv run --extra tracking python scripts/eval_protocol.py runs/RUN --mlflow       # also log to MLflow
+    uv run hydroknight eval protocol runs/v2_ckpt_after
+    uv run hydroknight eval protocol runs/v2_ckpt_after --pseudo-normal      # tier 2 on pre-onset footage
+    uv run hydroknight eval protocol runs/v2_ckpt_after --onset-alt scratch/z5cc/label_compare.json
+    uv run hydroknight eval protocol runs/RUN_B --compare runs/RUN_A          # is B better than A?
+    uv run --extra tracking hydroknight eval protocol runs/RUN --mlflow       # also log to MLflow
 
 --onset-alt takes either {clip_id: onset in source seconds} or the Z5cc label comparison
 rows (clip_id, his_onset, our_onset); only onsets within 30 s of ours are used.

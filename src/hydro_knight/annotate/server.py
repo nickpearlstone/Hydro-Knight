@@ -327,7 +327,7 @@ def create_app(
 
     def count_frames() -> list[dict]:
         if not Path(count_path).exists():
-            abort(404, f"no {count_path}: run scripts/benchmark_pose.py frames first")
+            abort(404, f"no {count_path}: run hydroknight benchmark pose frames first")
         return count.load(count_path)["frames"]
 
     @app.get("/count")

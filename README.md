@@ -127,6 +127,7 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 ```bash
 uv sync                          # install dependencies
 uv run python -m pytest          # run the tests
+uv run hydroknight --help        # every command, one line each
 uv sync --extra tracking         # optional: MLflow
 uv sync --extra spike            # optional: MediaPipe, to regenerate the comparison figures
 ```
@@ -136,7 +137,7 @@ Pose extraction runs on a Colab GPU or a Mac GPU (see
 GPU in about an hour:
 
 ```bash
-uv run python scripts/train_v2.py --sizes small medium large --seeds 0 1 2 --rates capped --device mps
+uv run hydroknight train tcn-v2 --sizes small medium large --seeds 0 1 2 --rates capped --device mps
 ```
 
 ## Data and privacy

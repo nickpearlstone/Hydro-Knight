@@ -7,17 +7,17 @@ run folder: figures, stats parquets, summary.md.
 
 Usage:
   # Saved weights (e.g. the first Colab run's checkpoint):
-  python scripts/eval_report.py \
+  hydroknight legacy eval-report \
       --keypoints data/keypoints --manifest data/manifests/pool_footage.jsonl \
       --videos raw_local --ckpt tcn_ae.pt --out runs/tcn_baseline
 
   # Fresh train (holds out 20% of normal windows; saves the new weights):
-  python scripts/eval_report.py \
+  hydroknight legacy eval-report \
       --keypoints data/keypoints --manifest data/manifests/pool_footage.jsonl \
       --videos raw_local --train-fresh --save-ckpt tcn_fresh.pt --out runs/tcn_fresh
 
   # Local smoke test on a scratch parquet:
-  python scripts/eval_report.py --keypoints scratch/long.parquet \
+  hydroknight legacy eval-report --keypoints scratch/long.parquet \
       --train-fresh --epochs 40 --window 16 --stride 4 --out runs/smoke
 
 Timing correctness: event windows are annotated in *seconds*, so frame->time
@@ -208,7 +208,7 @@ def main() -> None:
             f"(no manifest fps): {', '.join(guessed_fps[:5])}"
             f"{' ...' if len(guessed_fps) > 5 else ''}\n"
             "  Event labels for these clips are unreliable. "
-            "Fix with: uv run python scripts/backfill_fps.py"
+            "Fix with: uv run hydroknight backfill-fps"
         )
 
     # Model + (for fresh training) which windows were trained on.

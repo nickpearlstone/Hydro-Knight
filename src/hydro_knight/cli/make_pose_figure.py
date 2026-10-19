@@ -6,17 +6,14 @@ skeletons are drawn on top — so the figures show detection quality without
 committing identifiable footage, consistent with the project's data ethics.
 
 Reads from a gitignored local clip; writes committable PNGs to docs/images/.
-Run: PYTHONPATH=src .venv/bin/python scripts/make_pose_figure.py
+Run: uv run hydroknight legacy pose-figure
 """
 
+import argparse
 from pathlib import Path
 
 import cv2
-import mediapipe as mp
 import numpy as np
-from mediapipe.tasks import python as mp_python
-from mediapipe.tasks.python import vision
-from ultralytics import YOLO
 
 CLIP = "raw_local/b4b2db5ffb48.mp4"  # a wavepool rescue clip (crowded normal lead-in)
 FRAME = 1197
@@ -52,6 +49,13 @@ def draw_mp(img, poses, conns):
 
 def main():
     """Render the two README figures (resolution and YOLO-vs-MediaPipe) to docs/images/."""
+    argparse.ArgumentParser(description=__doc__.split("\n\n")[0].strip()).parse_args()
+    # Imported here so `--help` works without the optional MediaPipe extra.
+    import mediapipe as mp
+    from mediapipe.tasks import python as mp_python
+    from mediapipe.tasks.python import vision
+    from ultralytics import YOLO
+
     OUT.mkdir(parents=True, exist_ok=True)
 
     cap = cv2.VideoCapture(CLIP)
