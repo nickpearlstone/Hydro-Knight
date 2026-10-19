@@ -188,4 +188,9 @@ Same frame (seed 2, t = 0) rendered three ways:
 - **Brightness fix:** `post.py` now picks its gain by the backend recorded in each frame's labels
   (Metal 0.90, CPU/OptiX/CUDA 0.96). On the Kaggle OptiX frame this gives YOLO 60% / 23% (25 / 5
   false), RT-DETR 93% / 68% (355 / 50 false), close to the Mac frame and the real targets.
-- **Shadow fix (pending):** `scene.py --backend CUDA` on Kaggle, compared against the CPU reference.
+- **Shadow fix: render with CUDA, not OptiX.** Same frame on Kaggle with CUDA: mean difference from
+  the CPU reference 3.2 levels (OptiX 18.9, Metal 7.8), floor shadows and the bright floor line back,
+  water L 151.9 vs CPU 148.0. Same speed on 2x T4 (32.5 s vs 34.2 s). `scene.py` now tries CUDA first.
+- **Kaggle CUDA frame vs the real frame:** YOLO 64% / 22% (real 65% / 23%), false 32 / 9 (25 / 3);
+  RT-DETR 91% / 70% (real 89% / 70%), false 309 / 44 (289 / 44). KID 27, classifier AUC 0.995.
+  The closest detector-level match so far, so Kaggle batches can start from this setup.

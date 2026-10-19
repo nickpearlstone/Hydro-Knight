@@ -40,6 +40,11 @@ ap.add_argument(
     help="render on the CPU (Cycles reference), not the GPU",
 )
 ap.add_argument(
+    "--backend",
+    default=None,
+    help="force a GPU backend: OPTIX, CUDA or METAL (default: first one found)",
+)
+ap.add_argument(
     "--clip",
     type=int,
     default=1,
@@ -652,7 +657,8 @@ def setup_render():
     sc = bpy.context.scene
     sc.render.engine = "CYCLES"
     prefs = bpy.context.preferences.addons["cycles"].preferences
-    order = [args.backend] if args.backend else ["OPTIX", "CUDA", "METAL"]
+    # CUDA first: it matches the CPU reference (OptiX drops shadows cast through the water, 10-19)
+    order = [args.backend] if args.backend else ["CUDA", "OPTIX", "METAL"]
     for dev_type in order:
         try:
             prefs.compute_device_type = dev_type
