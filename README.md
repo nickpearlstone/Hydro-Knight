@@ -25,14 +25,14 @@ and nothing has been shown to work yet. The sections below say where it stands a
 
 ```mermaid
 flowchart LR
-    A[Pool video] --> B[Find swimmers<br/>YOLO11 pose, tiled]
-    B --> C[Follow each swimmer<br/>ByteTrack]
-    C --> D[Movement over time<br/>per swimmer]
+    A[Pool video] --> B[Find swimmers<br/>YOLO11 pose]
+    B --> C[Follow each one<br/>ByteTrack]
+    C --> D[Movement<br/>over time]
     D --> E[Score how unusual<br/>TCN autoencoder]
     E --> F[Alarm]
-    A -.-> G[Find heads in each<br/>camera's zone<br/><i>planned</i>]
-    G -.-> H[Follow swimmers<br/>under water<br/><i>planned</i>]
-    H -.-> I[Time under, progress,<br/>bobbing<br/><i>planned</i>]
+    A -.-> G[Find heads<br/><i>planned</i>]
+    G -.-> H[Follow under water<br/><i>planned</i>]
+    H -.-> I[Time under, bobbing<br/><i>planned</i>]
     I -.-> F
 ```
 
