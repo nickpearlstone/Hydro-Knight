@@ -13,7 +13,8 @@ latest score already available at that moment, so color lags motion by about 4.5
 (window plus right context), as a live system would.
 
 Output is unblurred footage of identifiable people, often minors: write it under
-scratch/ and never commit or publish it.
+scratch/ and never commit or publish it. `--pixelate N` pixelates the footage (N blocks
+across) before the boxes are drawn; only pixelated output may go in docs/images/.
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pandas as pd
+
+from hydro_knight.cli.make_pose_figure import pixelate
 
 OUT_W, OUT_H, OUT_FPS = 1280, 720, 30
 STALE_S = 1.0  # drop a track's score once no newer window has arrived for this long
@@ -85,7 +88,9 @@ def title_card(writer, lines):
         writer.stdin.write(img.tobytes())
 
 
-def render_clip(writer, clip: str, alarms: pd.DataFrame, scale: Scale, span):
+def render_clip(
+    writer, clip: str, alarms: pd.DataFrame, scale: Scale, span, blocks: int = 0
+):
     start, end = span
     cap = cv2.VideoCapture(f"raw_local/{clip}.mp4")
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -111,6 +116,8 @@ def render_clip(writer, clip: str, alarms: pd.DataFrame, scale: Scale, span):
             f_next += fps / OUT_FPS
             now = f / fps
             img = cv2.resize(frame, (OUT_W, OUT_H), interpolation=cv2.INTER_AREA)
+            if blocks:
+                img = pixelate(img, blocks)
             rows = by_frame.get(f)
             for r in rows.itertuples() if rows is not None else ():
                 color, thick = GREY, 1
@@ -141,6 +148,13 @@ def main() -> None:
         "--window", action="store_true", help="onset - 10 s to contact + 5 s"
     )
     p.add_argument("--manifest", default="data/manifests/pool_footage.jsonl")
+    p.add_argument(
+        "--pixelate",
+        type=int,
+        default=0,
+        metavar="N",
+        help="pixelate the footage to N blocks across before drawing boxes",
+    )
     args = p.parse_args()
 
     results = json.loads((args.run / "summary.json").read_text())["results"]
@@ -173,7 +187,7 @@ def main() -> None:
             ],
         )
         span = clip_span(manifest[clip], args.window)
-        render_clip(writer, clip, alarms, run_scale(results, seed), span)
+        render_clip(writer, clip, alarms, run_scale(results, seed), span, args.pixelate)
     writer.stdin.close()
     writer.wait()
 

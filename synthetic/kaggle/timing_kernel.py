@@ -34,6 +34,12 @@ def sh(cmd, log=None):
 
 timings = {}
 src = os.path.dirname(glob.glob("/kaggle/input/**/scene.py", recursive=True)[0])
+if (
+    "--backend" not in Path(f"{src}/scene.py").read_text()
+):  # stale dataset version mounted
+    raise SystemExit(
+        f"stale scene.py in {src}: re-version the hk-synth dataset and re-run"
+    )
 work = f"{W}/synth"
 shutil.copytree(src, work, dirs_exist_ok=True)
 cfg = json.loads(Path(f"{work}/ref_6f5c.json").read_text())
