@@ -1,7 +1,7 @@
 # Short commands for common tasks. `make help` lists them.
 N ?= 5
 
-.PHONY: help harvest harvest-status labeler mlflow test check
+.PHONY: help harvest harvest-status labeler mlflow test check hooks
 
 help:
 	@echo "Every pipeline command: uv run hydroknight --help"
@@ -12,6 +12,7 @@ help:
 	@echo "make mlflow          open the MLflow dashboard (http://127.0.0.1:5001)"
 	@echo "make test            run the tests"
 	@echo "make check           tests + lint + format check (what CI runs)"
+	@echo "make hooks           run ruff on every commit (once per clone)"
 
 harvest:
 	bash scripts/harvest.sh $(N)
@@ -33,3 +34,6 @@ check:
 	uv run python -m pytest -q
 	uv run ruff check .
 	uv run ruff format --check .
+
+hooks:
+	uv run pre-commit install

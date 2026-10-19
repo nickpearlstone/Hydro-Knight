@@ -1,0 +1,19 @@
+# Checks that run on every `git commit` (one-time setup per clone:
+# `uv run pre-commit install`). Same ruff checks CI runs, caught before the push.
+#
+# "local" hooks call the ruff already in .venv, so the hook, `make check` and CI
+# all use the one ruff version pinned in uv.lock. Pytest is left to CI and
+# `make check` because it is too slow to run on every commit.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix  # --fix applies safe fixes, then the commit stops so you can review
+        language: system                # plain shell command, no separate environment
+        types: [python]                 # only runs when .py files are staged
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
