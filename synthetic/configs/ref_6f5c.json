@@ -19,7 +19,8 @@
   "yaw": 26,
   "pitch": 25,
   "hfov": 70,
-  "roll": -1.5
+  "roll": -1.5,
+  "lens_k": 0.0
  },
  "water": {
   "swell_amp": [
@@ -126,5 +127,20 @@
    0.45
   ],
   "skin_coat": 0.25
+ },
+ "vary": {
+  "pos": [
+   0.5,
+   0.5,
+   0.3
+  ],
+  "yaw": 3,
+  "pitch": 1.5,
+  "hfov": 3,
+  "roll": 1,
+  "n_people": [
+   0.75,
+   1.25
+  ]
  }
 }

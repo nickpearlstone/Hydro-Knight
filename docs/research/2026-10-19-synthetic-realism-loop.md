@@ -188,4 +188,44 @@ Same frame (seed 2, t = 0) rendered three ways:
 - **Brightness fix:** `post.py` now picks its gain by the backend recorded in each frame's labels
   (Metal 0.90, CPU/OptiX/CUDA 0.96). On the Kaggle OptiX frame this gives YOLO 60% / 23% (25 / 5
   false), RT-DETR 93% / 68% (355 / 50 false), close to the Mac frame and the real targets.
-- **Shadow fix (pending):** `scene.py --backend CUDA` on Kaggle, compared against the CPU reference.
+- **Shadow fix: render with CUDA, not OptiX.** Same frame on Kaggle with CUDA: mean difference from
+  the CPU reference 3.2 levels (OptiX 18.9, Metal 7.8), floor shadows and the bright floor line back,
+  water L 151.9 vs CPU 148.0. Same speed on 2x T4 (32.5 s vs 34.2 s). `scene.py` now tries CUDA first.
+- **Kaggle CUDA frame vs the real frame:** YOLO 64% / 22% (real 65% / 23%), false 32 / 9 (25 / 3);
+  RT-DETR 91% / 70% (real 89% / 70%), false 309 / 44 (289 / 44). KID 27, classifier AUC 0.995.
+  The closest detector-level match so far, so Kaggle batches can start from this setup.
+
+## Varied batch (10-19 evening): six reference cameras, ~300 frames
+
+Nick's call: render ~300 varied frames now; drowning sequences later. The September rule that
+synthetic data is only for tuning rules is dropped: realistic synthetic sequences are fair game for
+training and evaluation later.
+
+- **Six reference cameras**, each fitted against its own hand-counted real frame with
+  `synthetic/tools/fit_preview.sh`: 6f5c (left deck, the original), dc93 (beach end looking back at
+  the wave-machine wall, deep blue), 1d50 (low, across a field of blue tubes, hazy), 9992 (right
+  lifeguard deck, fish-eye), 644c (high left stand, fish-eye), 8c83 (left deck, deep blue, fish-eye).
+  bffdeb793010 was skipped (same view as 6f5c), and the Jupiter Reef frames (on hold, not wave pools).
+- **New in the pipeline:**
+  - fish-eye lens in post (`camera.lens_k`), with labels and masks moved to match, approved by
+    Nick on a preview;
+  - a head-only mask pass (vertices within 1.3 head radii of the head centre), so head boxes cover
+    only the visible part;
+  - `export_yolo.py` (person = 0, head = 1, plus a JSON sidecar with id, pose and submersion);
+  - a per-frame `vary` block (camera position, aim, field of view, crowd size);
+  - crowd `y_min` / `y_max`, `tube_colors`, `trees_behind`.
+- **Per-reference check** (one exact frame each; detectors vs that reference's real frame):
+
+| Reference | Real: YOLO @0.05 / @0.25, RT-DETR @0.05 / @0.25 | Render: same |
+|---|---|---|
+| dc93 | 82% / 27%, 100% / 100% | 91% / 48%, 100% / 93% (people slightly too close; camera moved back 2 m after) |
+| 1d50 | 66% / 40%, 100% / 92% | 80% / 26%, 100% / 89% |
+| 9992 | 42% / 20%, 96% / 94% | 56% / 20%, 100% / 93% |
+| 644c | 76% / 31%, 99% / 92% | 75% / 35%, 100% / 86% |
+| 8c83 | 55% / 20%, 100% / 100% | 53% / 25%, 100% / 93% |
+
+- **Kaggle batch:**
+  - two private notebooks, `hk-synth-batch-a` (6f5c, dc93, 9992) and `-b` (1d50, 644c, 8c83), each
+    3 configs × 50 frames;
+  - 4-frame water clips, CUDA, one Blender worker per T4;
+  - the render guard stops at 9.5 h so post and export finish inside Kaggle's 12 h limit.
