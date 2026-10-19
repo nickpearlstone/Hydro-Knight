@@ -657,7 +657,8 @@ def setup_render():
     sc = bpy.context.scene
     sc.render.engine = "CYCLES"
     prefs = bpy.context.preferences.addons["cycles"].preferences
-    order = [args.backend] if args.backend else ["OPTIX", "CUDA", "METAL"]
+    # CUDA first: it matches the CPU reference (OptiX drops shadows cast through the water, 10-19)
+    order = [args.backend] if args.backend else ["CUDA", "OPTIX", "METAL"]
     for dev_type in order:
         try:
             prefs.compute_device_type = dev_type
