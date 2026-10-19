@@ -1,0 +1,26 @@
+# Dependabot opens PRs when dependencies have newer versions; CI runs on each.
+version: 2  # config format version (always 2)
+updates:
+  # Python packages: reads pyproject.toml and updates uv.lock to match,
+  # so CI's `uv sync --frozen` keeps working.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7  # skip releases younger than a week (often yanked or hot-fixed)
+    open-pull-requests-limit: 3
+    groups:
+      # Every minor and patch bump lands in one weekly PR.
+      # Major bumps (e.g. torch 3) still arrive one per PR so they stand out.
+      python-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # The `uses:` lines in .github/workflows/ (checkout, setup-uv), in one PR.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]

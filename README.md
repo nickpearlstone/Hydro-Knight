@@ -128,6 +128,7 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 uv sync                          # install dependencies
 uv run python -m pytest          # run the tests
 uv run hydroknight --help        # every command, one line each
+make hooks                       # optional: run ruff before every commit
 uv sync --extra tracking         # optional: MLflow
 uv sync --extra spike            # optional: MediaPipe, to regenerate the comparison figures
 ```
