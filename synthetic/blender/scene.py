@@ -40,6 +40,11 @@ ap.add_argument(
     help="render on the CPU (Cycles reference), not the GPU",
 )
 ap.add_argument(
+    "--backend",
+    default=None,
+    help="force a GPU backend: OPTIX, CUDA or METAL (default: first one found)",
+)
+ap.add_argument(
     "--clip",
     type=int,
     default=1,
