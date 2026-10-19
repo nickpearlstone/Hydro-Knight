@@ -26,7 +26,7 @@ At its default 640px input, YOLO misses distant swimmers. Running at 1280px foun
 **Decision:** YOLO-pose at 1280px or higher. Confirmed against hand-counted swimmers
 in [section 4](#4-pose-model-benchmark).
 
-Reproduce: `uv sync --extra spike`, then `uv run python scripts/make_pose_figure.py`.
+Reproduce: `uv sync --extra spike`, then `uv run hydroknight legacy pose-figure`.
 
 ## 2. Distant swimmers: tiling and tracking
 
@@ -130,7 +130,7 @@ was tested with and without its optional NMS step.
   most were small, distant, or low in the water. Next: a head-focused detector and a
   per-camera distance cutoff.
 
-Reproduce: `uv run python scripts/benchmark_pose.py run` (and `sweep`). Labels:
+Reproduce: `uv run hydroknight benchmark pose run` (and `sweep`). Labels:
 [`pose_bench_gt.json`](../data/annotations/pose_bench_gt.json).
 
 ## 5. Second model (v2): above chance at ranking victims, no catches
@@ -228,6 +228,6 @@ Model size, box speed capped:
 - The test split moves AUC from 0.74 to 0.93, far more than any setting. Each split has
   only 6 to 11 test clips, so single numbers are not precise.
 
-Reproduce: `uv run python scripts/train_v2.py --sizes small --seeds 0 1 2 --rates capped
+Reproduce: `uv run hydroknight train tcn-v2 --sizes small --seeds 0 1 2 --rates capped
 --min-track-s 1.0 --detection --device mps --out runs/v2_ckpt_after`. Model weights are
 saved per seed as `model_small_s<seed>.pt`; `--load-dir` re-scores a saved run.

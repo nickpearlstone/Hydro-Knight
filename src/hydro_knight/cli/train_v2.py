@@ -2,9 +2,9 @@
 Train the v2 TCN autoencoder sizes on non-victim swimmers and compare them on
 held-out clips.
 
-    uv run python scripts/train_v2.py --sizes small medium large --seeds 0 1 2 --out runs/v2_sizes
-    uv run python scripts/train_v2.py --sizes medium --rates capped --out runs/v2_rates_capped
-    uv run python scripts/train_v2.py --smoke        # code-path check before labels exist
+    uv run hydroknight train tcn-v2 --sizes small medium large --seeds 0 1 2 --out runs/v2_sizes
+    uv run hydroknight train tcn-v2 --sizes medium --rates capped --out runs/v2_rates_capped
+    uv run hydroknight train tcn-v2 --smoke        # code-path check before labels exist
 
 Each seed picks its own whole-clip train/test split and initialization. For every
 (size, seed) it reports two checks on the held-out clips:

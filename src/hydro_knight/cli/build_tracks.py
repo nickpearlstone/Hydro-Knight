@@ -7,9 +7,9 @@ keypoint files are left alone unless --overwrite is passed, so older extractions
 are never replaced by accident.
 
 Usage:
-    uv run python scripts/build_tracks.py                         # fixed defaults
-    uv run python scripts/build_tracks.py --legacy --out data/keypoints_legacy   # original behavior
-    uv run python scripts/build_tracks.py --lost-track-seconds 2 --overwrite
+    uv run hydroknight tracks                         # fixed defaults
+    uv run hydroknight tracks --legacy --out data/keypoints_legacy   # original behavior
+    uv run hydroknight tracks --lost-track-seconds 2 --overwrite
 """
 
 from __future__ import annotations

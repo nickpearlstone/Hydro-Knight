@@ -1,8 +1,8 @@
 """
 Draw each swimmer's v2 anomaly score on the video: box color = score.
 
-    uv run python scripts/render_scores.py runs/v2_ckpt_after scratch/scores.mp4 7096dfde4791@0 cc9bd9e965e3@0
-    uv run python scripts/render_scores.py runs/v2_ckpt_after scratch/scores.mp4 829a5075e439@1 --window
+    uv run hydroknight score-video runs/v2_ckpt_after scratch/scores.mp4 7096dfde4791@0 cc9bd9e965e3@0
+    uv run hydroknight score-video runs/v2_ckpt_after scratch/scores.mp4 829a5075e439@1 --window
 
 Reads a `train_v2.py --detection` run (alarms_small_s<seed>.parquet + summary.json),
 the tracked boxes in data/keypoints_tiled/ and the video in raw_local/. Each clip is

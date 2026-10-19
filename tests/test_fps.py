@@ -8,18 +8,14 @@ must agree on each clip's fps. These pin that eval reads the fps the tracker use
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from backfill_fps import _snap  # noqa: E402
-
-from hydro_knight.eval.timing import clip_fps  # noqa: E402
+from hydro_knight.cli.backfill_fps import _snap
+from hydro_knight.eval.timing import clip_fps
 
 
 @pytest.mark.parametrize(

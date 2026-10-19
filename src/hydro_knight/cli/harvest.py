@@ -7,13 +7,13 @@ only does what needs no judgment. Candidates live in data/harvest/candidates.jso
 (metadata only, safe to commit), separate from the manifest: a clip enters the
 manifest only once accepted.
 
-    uv run python scripts/harvest.py search             # find new candidates (metadata only)
-    uv run python scripts/harvest.py next               # print the next pending candidate
-    uv run python scripts/harvest.py fetch URL_ID       # download it to raw_local/ for judging
-    uv run python scripts/harvest.py accept URL_ID --kind rescue|normal [--section A B]
-    uv run python scripts/harvest.py reject URL_ID --reason "..."
-    uv run python scripts/harvest.py extract            # pose + tracks for accepted clips (Mac GPU)
-    uv run python scripts/harvest.py status
+    uv run hydroknight harvest search             # find new candidates (metadata only)
+    uv run hydroknight harvest next               # print the next pending candidate
+    uv run hydroknight harvest fetch URL_ID       # download it to raw_local/ for judging
+    uv run hydroknight harvest accept URL_ID --kind rescue|normal [--section A B]
+    uv run hydroknight harvest reject URL_ID --reason "..."
+    uv run hydroknight harvest extract            # pose + tracks for accepted clips (Mac GPU)
+    uv run hydroknight harvest status
 
 URL_ID is the candidate's short id from `next`. Rejected URLs go on the blocklist, so no
 search ever brings them back. Every accepted clip is tagged "[AUTO <date>]" in its notes.
@@ -367,7 +367,7 @@ def cmd_fetch(args) -> None:
     for cid, m, n, title in dups:
         print(f"POSSIBLE DUPLICATE of {cid}: {m}/{n} frames match ({title})")
     print(
-        f"fetched {local_path(rec)}  (sheets: scripts/label_sheets.py {rec.clip_id} overview)"
+        f"fetched {local_path(rec)}  (sheets: hydroknight sheets {rec.clip_id} overview)"
     )
 
 
@@ -425,10 +425,10 @@ def cmd_extract(args) -> None:
     if not todo:
         print("nothing to extract")
         return
-    py = [sys.executable]
+    py = [sys.executable, "-m", "hydro_knight.cli"]
     run = lambda cmd: subprocess.run(py + cmd, check=True)  # noqa: E731
-    run(["scripts/extract_dataset.py", "--clips", *todo, "--device", args.device])
-    run(["scripts/build_tracks.py", "--clips", *todo, "--out", "data/keypoints_tiled"])
+    run(["extract", "--clips", *todo, "--device", args.device])
+    run(["tracks", "--clips", *todo, "--out", "data/keypoints_tiled"])
     print(f"extracted {len(todo)} clips")
 
 

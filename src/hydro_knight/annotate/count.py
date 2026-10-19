@@ -1,7 +1,7 @@
 """
 Swimmer-count labels: every person clicked on a handful of still frames.
 
-This is the ground truth behind scripts/benchmark_pose.py. Each frame record is
+This is the ground truth behind hydroknight benchmark pose. Each frame record is
 {"clip_id", "frame", "label", "water": [[x, y], ...], "deck": [[x, y], ...]}:
 one point per person, in original-frame pixels, "water" for people in the pool and
 "deck" for people out of it (deck, stairs, guard stand). The file holds points only,

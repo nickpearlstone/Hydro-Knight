@@ -10,7 +10,7 @@ The victim's boxes carry a "victim" tag; banners mark onset and guard contact.
 
 The output shows identifiable people (often minors). It is for local viewing only: it
 is written under runs/ and attached to local MLflow runs, both gitignored, and must never
-be committed or published (anonymised figures go through scripts/make_pose_figure.py).
+be committed or published (anonymised figures go through hydroknight legacy pose-figure).
 Needs ffmpeg on PATH (H.264 output that browsers and the MLflow UI can play).
 """
 

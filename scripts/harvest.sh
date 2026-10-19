@@ -28,16 +28,16 @@ echo "== harvest $STAMP: up to $N clips, log $LOG"
 caffeinate -dims claude -p \
   "Read docs/HARVEST.md and follow it exactly. Accept and label up to ${N} new clips (rescue or normal), then stop and report." \
   --allowedTools \
-    "Bash(uv run python scripts/harvest.py *)" \
-    "Bash(uv run python scripts/label_sheets.py *)" \
-    "Bash(uv run python scripts/write_label.py *)" \
+    "Bash(uv run hydroknight harvest *)" \
+    "Bash(uv run hydroknight sheets *)" \
+    "Bash(uv run hydroknight write-label *)" \
     "Bash(ffprobe *)" \
     "Read" \
     "Write(scratch/specs/*)" \
   2>&1 | tee "$LOG"
 
 echo "== extraction (Mac GPU)" | tee -a "$LOG"
-caffeinate -dims uv run python scripts/harvest.py extract 2>&1 | tee -a "$LOG"
+caffeinate -dims uv run hydroknight harvest extract 2>&1 | tee -a "$LOG"
 
 git add data/manifests/pool_footage.jsonl data/harvest/candidates.jsonl \
   data/annotations/labeled_by_claude.json data/blocklist.txt 2>/dev/null || true
@@ -46,7 +46,7 @@ if git diff --cached --quiet; then
   git checkout -q main && git branch -q -D "$BRANCH"
   exit 0
 fi
-SUMMARY="$(uv run python scripts/harvest.py status)"
+SUMMARY="$(uv run hydroknight harvest status)"
 git commit -q -m "Harvest ${STAMP}: new clips and Claude labels (pending review)
 
 ${SUMMARY}

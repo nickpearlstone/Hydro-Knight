@@ -15,8 +15,8 @@ lossless. Audio is dropped (unused). Originals are kept in <videos>/av1_original
 Needs ffmpeg/ffprobe with an AV1 decoder (Homebrew's build has libdav1d).
 
 Usage:
-    uv run python scripts/transcode_av1.py --dry-run   # list AV1 clips
-    uv run python scripts/transcode_av1.py             # convert, verify, replace
+    uv run hydroknight transcode-av1 --dry-run   # list AV1 clips
+    uv run hydroknight transcode-av1             # convert, verify, replace
 """
 
 from __future__ import annotations
