@@ -1,0 +1,20 @@
+# Lets GitHub show a "Cite this repository" button. Format: https://citation-file-format.github.io
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "Hydro-Knight: pose-based drowning detection for swimming pools"
+authors:
+  - family-names: Pearlstone
+    given-names: Nick
+repository-code: "https://github.com/nickpearlstone/Hydro-Knight"
+license: AGPL-3.0-only
+version: 0.1.0
+abstract: >-
+  A computer vision project that tracks each swimmer in pool footage, turns
+  their body pose into a time series, and flags patterns that match real
+  drowning behavior.
+keywords:
+  - computer vision
+  - pose estimation
+  - drowning detection
+  - anomaly detection
