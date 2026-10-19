@@ -1,177 +1,140 @@
 # Hydro-Knight
 
 [![CI](https://github.com/nickpearlstone/Hydro-Knight/actions/workflows/ci.yml/badge.svg)](https://github.com/nickpearlstone/Hydro-Knight/actions/workflows/ci.yml)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/nickpearlstone/Hydro-Knight)
+[![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fnickpearlstone%2FHydro-Knight%2Fmain%2Fpyproject.toml)](pyproject.toml)
+[![License](https://img.shields.io/github/license/nickpearlstone/Hydro-Knight)](LICENSE)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Last commit](https://img.shields.io/github/last-commit/nickpearlstone/Hydro-Knight)](https://github.com/nickpearlstone/Hydro-Knight/commits/main)
 
-Hydro-Knight is a computer vision project that watches swimming pool footage and
-flags swimmers who may be drowning. It tracks each swimmer, turns their body pose
-into a time series, and looks for patterns that match real drowning behavior.
+Hydro-Knight is a computer vision project that tries to flag swimmers who may be drowning
+in pool video. It is built around what I learned as a lifeguard: most drownings are
+quiet. A swimmer slips under and doesn't come back up, usually without splashing or
+yelling, so a useful detector has to notice when someone disappears. This is a learning
+and portfolio project in active development, and nothing has been shown to work yet.
 
-It is built around what I learned as a lifeguard: most drownings are quiet. There
-is usually no splashing or yelling. A swimmer slips under and doesn't come back up.
-A useful detector has to notice when someone disappears, in addition to spotting
-dramatic movement.
-
-This is a learning and portfolio project, still in active development.
+**Current scope (v1):** one wave pool. All 66 rescue clips come from one YouTube series,
+so the question is whether drowning can be detected at this pool, with these cameras;
+other pools may come later. A result counts only if it beats trivial baselines (box
+size, box confidence, missing frames) and holds up when every clip is tested once.
 
 ## How it works
 
 ```mermaid
 flowchart TD
-    A[Pool video, 720p or 1080p] --> B[YOLO11 pose on overlapping 480px tiles<br/>each run at 1280px, plus the whole frame]
+    A[Pool video, 720p or 1080p] --> B[YOLO11n-pose on overlapping 480px tiles<br/>each run at 1280px, plus the whole frame]
     B --> C[ByteTrack<br/>one ID per swimmer]
-    C --> D[Per-swimmer time series at 30 fps]
-    D --> E[3 s windows: pose, confidences,<br/>box shape and speed]
-    E --> F[TCN autoencoder<br/>anomaly score]
-    D -.-> G[Rule-based detector<br/>for swimmers who go under<br/><i>planned</i>]
+    C --> D[Per-swimmer time series at 30 fps<br/>pose, confidences, box shape and speed]
+    D --> E[TCN autoencoder<br/>anomaly score per 3 s window]
+    E --> F[Alarm on the swimmer's track]
+    A -.-> G[Head detector inside each camera's<br/>water zone <i>planned</i>]
+    G -.-> H[Tracking through submersion <i>planned</i>]
+    H -.-> I[Time under, forward progress, bobbing<br/>per swimmer <i>planned</i>]
+    I -.-> F
 ```
 
-The model is an **anomaly detector**. It learns what normal swimming looks like and
-scores how far a swimmer strays from it. Real drowning footage is rare, so training
-a classifier on labeled examples of each type isn't practical. The system is also
-tuned to favor recall, because a missed drowning costs far more than a false alarm.
+The current model is an anomaly detector: it learns normal swimming and scores how far
+each swimmer strays from it, since real drowning footage is too rare to train on each
+type. The dashed path is the planned redesign around heads in the water, with the
+autoencoder kept as a baseline. Both are tuned for recall, since a missed drowning costs
+far more than a false alarm.
 
 ## Five ways drowning shows up on camera
 
-| Signature | What the camera sees | Planned detection |
-|---|---|---|
-| Silent sink | A swimmer goes under mid-pool and never resurfaces | Per-swimmer timer |
-| Bobbing in place | Repeated up-and-down cycles with no forward movement | Per-swimmer rules |
-| Passive face-down | A still, face-down body for too long | Pose + duration rules |
-| Flailing | Erratic, high-energy arm and leg movement | Autoencoder |
-| Effort without progress | Swimming hard without moving through the water | Displacement features |
+| Signature | What the camera sees |
+|---|---|
+| Silent sink | A swimmer goes under mid-pool and never resurfaces |
+| Bobbing in place | Repeated up-and-down cycles with no forward movement |
+| Passive face-down | A still, face-down body for too long |
+| Flailing | Erratic, high-energy arm and leg movement |
+| Effort without progress | Swimming hard without moving through the water |
 
-Only flailing is a good fit for an autoencoder. The other four depend on timing and
-position, so they will be handled by explicit rules over each swimmer's track.
+## Findings so far
 
-## Key findings so far
+Details in [docs/FINDINGS.md](docs/FINDINGS.md) and [docs/EVALUATION.md](docs/EVALUATION.md).
+Images are pixelated so no one can be recognized.
 
-Full writeups, figures, and numbers are in [docs/FINDINGS.md](docs/FINDINGS.md).
-
-**1. Image resolution mattered more than model choice.** YOLO-pose found far more
-swimmers than MediaPipe on crowded scenes. Raising YOLO's input size (the resolution
-YOLO runs each image at) from 640px to 1280px found 3 to 6 times more swimmers on
-the same frames. A later benchmark against
-736 hand-counted swimmers confirmed YOLO11n over larger YOLO11 models, YOLO26, and
-MediaPipe, and showed that even the best setup finds only 30 to 40% of swimmers.
+**1. Resolution and tiling matter more than the model.** YOLO at 1280px found 3 to 6
+times more swimmers than at 640px, and tiling raised a crowded frame from about 13 to 50.
+Against 736 hand-counted swimmers, the best setup still finds only 30 to 40%.
 
 ![YOLO at 640px vs 1280px](docs/images/pose_resolution.png)
 
-*Figures are pixelated on purpose. Pool footage often shows minors, so only the
-detected skeletons are drawn clearly.*
+**2. Evaluation has to follow the victim.** Random scores "caught" every rescue in the
+first evaluation, because any flagged swimmer counted. Scoring now uses the victim's own
+track from onset to guard contact, next to random and shuffled baselines.
 
-**2. Tiling and a dedicated tracker made distant swimmers usable.** Splitting each
-frame into overlapping tiles (SAHI) raised detections from about 13 to about 50
-swimmers per frame on a crowded clip. ByteTrack then turned those detections into
-15 stable swimmer IDs on a short test stretch, down from 53 with a simple tracker.
-Over whole clips, tracks are still short (about 1 second median).
+**3. Detection is the bottleneck.** The v2 model ranks victims above other swimmers
+(ROC-AUC 0.83, random 0.50) but catches 0 of 25 held-out rescues at 240 false alarms per
+hour or fewer. On average the victim is in the tracks for only half of the drowning.
 
-**3. The first evaluation couldn't tell a good model from a random one.** The first
-trained autoencoder scored a ROC-AUC of 0.539. An audit then showed that a detector
-outputting random numbers scored 0.497 and still "caught" every rescue, because a
-rescue counted as caught if any of the roughly 21 swimmers in frame was flagged. The
-evaluation was rebuilt around the victim's own track, using clicked victim positions
-and the moment the lifeguard makes contact, with a random baseline reported next to
-every result.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/victim_window_dark.png">
+  <img alt="Share of the distress window: victim in tracks 50 to 51%, scored 21 to 27%" src="docs/images/victim_window_light.png">
+</picture>
 
-**4. The second model ranks victims above chance but catches none.** On held-out
-clips, at 240 false alarms per hour or fewer, the autoencoder caught 0 of 25 rescues,
-the same as random scores. It beats random only at thousands of false alarms per hour.
-Victim moments do score as more unusual than other swimmers' (ROC-AUC 0.83, random
-0.50), but far below any usable alarm threshold. Drawing the scores on the video also
-showed that the best-ranked "victim" was the lifeguard filming in the foreground, and
-that victims often have no detection box for much of the drowning. The victim matcher
-now rejects oversized boxes, and detection results come first in every report.
+**4. Watching scores on video catches what numbers miss.** Boxes run from normal (green)
+to the alarm line (red). Here the highest score is the lifeguard filming in the
+foreground, and the victim has no box.
 
-## Project status
+![Anomaly scores drawn on a rescue clip](docs/images/score_overlay.png)
 
-**Built and tested**
-- Data pipeline: a JSONL manifest of source clips, a download tool, and a browser
-  labeling app with four tabs: each rescue's timeline and where the victim is,
-  counting every swimmer on still frames, a quick good / not good review of labels,
-  and each camera's coverage zone (the water it can watch well)
-- Pose extraction with YOLO11-pose, SAHI tiling, and ByteTrack, in two steps: raw
-  detections on the GPU, then merging and tracking offline
-- Features: each swimmer resampled to 30 fps, with pose relative to its bounding box,
-  all keypoint confidences, a detected flag, and box shape, size, and speed (58 values
-  per step). Missed frames stay in as "not detected" instead of being dropped
-- A dilated temporal convolutional (TCN) autoencoder in three sizes
-- Victim-based scoring on whole held-out clips: catches (an alarm on the victim's own
-  track between onset and guard contact) against false alarms per hour, plus victim vs
-  other-swimmer ranking, each next to a random baseline
-- Saved model weights for every run, and a renderer that draws each swimmer's score on
-  the video for review
-- An earlier evaluation harness that works with any detector (per-event recall,
-  detection delay, false alarms per hour, ROC/PR curves)
-- A pose-model benchmark scored against hand-counted swimmers
-- MLflow experiment tracking, and CI running pytest plus ruff lint and format checks
+**5. Synthetic frames can match a real one at the detector level.** At a 0.05 cutoff, a
+Blender scene matched to a real frame gives YOLO11n-pose 62 to 64% recall (real: 65%) and
+RT-DETRv2 90 to 96% (real: 89%). Whether it helps train a detector is the next test
+([log](docs/research/2026-10-19-synthetic-realism-loop.md)).
 
-**Dataset:** 74 clips (66 rescues, 4 normal, 4 unlabeled). The first version targets
-wave pools only: 57 wave-pool rescue clips are extracted with the tiled pipeline, and
-51 of them are labeled with drowning onset, guard contact, save, and clicked victim
-positions. Most labels were made with an AI-assisted procedure (Claude, following a
-fixed written protocol) and every one was reviewed by hand. Five clips whose victim a
-review found wrong are left out of training until corrected.
+![Real frame next to the matched Blender render](docs/images/synthetic_vs_real.png)
 
-**In progress / next**
-1. Finishing the labels: 6 clips are unlabeled and 5 need the victim corrected
-2. Scoring victims the tracker keeps losing (tracks under 3 s), and checking whether
-   the victim is detected and tracked before going under at these camera distances
-3. A rule-based detector for swimmers who go under and don't resurface
-4. A head-focused detector, and a distance cutoff so each camera only watches the part
-   of the pool it can see clearly
+## Status
+
+**Built:** clip manifest and browser labeler (rescue timelines, victim clicks, swimmer
+counts, water zones), two-step pose extraction, per-swimmer features, a TCN autoencoder,
+a two-tier evaluation protocol, a pose benchmark, a score-overlay renderer, a Blender
+pipeline for labeled synthetic frames, MLflow tracking, and CI.
+
+**Dataset:** 74 clips (66 rescues, 4 normal, 4 unlabeled); 57 rescues extracted and 51
+labeled with onset, guard contact, save, and victim positions. Most labels were made by
+Claude following a written protocol, and every one was reviewed by hand.
+
+**Next:** trivial baselines and grouped K-fold; a head detector fine-tuned on pool
+frames; tracking through submersion with per-swimmer measurements; pretraining on
+synthetic frames before fine-tuning on real ones.
 
 ## Quickstart
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
-To try it without installing anything, open the repo in GitHub Codespaces (badge
-above) and run `make test` once setup finishes. Codespaces has no GPU, so this is for
-the tests and the code, not pose extraction.
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/). Or open it in Codespaces and
+run `make test` (CPU only):
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/nickpearlstone/Hydro-Knight)
 
 ```bash
 uv sync                          # install dependencies
 uv run python -m pytest          # run the tests
 uv run hydroknight --help        # every command, one line each
 make hooks                       # optional: run ruff before every commit
-uv sync --extra tracking         # optional: MLflow
-uv sync --extra spike            # optional: MediaPipe, to regenerate the comparison figures
 ```
 
-Pose extraction runs on a Colab GPU or a Mac GPU (see
-[docs/COLAB_TRAINING.md](docs/COLAB_TRAINING.md)). The model comparison trains on a Mac
-GPU in about an hour:
-
-```bash
-uv run hydroknight train tcn-v2 --sizes small medium large --seeds 0 1 2 --rates capped --device mps
-```
+Pose extraction runs on a Colab or Mac GPU ([docs/COLAB_TRAINING.md](docs/COLAB_TRAINING.md));
+synthetic renders need Blender ([synthetic/README.md](synthetic/README.md)).
 
 ## Data and privacy
 
-No video is stored in this repo. It holds a manifest of source links, metadata, and
-labels (event times and clicked victim positions). Publicly posted footage isn't licensed for
-redistribution, and it shows identifiable people, often children. Labels are based
-on outcomes: if a lifeguard stepped in, the clip counts as a distress event. More in
-[docs/DATA_SOURCING.md](docs/DATA_SOURCING.md).
+No video is stored here, only source links, metadata, and labels. The footage isn't
+licensed for redistribution and shows identifiable people, often children. A clip counts
+as a distress event if a lifeguard stepped in. More in [docs/DATA_SOURCING.md](docs/DATA_SOURCING.md).
 
 ## Acknowledgements
 
-Hydro-Knight builds on:
-- [Ultralytics YOLO](https://github.com/ultralytics/ultralytics) for pose estimation
-- [ByteTrack](https://arxiv.org/abs/2110.06864) (Zhang et al., 2022) for tracking, through
-  Roboflow's [trackers](https://github.com/roboflow/trackers) and
-  [supervision](https://github.com/roboflow/supervision) packages
-- [SAHI](https://arxiv.org/abs/2202.06934) (Akyon et al., 2022), whose sliced inference
-  is the basis for the tiled detection
-- [MediaPipe](https://github.com/google-ai-edge/mediapipe), the pose backend YOLO was
-  compared against
-- [Blender](https://www.blender.org) and [MPFB](https://github.com/makehumancommunity/mpfb2)
-  with the CC0 MakeHuman assets, for the synthetic renders
-- [uv](https://github.com/astral-sh/uv) and [ruff](https://github.com/astral-sh/ruff)
-
-Thanks to the people who post lifeguard rescue footage publicly. The clips are linked
-from the manifest and are not copied into this repo.
+Built on [Ultralytics YOLO](https://github.com/ultralytics/ultralytics),
+[ByteTrack](https://arxiv.org/abs/2110.06864) (Zhang et al., 2022) via Roboflow's
+[trackers](https://github.com/roboflow/trackers) and [supervision](https://github.com/roboflow/supervision),
+[SAHI](https://arxiv.org/abs/2202.06934) (Akyon et al., 2022),
+[RT-DETRv2](https://arxiv.org/abs/2407.17140) (Lv et al., 2024),
+[MediaPipe](https://github.com/google-ai-edge/mediapipe), [Blender](https://www.blender.org)
+and [MPFB](https://github.com/makehumancommunity/mpfb2) with CC0 MakeHuman assets,
+[uv](https://github.com/astral-sh/uv) and [ruff](https://github.com/astral-sh/ruff). Thanks
+to the people who post lifeguard rescue footage publicly.
 
 ## License
 
-[AGPL-3.0](LICENSE), inherited from the pose backend,
-[Ultralytics YOLO](https://github.com/ultralytics/ultralytics).
+[AGPL-3.0](LICENSE), inherited from [Ultralytics YOLO](https://github.com/ultralytics/ultralytics).
