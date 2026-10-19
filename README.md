@@ -3,9 +3,14 @@
 [![CI](https://github.com/nickpearlstone/Hydro-Knight/actions/workflows/ci.yml/badge.svg)](https://github.com/nickpearlstone/Hydro-Knight/actions/workflows/ci.yml)
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/nickpearlstone/Hydro-Knight)
 
-Hydro-Knight is a computer vision project that watches swimming pool footage and
-flags swimmers who may be drowning. It tracks each swimmer, turns their body pose
-into a time series, and looks for patterns that match real drowning behavior.
+Hydro-Knight is a computer vision project that tries to flag swimmers who may be
+drowning in pool video. Version 1 is a single-venue feasibility study: every rescue
+clip comes from one wave pool, from one YouTube series of real lifeguard rescues. The
+question it asks is narrow: can drowning be detected from video at this pool, with
+these cameras? Nothing has been shown to work yet.
+
+The system tracks each swimmer, turns what the camera sees of them into a time series,
+and looks for patterns that match real drowning behavior.
 
 It is built around what I learned as a lifeguard: most drownings are quiet. There
 is usually no splashing or yelling. A swimmer slips under and doesn't come back up.
@@ -13,6 +18,39 @@ A useful detector has to notice when someone disappears, in addition to spotting
 dramatic movement.
 
 This is a learning and portfolio project, still in active development.
+
+## Scope
+
+**In scope for v1:** one wave pool. The claim to test is only "learnable at this
+pool", so a split that keeps whole clips apart (train on some rescues, test on others)
+is an acceptable test of it. Generalization to other pools is out of scope.
+
+**What the proof of concept has to show:**
+- **It beats trivial baselines, not just random scores.** Victims are mostly near
+  inner tubes and are often small, and box size, box confidence and a detected flag
+  are model inputs, so a model could score well from shortcuts. It counts only if it
+  beats simple scores on the same protocol: the share of missing frames, the number of
+  times a swimmer flips between detected and missing, 1 minus the mean box confidence,
+  and negative box height, plus the same model with all pose coordinates removed.
+- **It holds up when every labeled clip is tested once** (grouped K-fold), instead of
+  three random splits. With 6 to 11 test clips per split, the victim-separation AUC
+  (FINDINGS section 5) moves from 0.74 to 0.93 on the split alone.
+- **It can see the victim.** Today the victim is in the input tracks for only about
+  half of the distress window, and the model scores the victim for only 21 to 27% of
+  it. Both detection and the scoring of short tracks have to improve before more model
+  work can show anything.
+
+**Allowed at a single site:** shortcuts that only make sense at one pool, such as
+hand-drawn water zones, homographies to the water surface, and thresholds tuned to
+this site. Camera position changes from video to video, so zones and homographies are
+set per clip.
+
+**Limitations:** most events involve inner tubes and many victims are young children,
+so v1 covers that kind of rescue more than a silent submersion. Every event was caught
+by a lifeguard, which biases the data toward drownings that a guard can see. This is
+also a hard setting: an oblique camera above the water of a crowded wave pool.
+Commercial systems mostly watch from underwater, where a still body near the bottom
+is easy to see.
 
 ## How it works
 
@@ -106,12 +144,13 @@ now rejects oversized boxes, and detection results come first in every report.
 - A pose-model benchmark scored against hand-counted swimmers
 - MLflow experiment tracking, and CI running pytest plus ruff lint and format checks
 
-**Dataset:** 74 clips (66 rescues, 4 normal, 4 unlabeled). The first version targets
-wave pools only: 57 wave-pool rescue clips are extracted with the tiled pipeline, and
-51 of them are labeled with drowning onset, guard contact, save, and clicked victim
-positions. Most labels were made with an AI-assisted procedure (Claude, following a
-fixed written protocol) and every one was reviewed by hand. Five clips whose victim a
-review found wrong are left out of training until corrected.
+**Dataset:** 74 clips (66 rescues, 4 normal, 4 unlabeled). All 66 rescues come from
+one wave pool, from one YouTube series. The first version targets that pool only: 57
+rescue clips are extracted with the tiled pipeline, and 51 of them are labeled with
+drowning onset, guard contact, save, and clicked victim positions. Most labels were
+made with an AI-assisted procedure (Claude, following a fixed written protocol) and
+every one was reviewed by hand. Five clips whose victim a review found wrong are left
+out of training until corrected.
 
 **In progress / next**
 1. Finishing the labels: 6 clips are unlabeled and 5 need the victim corrected

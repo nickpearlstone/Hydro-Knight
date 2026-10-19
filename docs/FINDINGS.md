@@ -3,6 +3,12 @@
 Detailed writeups of the experiments summarized in the [README](../README.md), all run
 on real pool footage.
 
+> **Single venue.** Every model and evaluation result here (sections 3 and 5) comes from
+> rescue clips at one wave pool, from one YouTube series, and says nothing yet about other
+> pools. The pose comparisons (sections 1 and 4) also include a few frames from a second,
+> resort pool. Version 1 is scoped as a single-venue proof of concept; see the
+> [README](../README.md#scope).
+
 > Figures are **deliberately pixelated** so no one can be recognized. Only the
 > extracted skeletons are drawn clearly.
 
