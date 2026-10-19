@@ -172,3 +172,20 @@ generic-feature distance (KID) are close; per-person appearance is not.
   OptiX render has darker water (Lab L 125 vs 139), fainter floor caustics and lighter tube shadows,
   and RT-DETR fires ~30% more false boxes (411 vs 308). **Calibrate exposure/water on Kaggle itself**
   (score one Kaggle frame against the real reference) before rendering a large batch.
+
+### Backend calibration (10-19)
+
+Same frame (seed 2, t = 0) rendered three ways:
+
+| Backend | water L | frame L | floor shadows / bright floor line |
+|---|---|---|---|
+| CPU (Cycles reference, M1) | 148.0 | 183.5 | yes |
+| Metal (M1 GPU, where the look was tuned) | 156.8 | 189.9 | yes |
+| OptiX (Kaggle T4) | 147.4 | 171.2 | mostly missing |
+
+- Metal renders this scene about 6% brighter than the CPU reference; OptiX matches the CPU on water
+  brightness but loses most shadows cast through the water onto the floor.
+- **Brightness fix:** `post.py` now picks its gain by the backend recorded in each frame's labels
+  (Metal 0.90, CPU/OptiX/CUDA 0.96). On the Kaggle OptiX frame this gives YOLO 60% / 23% (25 / 5
+  false), RT-DETR 93% / 68% (355 / 50 false), close to the Mac frame and the real targets.
+- **Shadow fix (pending):** `scene.py --backend CUDA` on Kaggle, compared against the CPU reference.

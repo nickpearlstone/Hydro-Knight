@@ -35,6 +35,11 @@ ap.add_argument("--samples", type=int, default=None)
 ap.add_argument("--res", type=int, default=None)
 ap.add_argument("--seed", type=int, default=None)
 ap.add_argument(
+    "--cpu",
+    action="store_true",
+    help="render on the CPU (Cycles reference), not the GPU",
+)
+ap.add_argument(
     "--clip",
     type=int,
     default=1,
@@ -647,7 +652,8 @@ def setup_render():
     sc = bpy.context.scene
     sc.render.engine = "CYCLES"
     prefs = bpy.context.preferences.addons["cycles"].preferences
-    for dev_type in ("OPTIX", "CUDA", "METAL"):
+    order = [args.backend] if args.backend else ["OPTIX", "CUDA", "METAL"]
+    for dev_type in order:
         try:
             prefs.compute_device_type = dev_type
             prefs.get_devices()
@@ -665,7 +671,7 @@ def setup_render():
         [(d.name, d.use) for d in prefs.devices],
         flush=True,
     )
-    sc.cycles.device = "GPU"
+    sc.cycles.device = "CPU" if args.cpu else "GPU"
     sc.render.resolution_x, sc.render.resolution_y = RES, RES * 9 // 16
     sc.render.resolution_percentage = 100
     sc.render.image_settings.file_format = "PNG"
@@ -821,7 +827,20 @@ def main():
         counts = np.bincount(seg.ravel(), minlength=max(p["id"] for p in people) + 2)
         cam = sc.camera
         fpx = (W / 2) / math.tan(cam.data.angle / 2)
-        lab = {"config": CFG, "seed": SEED, "scene": s, "people": []}
+        backend = (
+            "CPU"
+            if args.cpu
+            else bpy.context.preferences.addons[
+                "cycles"
+            ].preferences.compute_device_type
+        )
+        lab = {
+            "config": CFG,
+            "seed": SEED,
+            "scene": s,
+            "backend": backend,
+            "people": [],
+        }
         for p in people:
             co = Vector(p["head"])
             ndc = world_to_camera_view(sc, cam, co)

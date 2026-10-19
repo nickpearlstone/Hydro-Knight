@@ -1,8 +1,8 @@
 """Kaggle GPU job: render the synthetic wave-pool scene with Linux Blender and time it.
 
 Input dataset (npstone/hk-synth): scene.py, humans.py, post.py, ref_6f5c.json, humans_packed.blend.
-Run 1 = the b13 setup (seed 2, 4-frame moving-water clip, 32 samples, 1920 px); run 2 = one plain
-frame (seed 3, no clip); then post.py on run 1. Writes timings.json + frames to /kaggle/working.
+Renders the same frame (seed 2, 32 samples, 1920 px) with the CUDA and OptiX backends, then post.py
+on both, to compare against the Mac CPU reference render. Writes timings.json + frames to /kaggle/working.
 """
 
 import glob
@@ -48,9 +48,9 @@ _, t, _ = sh(f"cd /tmp && wget -q {BL_URL} && tar xf blender-4.2.1-linux-x64.tar
 timings["blender_download_s"] = round(t, 1)
 B = "/tmp/blender-4.2.1-linux-x64/blender"
 
-runs = {
-    "b13_clip4_seed2": f"--seed 2 --clip 4 --samples 32 --res 1920 --out {W}/b13k",
-    "single_seed3": f"--seed 3 --clip 1 --samples 32 --res 1920 --out {W}/single",
+runs = {  # same frame (seed 2, labelled t = 0) on both GPU backends, to compare with the CPU reference
+    "seed2_cuda": f"--seed 2 --clip 1 --samples 32 --res 1920 --backend CUDA --out {W}/cuda",
+    "seed2_optix": f"--seed 2 --clip 1 --samples 32 --res 1920 --backend OPTIX --out {W}/optix",
 }
 for name, extra in runs.items():
     out, t, rc = sh(
@@ -66,7 +66,7 @@ for name, extra in runs.items():
     }
 
 _, t, rc = sh(
-    f"pip -q install opencv-python-headless pandas pyarrow > /dev/null 2>&1; cd {work} && python post.py {W}/b13k"
+    f"pip -q install opencv-python-headless pandas pyarrow > /dev/null 2>&1; cd {work} && python post.py {W}/cuda && python post.py {W}/optix"
 )
 timings["post_s"] = round(t, 1)
 Path(f"{W}/timings.json").write_text(json.dumps(timings, indent=1))

@@ -23,7 +23,11 @@ import cv2
 import numpy as np
 
 DEFAULTS = {  # tuned against 6f5c67826a76 #720 (batch b02, see docs/research synthetic log)
-    "gain": 0.9,
+    "gain": None,  # None = by render backend (below); a number overrides
+    # Cycles backends differ in brightness on this scene: Metal (the Mac, where the look was tuned)
+    # renders the water ~6% brighter than the CPU reference, OptiX and CUDA. Gains equalise them
+    # (10-19: Kaggle OptiX frame at 0.96 scored like the Mac frame at 0.90).
+    "gain_by_backend": {"METAL": 0.9, "CPU": 0.96, "OPTIX": 0.96, "CUDA": 0.96},
     "wb": [0.95, 1.05, 1.0],  # B, G, R gains
     "clahe": 1.2,  # 0 = off
     "sat": 1.4,
@@ -231,12 +235,19 @@ def main():
     ap.add_argument("--params", default="{}")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
-    p = {**DEFAULTS, **json.loads(a.params)}
+    p0 = {**DEFAULTS, **json.loads(a.params)}
+    p = p0
     rng = np.random.default_rng(a.seed)
     d = Path(a.dir)
     for f in sorted(d.glob("rgb_*.png")):
         img = cv2.imread(str(f))
         n = f.stem.split("_")[1]
+        lab = json.loads((d / f"labels_{n}.json").read_text())
+        p = {
+            **p0,
+            "gain": p0["gain"]
+            or p0["gain_by_backend"].get(lab.get("backend", "METAL"), 0.9),
+        }
         img = supersample(d, n, img, p.get("target_w", 1920))
         clip, ck = None, 0
         meta = d / f"clip_{n}.json"
