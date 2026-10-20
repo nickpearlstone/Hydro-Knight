@@ -12,7 +12,7 @@ help:
 	@echo "make mlflow          open the MLflow dashboard (http://127.0.0.1:5001)"
 	@echo "make test            run the tests"
 	@echo "make check           tests + lint + format check (what CI runs)"
-	@echo "make hooks           run ruff on every commit (once per clone)"
+	@echo "make hooks           run ruff and a secret scan on every commit (once per clone)"
 
 harvest:
 	bash scripts/harvest.sh $(N)
@@ -37,3 +37,4 @@ check:
 
 hooks:
 	uv run pre-commit install
+	@command -v gitleaks >/dev/null || echo "The secret scan also needs gitleaks: brew install gitleaks"
