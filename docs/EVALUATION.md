@@ -7,6 +7,24 @@ The protocol has two tiers because the data does. Tier 1 works today with the la
 clips alone and answers "is this change heading the right way?". Tier 2 is the standard a
 deployable system has to meet, and it needs hours of incident-free footage we don't have yet.
 
+## Tier 1 is the proof-of-concept bar
+
+Version 1 is a single-venue proof of concept: all rescue clips come from one wave pool, and
+the claim is only that drowning is learnable at this pool. Tier 1 is the bar for that claim,
+and a result clears it only if it beats **trivial baselines** as well as the random and
+shuffled scores. Within one pool the risk is shortcuts: victims are mostly near inner tubes
+and often small, and box size, box confidence and a detected flag are model inputs. So each
+window is also scored, on the same clips and the same rules, by:
+
+- the share of missing steps in the window,
+- the number of times the track flips between detected and missing,
+- 1 minus the mean box confidence,
+- negative box height,
+
+and the model is retrained with all pose coordinates removed. These baselines are required
+but not yet built into the harness. Results should come from grouped K-fold over all labeled
+clips, so each clip is tested exactly once.
+
 ## Shared rules
 
 - **Input.** Any model reduces to one table: clip, track, time, score. The time is when a live

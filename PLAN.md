@@ -3,7 +3,7 @@
 The roadmap and decisions of record. For the project overview see the
 [README](README.md); for experiment writeups see [docs/FINDINGS.md](docs/FINDINGS.md).
 
-*Last updated 2026-10-10.*
+*Last updated 2026-10-18.*
 
 ## Current status
 
@@ -80,6 +80,33 @@ Rule 1 has to match a *new* track to the lost one, because the tracker gives a s
 new ID after a short submersion (see Known issues).
 
 ## Next steps
+
+### Proof-of-concept criteria (do these first, in this order)
+
+Nothing has passed these yet. They define what v1 has to demonstrate.
+
+1. **Trivial baselines and a pose ablation.** On the same protocol and the same clips,
+   score each window by (a) the share of missing steps, (b) the number of detected or
+   missing transitions, (c) 1 minus the mean box confidence, and (d) negative box
+   height, and retrain the model with all pose coordinates removed. Random scores are
+   not a sufficient baseline: victims are mostly near inner tubes and often small, and
+   box size, box confidence and the detected flag are model inputs. The model counts only
+   if it beats these. In the same step, cut normal training data at guard contact: today
+   the rescuing guard and the commotion after contact are counted as normal swimming.
+2. **Grouped K-fold over all labeled clips,** each clip tested exactly once, in place of
+   three random hash splits. With 6 to 11 test clips per split, the victim-separation
+   AUC (FINDINGS section 5) moves from 0.74 to 0.93 on the split alone. Choose model
+   settings without looking at the test folds, and label any threshold picked on test
+   clips as an upper bound.
+3. **Detection and visibility.** On the v2 runs the victim is in the input tracks for
+   only about half of the distress window, and the model scores the victim for 21 to 27%
+   of it (its first score comes about 4.5 s into a track, and most victim tracks are
+   shorter). Raise both: a better detector for heads in water, and scoring that works on
+   short or re-joined tracks.
+4. **Further modeling,** only after 1 to 3: a small supervised model on per-track
+   features (every other swimmer is a labeled negative) and the Plan A rules.
+
+### Earlier roadmap (partly done)
 
 1. **Label the 66 rescue clips:** guard contact time, victim click at onset, victim
    click at the last visible moment. Everything below depends on these labels.
@@ -164,6 +191,16 @@ new ID after a short submersion (see Known issues).
 
 ## Decisions of record
 
+- **v1 is a single-venue proof of concept (2026-10-18).** All 66 rescue clips come from
+  one wave pool, from one YouTube series. The v1 question is "can drowning be detected
+  from video at this pool, with these cameras?" Generalization to other pools is out of
+  scope, so a whole-clip train/test split is an acceptable test. Within one pool the main
+  threat is shortcuts, so a result counts only if it beats trivial baselines on the same
+  protocol (see Next steps). Single-site shortcuts are allowed: hand-drawn water zones,
+  homographies to the water surface, and thresholds tuned to this site, set per clip
+  because camera position changes from video to video. Stated limitations: most events
+  involve inner tubes and many victims are young children, and every event was caught by
+  a lifeguard.
 - **Anomaly detection over classification.** Real positives are too rare. Favor recall.
 - **Pose backend:** YOLO11n-pose at imgsz 1280 or higher, with tiling. It beat
   MediaPipe, and resolution was the biggest recall lever. The October 2026 benchmark
