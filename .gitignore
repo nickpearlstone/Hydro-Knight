@@ -30,6 +30,27 @@ access_token
 secrets.json
 *.pem
 *.key
+cookie*.txt
+*cookies*.json
+.env.*
+!.env.example
+.netrc
+.npmrc
+id_rsa*
+id_ed25519*
+*.p12
+*.pfx
+credentials.json
+client_secret*.json
+service-account*.json
+token.json
+token.pickle
+.huggingface/
+wandb/
+
+# Notebooks save cell outputs (frames, paths, tokens); keep recipes as .py or in docs.
+# Force-add one with `git add -f` after clearing its outputs.
+*.ipynb
 
 # Model weight files (auto-downloaded, large, not source)
 *.pt
