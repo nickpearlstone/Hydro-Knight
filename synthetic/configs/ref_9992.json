@@ -1,0 +1,147 @@
+{
+ "name": "ref_9992",
+ "about": "Right-side lifeguard deck looking across (mirror of 6f5c); bright turquoise; strong fish-eye.",
+ "seed": 1,
+ "samples": 32,
+ "res": 1920,
+ "pool": {
+  "width_near": 16,
+  "width": 38,
+  "length": 30,
+  "depth": 1.4
+ },
+ "camera": {
+  "pos": [
+   9.7,
+   3.0,
+   2.7
+  ],
+  "yaw": -22,
+  "pitch": 22,
+  "hfov": 75,
+  "roll": 1.5,
+  "lens_k": 0.45
+ },
+ "water": {
+  "swell_amp": [
+   0.05,
+   0.12
+  ],
+  "swell_len": [
+   8,
+   14
+  ],
+  "chop_amp": [
+   0.02,
+   0.05
+  ],
+  "roughness": [
+   0.0,
+   0.01
+  ],
+  "bump": [
+   0.5,
+   0.45
+  ],
+  "absorb_color": [
+   0.05,
+   0.6,
+   0.75
+  ],
+  "absorb_density": [
+   0.45,
+   0.55
+  ],
+  "scatter_color": [
+   0.45,
+   0.88,
+   0.92
+  ],
+  "scatter_density": [
+   0.12,
+   0.16
+  ],
+  "ripple_scale": [
+   3,
+   6
+  ],
+  "ripple_speed": 4.0
+ },
+ "scene": {
+  "floor_color": [
+   0.9,
+   0.97,
+   0.98
+  ],
+  "deck_color": [
+   0.42,
+   0.41,
+   0.39
+  ],
+  "trees": 40,
+  "rope_y": 7,
+  "caustic_scale": 3.0,
+  "caustic_strength": 0.45
+ },
+ "light": {
+  "sun_elevation": [
+   62,
+   72
+  ],
+  "sun_azimuth": [
+   150,
+   210
+  ],
+  "dust": [
+   1.0,
+   2.5
+  ],
+  "strength": [
+   0.45,
+   0.55
+  ],
+  "view_transform": "AgX",
+  "look": "AgX - Punchy",
+  "exposure": -0.3
+ },
+ "crowd": {
+  "n_people": 120,
+  "far_density_gain": 8.0,
+  "min_spacing": 0.6,
+  "tube_frac_near": 0.75,
+  "tube_frac_far": 0.12,
+  "empty_tubes": 8,
+  "pose_mix": [
+   0.68,
+   0.71,
+   0.76,
+   0.92
+  ],
+  "splash_prob": 0.04,
+  "beach_from": 0.75,
+  "beach_stand_prob": 0.7,
+  "human_lib": "synthetic/mpfb/humans.blend",
+  "cluster": 0.45,
+  "beach_dz": [
+   0.15,
+   0.45
+  ],
+  "skin_coat": 0.25
+ },
+ "vary": {
+  "pos": [
+   0.5,
+   0.5,
+   0.3
+  ],
+  "yaw": 3,
+  "pitch": 1.5,
+  "hfov": 3,
+  "roll": 1,
+  "n_people": [
+   0.75,
+   1.25
+  ]
+ },
+ "reference": "99922f6d32ae_914"
+}

@@ -206,6 +206,56 @@ def degrade(img, p, rng, clip=None, clip_keep=0):
     return encode(frames, p)
 
 
+def fisheye_maps(W, H, k):
+    """Barrel ("fish-eye") distortion that keeps the frame full.
+
+    An output pixel at normalised radius r (r = 1 at the corners) samples the clean render at radius
+    r * s * (1 + k r^2), with s = 1 / (1 + k) so corners map to corners. k = 0 is a straight lens.
+    """
+    cx, cy, R = W / 2, H / 2, np.hypot(W / 2, H / 2)
+    gx, gy = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
+    dx, dy = (gx - cx) / R, (gy - cy) / R
+    f = (1 + k * (dx * dx + dy * dy)) / (1 + k)
+    return (cx + dx * f * R).astype(np.float32), (cy + dy * f * R).astype(np.float32)
+
+
+def fisheye_point(u, v, W, H, k):
+    """Where a clean-render pixel (u, v) lands after fisheye_maps: invert r_u = r_d (1 + k r_d^2) / (1 + k)."""
+    cx, cy, R = W / 2, H / 2, np.hypot(W / 2, H / 2)
+    xu, yu = (u - cx) / R, (v - cy) / R
+    ru = np.hypot(xu, yu)
+    rd = ru
+    for _ in range(30):  # Newton on g(r) = r (1 + k r^2) / (1 + k) - ru
+        g = rd * (1 + k * rd * rd) / (1 + k) - ru
+        rd = rd - g / ((1 + 3 * k * rd * rd) / (1 + k))
+    sc = rd / ru if ru > 0 else 1.0 / (1 / (1 + k))
+    return cx + xu * sc * R, cy + yu * sc * R
+
+
+def apply_fisheye(d, n, k, W, H):
+    """Distort this frame's labels and masks once (recorded in the labels as lens_k_applied)."""
+    lf = d / f"labels_{n}.json"
+    lab = json.loads(lf.read_text())
+    if k <= 0 or lab.get("lens_k_applied"):
+        return
+    mx, my = fisheye_maps(W, H, k)
+    for p in lab["people"]:
+        u, v = fisheye_point(p["u"], p["v"], W, H, k)
+        r_out = np.hypot(
+            *(
+                np.array(fisheye_point(p["u"] + p["head_r_px"], p["v"], W, H, k))
+                - (u, v)
+            )
+        )
+        p["u"], p["v"], p["head_r_px"] = float(u), float(v), float(r_out)
+    for name in ("seg", "headseg"):
+        f = d / f"{name}_{n}.npy"
+        if f.exists():
+            np.save(f, cv2.remap(np.load(f), mx, my, cv2.INTER_NEAREST))
+    lab["lens_k_applied"] = k
+    lf.write_text(json.dumps(lab))
+
+
 def supersample(d, n, img, target_w):
     """Renders made larger than target_w are area-downscaled; labels and seg are rescaled once to match."""
     H, W = img.shape[:2]
@@ -264,6 +314,27 @@ def main():
                 )
                 for k in range(m["n"])
             ]
+        k = lab.get("config", {}).get("camera", {}).get("lens_k", 0.0)
+        if (
+            k > 0
+        ):  # fish-eye lens: same curve on the image, every clip frame, labels and masks
+            mx, my = fisheye_maps(img.shape[1], img.shape[0], k)
+            img = cv2.remap(
+                img, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT
+            )
+            clip = (
+                [
+                    cv2.remap(
+                        c, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT
+                    )
+                    for c in clip
+                ]
+                if clip
+                else None
+            )
+            if clip:
+                clip[ck] = img
+            apply_fisheye(d, n, k, img.shape[1], img.shape[0])
         out = degrade(img, p, rng, clip, ck)
         out = grain(out, p, rng)
         cv2.imwrite(str(d / f.name.replace("rgb_", "rgbv_")), out)

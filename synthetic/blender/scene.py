@@ -40,6 +40,11 @@ ap.add_argument(
     help="render on the CPU (Cycles reference), not the GPU",
 )
 ap.add_argument(
+    "--exact",
+    action="store_true",
+    help="ignore the config's vary block (for fitting a camera)",
+)
+ap.add_argument(
     "--backend",
     default=None,
     help="force a GPU backend: OPTIX, CUDA or METAL (default: first one found)",
@@ -322,9 +327,12 @@ def build_pool(rng, c):
     leaf = [humans.mat(f"leaf{i}", col, rough=0.8) for i, col in enumerate(leaf_cols)]
     tex = bpy.data.textures.new("leafy", "CLOUDS")
     tex.noise_scale = 0.5
-    for _ in range(int(c["trees"])):
+    n_behind = int(c.get("trees_behind", 0))  # trees past the wave-machine end (y < 0)
+    for t in range(int(c["trees"]) + n_behind):
         side = rng.random()
-        if side < 0.6:
+        if t >= int(c["trees"]):
+            x, y = rng.uniform(-40, 40), -rng.uniform(9, 20)
+        elif side < 0.6:
             x, y = rng.uniform(-80, 80), POOL_L + rng.uniform(18, 45)
         else:
             x, y = (
@@ -394,9 +402,13 @@ def sample_crowd(rng, c, sc, cam):
             if not (1.2 < y < POOL_L - 0.8 and abs(x) < half_w(y) - 0.7):
                 continue
         else:
-            y = rng.uniform(1.2, POOL_L - 0.8)
+            y = rng.uniform(
+                c.get("y_min", 1.2), c.get("y_max", POOL_L - 0.8)
+            )  # where the crowd stands
             x = rng.uniform(-half_w(y) + 0.7, half_w(y) - 0.7)
-        if rng.random() > (1 + grad * y / POOL_L) / (1 + grad):
+        if rng.random() > (1 + grad * y / POOL_L) / max(
+            1.0, 1 + grad
+        ):  # grad < 0: denser at y = 0
             continue
         if not in_view(sc, cam, (x, y, 0.3)):
             continue
@@ -427,6 +439,18 @@ LIB_POSE = {
 }
 
 
+def mark_head(o):
+    """Point attribute is_head = 1 within 1.3 head radii of the origin (= head centre), incl. hair."""
+    me = o.data
+    if "is_head" in me.attributes:
+        return
+    co = np.zeros(len(me.vertices) * 3, np.float32)
+    me.vertices.foreach_get("co", co)
+    r = np.linalg.norm(co.reshape(-1, 3), axis=1)
+    attr = me.attributes.new("is_head", "FLOAT", "POINT")
+    attr.data.foreach_set("value", (r < 1.3 * float(o["head_r"])).astype(np.float32))
+
+
 def load_lib(path):
     """Append the posed MPFB humans (synthetic/blender/make_human_lib.py); {pose: [template objects]}."""
     with bpy.data.libraries.load(os.path.abspath(path)) as (src, dst):
@@ -435,6 +459,7 @@ def load_lib(path):
     coat = CFG["crowd"].get("skin_coat")
     for o in dst.objects:
         by.setdefault(o["pose"], []).append(o)
+        mark_head(o)
         for m in o.data.materials if coat is not None else []:
             for n in m.node_tree.nodes if m and m.use_nodes else []:
                 if n.type == "BSDF_PRINCIPLED" and not m.name.startswith("suit_"):
@@ -479,6 +504,26 @@ def place_lounger(rng, pid, x, y, wz, lib=None):
     return ob, r_world
 
 
+USED = {}  # camera + crowd actually used for the current scene, after per-frame variation
+
+
+def varied(rng):
+    """Config camera and crowd with this frame's random variation (config "vary" block; none = exact)."""
+    v = {} if args.exact else CFG.get("vary", {})
+    cam = dict(CFG["camera"])
+    if v:
+        cam["pos"] = [
+            c + rng.uniform(-d, d)
+            for c, d in zip(cam["pos"], v.get("pos", [0, 0, 0]), strict=True)
+        ]
+        for k in ("yaw", "pitch", "hfov", "roll"):
+            cam[k] = cam.get(k, 0) + rng.uniform(-v.get(k, 0), v.get(k, 0))
+    crowd = dict(CFG["crowd"])
+    if "n_people" in v:
+        crowd["n_people"] = int(crowd["n_people"] * rng.uniform(*v["n_people"]))
+    return cam, crowd
+
+
 def build_scene(rng):
     for ob in list(bpy.data.objects):
         if ob.type == "MESH":
@@ -487,13 +532,17 @@ def build_scene(rng):
         for item in list(coll):
             coll.remove(item)
     humans.TUBE_MATS.clear()
+    if "tube_colors" in CFG["crowd"]:  # e.g. deep blue tubes at some parks
+        humans.TUBE[:] = [tuple(c) for c in CFG["crowd"]["tube_colors"]]
     sc = bpy.context.scene
     world = sc.world
     wn = world.node_tree.nodes
     for nd in list(wn):
         if nd.type == "TEX_SKY":
             wn.remove(nd)
-    set_camera(CFG["camera"])
+    cam_cfg, crowd_cfg = varied(rng)
+    USED.update(camera=cam_cfg, n_people=crowd_cfg["n_people"])
+    set_camera(cam_cfg)
     waves = Waves(rng, CFG["water"])
     ANIM["waves"] = waves
     build_water(rng, waves, CFG["water"])
@@ -510,7 +559,7 @@ def build_scene(rng):
     world.node_tree.links.new(sky.outputs["Color"], wn["Background"].inputs["Color"])
     wn["Background"].inputs["Strength"].default_value = rng.uniform(*lc["strength"])
 
-    cc = CFG["crowd"]
+    cc = crowd_cfg
     lib = load_lib(cc["human_lib"]) if cc.get("human_lib") else None
     spots, kinds = sample_crowd(rng, cc, sc, sc.camera)
     people = []
@@ -721,9 +770,13 @@ def rgb_mode():
     ]
 
 
-def seg_material():
-    """Flat emission whose colour encodes the object's category_id: r = id % 256, g = id // 256."""
-    m = bpy.data.materials.get("seg") or bpy.data.materials.new("seg")
+def seg_material(heads_only=False):
+    """Flat emission whose colour encodes the object's category_id: r = id % 256, g = id // 256.
+
+    heads_only: multiply by the mesh's is_head attribute, so only (visible) head pixels keep their id.
+    """
+    name = "seg_head" if heads_only else "seg"
+    m = bpy.data.materials.get(name) or bpy.data.materials.new(name)
     m.use_nodes = True
     nt = m.node_tree
     nt.nodes.clear()
@@ -756,14 +809,29 @@ def seg_material():
     L(fl.outputs[0], g.inputs[0])
     L(r.outputs[0], comb.inputs[0])
     L(g.outputs[0], comb.inputs[1])
-    L(comb.outputs[0], em.inputs["Color"])
+    if heads_only:
+        ha = nt.nodes.new("ShaderNodeAttribute")
+        ha.attribute_type = "GEOMETRY"
+        ha.attribute_name = "is_head"
+        rnd = nt.nodes.new("ShaderNodeMath")
+        rnd.operation = "ROUND"
+        mul = nt.nodes.new("ShaderNodeMix")
+        mul.data_type = "RGBA"
+        mul.blend_type = "MULTIPLY"
+        mul.inputs["Factor"].default_value = 1.0
+        L(ha.outputs["Fac"], rnd.inputs[0])
+        L(comb.outputs[0], mul.inputs[6])
+        L(rnd.outputs[0], mul.inputs[7])
+        L(mul.outputs[2], em.inputs["Color"])
+    else:
+        L(comb.outputs[0], em.inputs["Color"])
     L(em.outputs[0], out.inputs["Surface"])
     return m
 
 
-def seg_mode():
+def seg_mode(heads_only=False):
     sc = bpy.context.scene
-    sc.view_layers[0].material_override = seg_material()
+    sc.view_layers[0].material_override = seg_material(heads_only)
     sc.cycles.samples = 1
     sc.cycles.use_adaptive_sampling = False
     sc.cycles.use_denoising = False
@@ -830,6 +898,11 @@ def main():
         seg = read_seg(seg_path)
         os.remove(seg_path)
         np.save(os.path.join(args.out, f"seg_{nm}.npy"), seg)
+        seg_mode(heads_only=True)
+        sc.render.filepath = seg_path
+        bpy.ops.render.render(write_still=True)
+        np.save(os.path.join(args.out, f"headseg_{nm}.npy"), read_seg(seg_path))
+        os.remove(seg_path)
         counts = np.bincount(seg.ravel(), minlength=max(p["id"] for p in people) + 2)
         cam = sc.camera
         fpx = (W / 2) / math.tan(cam.data.angle / 2)
@@ -842,6 +915,7 @@ def main():
         )
         lab = {
             "config": CFG,
+            "used": dict(USED),
             "seed": SEED,
             "scene": s,
             "backend": backend,

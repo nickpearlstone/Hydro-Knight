@@ -11,15 +11,19 @@ synthetic/
 │   ├── make_human_lib.py   builds the posed MPFB human library (synthetic/mpfb/humans.blend)
 │   ├── mpfb_env.sh         runs Blender with the repo-local MPFB user dirs
 │   └── pack_lib.py         shrinks + packs library textures into one portable .blend (Kaggle)
-├── configs/ref_6f5c.json   camera, pool, water, light and crowd matched to real frame 6f5c…#720
+├── configs/ref_*.json      one per real reference camera (6f5c, dc93, 1d50, 9992, 644c, 8c83): camera,
+│                           lens, pool, water, light, crowd, and a vary block for per-frame variation
 ├── tools/
 │   ├── post.py             camera + two-stage x264 degradation (rgb_ → rgbv_)
 │   ├── score.py            YOLO11n-pose + RT-DETRv2 recall / false boxes, real vs render
 │   ├── realism.py          DINOv2 crop KID + real-vs-render classifier AUC
 │   ├── stats.py            image-statistics diagnostics
+│   ├── export_yolo.py      person + head boxes (YOLO format + JSON sidecar) from the visible masks
+│   ├── fit_preview.sh      quick exact render of a config above its real reference (camera fitting)
 │   ├── side_by_side.py     real frame above a render
 │   └── evaluate.sh         post → stats → score → realism for one render folder
-├── kaggle/                 private Kaggle GPU job (render timing) + its metadata
+├── kaggle/                 private Kaggle jobs: timing_kernel.py, batch_kernel.py + make_batch.py
+│                           (two notebooks, 3 configs x 50 frames each)
 ├── renders/                outputs (gitignored)
 ├── blender-bin/            local Blender 4.2.1 (gitignored, per machine)
 └── mpfb/                   MPFB extension + CC0 asset pack + humans.blend (gitignored)
