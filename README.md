@@ -112,6 +112,7 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 uv sync                      # install dependencies
 uv run python -m pytest      # run the tests
 uv run hydroknight --help    # list every command
+make hooks                   # lint and scan for leaked keys on every commit (brew install gitleaks)
 ```
 
 To try it without installing anything, open it in Codespaces and run `make test`:
