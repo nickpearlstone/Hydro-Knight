@@ -34,7 +34,7 @@ does windowing, training/loading, metrics, and figures in one call.
 
 ### Cell 1 — setup (repo + deps + Drive), idempotent
 ```python
-!git clone -q https://github.com/DistancedTurtle/Hydro-Knight.git 2>/dev/null || (cd Hydro-Knight && git pull -q)
+!git clone -q https://github.com/nickpearlstone/Hydro-Knight.git 2>/dev/null || (cd Hydro-Knight && git pull -q)
 %cd Hydro-Knight
 # Colab ships a GPU build of torch; install the rest explicitly so it isn't clobbered.
 !pip -q install ultralytics trackers supervision opencv-python pandas pyarrow scikit-learn matplotlib
