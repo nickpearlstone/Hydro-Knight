@@ -1,7 +1,6 @@
 """Kaggle GPU job: fine-tune the head detectors on the synthetic tiles (private dataset hk-synth-tiles).
 
-GPU 0: RT-DETRv2-R18, backbone frozen, then a second run with the backbone at 0.1x learning rate.
-GPU 1: YOLO11n baseline (backbone frozen). Weights + training curves land in /kaggle/working/train.
+RUNS lists the jobs (one per GPU); see the comment there for what each version trained. Weights + training curves land in /kaggle/working/train.
 Scoring on real frames happens on the Mac afterwards (synthetic/train/score_heads.py); no real
 footage is uploaded.
 """
@@ -31,19 +30,23 @@ def run(cmd, gpu, log):
     return subprocess.Popen(f"{cmd} > {W}/{log} 2>&1", shell=True, env=env)
 
 
-rt = run(
-    f"python {code}/train_rtdetr.py {tiles} --epochs 40 --batch 8 --out {W}/train/rtdetr_frozen && "
-    f"python {code}/train_rtdetr.py {tiles} --epochs 40 --batch 8 --backbone-lr-scale 0.1 --out {W}/train/rtdetr_full",
-    0,
-    "log_rtdetr.txt",
-)
-yo = run(
-    f"python {code}/train_yolo.py {tiles}/data.yaml --epochs 60 --batch 16 --device 0 --project {W}/train",
-    1,
-    "log_yolo.txt",
-)
-rt.wait()
-yo.wait()
+# RUNS: which jobs to start, one per GPU. v1 (10-20) = RT-DETR frozen then 0.1x on GPU 0 + YOLO on GPU 1;
+# v2 = RT-DETR with scale jitter, warm-up and EMA for 100 epochs, frozen vs 0.1x backbone side by side.
+RUNS = [
+    (
+        f"python {code}/train_rtdetr.py {tiles} --epochs 100 --batch 8 --out {W}/train/rtdetr_v2_frozen",
+        0,
+        "log_rtdetr_frozen.txt",
+    ),
+    (
+        f"python {code}/train_rtdetr.py {tiles} --epochs 100 --batch 8 --backbone-lr-scale 0.1 --out {W}/train/rtdetr_v2_full",
+        1,
+        "log_rtdetr_full.txt",
+    ),
+]
+procs = [run(cmd, gpu, log) for cmd, gpu, log in RUNS]
+for p in procs:
+    p.wait()
 subprocess.run(f"rm -rf {tiles}", shell=True, check=False)
 for f in sorted(glob.glob(f"{W}/log_*.txt")):
     print("=====", f)

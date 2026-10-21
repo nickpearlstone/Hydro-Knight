@@ -7,13 +7,15 @@
    backbone trains too at a lower learning rate (the RT-DETR authors' fine-tuning recipe).
 3. Train on the 640 px synthetic tiles (YOLO txt labels read directly), with horizontal flips and
    small brightness / contrast jitter, AdamW, cosine schedule, mixed precision on CUDA.
-4. After each epoch, compute validation loss and keep the best weights (save_pretrained) in
+4. Scale/crop jitter (0.5-1.5x), warm-up, an EMA of the weights. After each epoch, compute
+   validation loss (EMA weights) and keep the best weights (save_pretrained) in
    <out>/best/, loadable with AutoModelForObjectDetection.from_pretrained.
 
     uv run --with transformers python synthetic/train/train_rtdetr.py synthetic/renders/tiles_c --epochs 40
 """
 
 import argparse
+import copy
 import json
 import math
 import random
@@ -53,6 +55,8 @@ class Tiles(torch.utils.data.Dataset):
             if random.random() < 0.5:
                 img = img[:, ::-1].copy()
                 boxes = [[W - x - w, y, w, h] for x, y, w, h in boxes]
+            if random.random() < 0.8:  # zoom 0.5-1.5x: the same head seen at many sizes
+                img, boxes = rescale(img, boxes, random.uniform(0.5, 1.5))
             a, b = random.uniform(0.8, 1.2), random.uniform(-20, 20)
             img = np.clip(img.astype(np.float32) * a + b, 0, 255).astype(np.uint8)
         anns = [
@@ -60,6 +64,36 @@ class Tiles(torch.utils.data.Dataset):
             for b in boxes
         ]
         return img, {"image_id": i, "annotations": anns}
+
+
+def rescale(img, boxes, s):
+    """Zoom a tile by s, then crop (s > 1) or pad with the tile's mean colour (s < 1) back to its size.
+
+    Boxes (COCO xywh) move with the image; a box keeps going only if 40% of it survives the crop.
+    """
+    H, W = img.shape[:2]
+    big = cv2.resize(img, (round(W * s), round(H * s)), interpolation=cv2.INTER_LINEAR)
+    bh, bw = big.shape[:2]
+    if s >= 1:
+        ox, oy = random.randint(0, bw - W), random.randint(0, bh - H)
+        out = big[oy : oy + H, ox : ox + W]
+        dx, dy = -ox, -oy
+    else:
+        out = np.empty_like(img)
+        out[:] = img.reshape(-1, 3).mean(0).astype(np.uint8)
+        dx, dy = random.randint(0, W - bw), random.randint(0, H - bh)
+        out[dy : dy + bh, dx : dx + bw] = big
+    kept = []
+    for x, y, w, h in boxes:
+        x0, y0, x1, y1 = x * s + dx, y * s + dy, (x + w) * s + dx, (y + h) * s + dy
+        cx0, cy0, cx1, cy1 = max(x0, 0), max(y0, 0), min(x1, W), min(y1, H)
+        if (
+            cx1 - cx0 >= 2
+            and cy1 - cy0 >= 2
+            and (cx1 - cx0) * (cy1 - cy0) >= 0.4 * (x1 - x0) * (y1 - y0)
+        ):
+            kept.append([cx0, cy0, cx1 - cx0, cy1 - cy0])
+    return out, kept
 
 
 class Collate:
@@ -86,6 +120,12 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument(
         "--backbone-lr-scale", type=float, default=0.0, help="0 = backbone frozen"
+    )
+    ap.add_argument(
+        "--warmup-epochs", type=float, default=2.0, help="linear learning-rate warm-up"
+    )
+    ap.add_argument(
+        "--ema", type=float, default=0.999, help="EMA decay of the weights (0 = off)"
     )
     ap.add_argument("--max-steps", type=int, default=0, help="stop early (smoke tests)")
     ap.add_argument("--out", default="synthetic/renders/train/rtdetrv2_head")
@@ -131,10 +171,33 @@ def main():
     dv = torch.utils.data.DataLoader(
         Tiles(a.tiles, "val", False), batch_size=a.batch, collate_fn=Collate(proc)
     )
-    total = a.epochs * len(dl)
-    sched = torch.optim.lr_scheduler.LambdaLR(
-        opt, lambda s: 0.5 * (1 + math.cos(math.pi * min(s, total) / total))
-    )
+    total, warm = a.epochs * len(dl), max(1, int(a.warmup_epochs * len(dl)))
+
+    def lr_factor(s):  # linear warm-up, then cosine decay to zero
+        if s < warm:
+            return (s + 1) / warm
+        return 0.5 * (
+            1 + math.cos(math.pi * min(s - warm, total - warm) / max(total - warm, 1))
+        )
+
+    sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_factor)
+    # EMA: a running average of the weights, smoother than the last step; used for val + saving
+    ema = copy.deepcopy(model).eval() if a.ema > 0 else model
+    for p_ in ema.parameters():
+        p_.requires_grad_(False)
+
+    def ema_update():
+        if a.ema <= 0:
+            return
+        with torch.no_grad():
+            for e, m in zip(
+                ema.state_dict().values(), model.state_dict().values(), strict=True
+            ):
+                if e.dtype.is_floating_point:
+                    e.mul_(a.ema).add_(m.detach(), alpha=1 - a.ema)
+                else:
+                    e.copy_(m)
+
     use_amp = dev == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
@@ -159,13 +222,14 @@ def main():
             scaler.step(opt)
             scaler.update()
             sched.step()
+            ema_update()
             tr.append(loss.item())
             step += 1
             if a.max_steps and step >= a.max_steps:
                 break
-        model.eval()
+        ema.eval()
         with torch.no_grad():
-            va = [model(**to_dev(b)).loss.item() for b in dv]
+            va = [ema(**to_dev(b)).loss.item() for b in dv]
         row = {
             "epoch": ep,
             "train_loss": float(np.mean(tr)),
@@ -176,10 +240,12 @@ def main():
         print(json.dumps(row), flush=True)
         if row["val_loss"] < best:
             best = row["val_loss"]
-            model.save_pretrained(out / "best")
+            ema.save_pretrained(out / "best")
             proc.save_pretrained(out / "best")
         if a.max_steps and step >= a.max_steps:
             break
+    ema.save_pretrained(out / "last")
+    proc.save_pretrained(out / "last")
     out.mkdir(parents=True, exist_ok=True)
     (out / "history.json").write_text(json.dumps(history, indent=1))
 
