@@ -7,6 +7,11 @@ counted). A click is found when a box covers it with the "fair" head rule from t
 padding of half the box height (min 6 px), since a head box can sit just above a click on the body.
 One box per click (greedy, most confident first); boxes covering no click are false boxes.
 
+--in-range (the 10-16 range rule): only swimmers inside the clip's hand-drawn zone whose expected
+body height there is >= 60 px at 1080p count. The expected height comes from a perspective fit
+(log height vs image row) of YOLO11n-pose boxes >= 0.25 on that frame. Clicks out of range, and
+boxes centred outside the zone, are ignored: neither found nor false.
+
 Models are compared at MATCHED false boxes over all 10 frames (20 / 50 / 100), so a detector that
 fires everywhere cannot win, plus the raw numbers at conf 0.25.
 
@@ -22,7 +27,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from hydro_knight.annotate import count
+from hydro_knight.annotate import count, zones
 from hydro_knight.preprocess.tiled_pose import merge_detections, tile_grid
 
 TILE, OVERLAP, FLOOR = 640, 0.25, 0.01
@@ -124,7 +129,37 @@ def match(boxes, confs, water, deck):
     return found, fp
 
 
+MIN_PX = 60.0
+
+
+def in_range_split(frame, img, zone):
+    """Split water clicks into in-range and out-of-range (zone + expected height >= MIN_PX)."""
+    import importlib.util
+
+    try:
+        from hydro_knight.cli import benchmark_pose as bp
+    except ImportError:
+        spec = importlib.util.spec_from_file_location("bp", "scripts/benchmark_pose.py")
+        bp = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bp)
+    bp.IMGSZ = 1280
+    if not hasattr(in_range_split, "pose"):
+        in_range_split.pose = bp.YoloBackend("yolo11n-pose", "mps", 4, conf=0.25)
+    b, _ = bp.detect(in_range_split.pose, img, tiled=True)
+    b = np.asarray(b, float).reshape(-1, 4)
+    h, yc = b[:, 3] - b[:, 1], (b[:, 1] + b[:, 3]) / 2
+    keep = h <= np.quantile(h, 0.9)
+    a, c = np.polyfit(yc[keep], np.log(h[keep]), 1)
+    pts = np.asarray(frame["water"], float).reshape(-1, 2)
+    ok = zones.in_zone(zone, pts[:, 0], pts[:, 1]) & (
+        np.exp(a * pts[:, 1] + c) * 1080.0 / img.shape[0] >= MIN_PX
+    )
+    return [tuple(p) for p in pts[ok]], [tuple(p) for p in pts[~ok]]
+
+
 def main():
+    in_range = "--in-range" in sys.argv
+    sys.argv = [x for x in sys.argv if x != "--in-range"]
     gt = json.loads(count.COUNT_PATH.read_text())["frames"]
     frames = [f for f in gt if f["water"]]
     imgs = {
@@ -133,6 +168,14 @@ def main():
         )
         for f in frames
     }
+    if in_range:  # out-of-range clicks become "allowed" points like deck clicks
+        zs = zones.load()
+        for f in frames:
+            inr, out = in_range_split(
+                f, imgs[f"{f['clip_id']}_{f['frame']}"], zs.get(f["clip_id"])
+            )
+            f["water"], f["deck"] = inr, list(f["deck"]) + out
+            f["zone"] = zs.get(f["clip_id"])
     total = sum(len(f["water"]) for f in frames)
     results = {}
     for arg in sys.argv[1:]:
@@ -148,6 +191,12 @@ def main():
             for fr in frames:
                 b, c = dets[f"{fr['clip_id']}_{fr['frame']}"]
                 k = c >= cut
+                if in_range and fr.get(
+                    "zone"
+                ):  # boxes centred outside the zone are ignored
+                    k &= zones.in_zone(
+                        fr["zone"], (b[:, 0] + b[:, 2]) / 2, (b[:, 1] + b[:, 3]) / 2
+                    )
                 f, p = match(b[k], c[k], fr["water"], fr["deck"])
                 f_tot, fp_tot = f_tot + f, fp_tot + p
             rows.append((cut, f_tot / total, fp_tot))
@@ -162,9 +211,9 @@ def main():
         results[name] = res
         print(name, json.dumps(res), flush=True)
     Path("synthetic/renders/train").mkdir(parents=True, exist_ok=True)
-    Path("synthetic/renders/train/head_scores.json").write_text(
-        json.dumps(results, indent=1)
-    )
+    Path(
+        f"synthetic/renders/train/head_scores{'_in_range' if in_range else ''}.json"
+    ).write_text(json.dumps(results, indent=1))
 
 
 if __name__ == "__main__":

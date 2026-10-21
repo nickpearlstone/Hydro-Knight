@@ -268,3 +268,34 @@ training and evaluation later.
   2. A longer RT-DETR recipe (more epochs, unfrozen backbone with warm-up) on the full batch.
   3. Several seeds per arm.
   4. Render the other 150 frames next week.
+
+### In range, and a better RT-DETR recipe (10-20)
+
+- **In range** (`score_heads.py --in-range`, the 10-16 rule): only swimmers inside the clip's
+  hand-drawn zone whose expected body height there is at least 60 px count (151 of 736).
+  Boxes centred outside the zone are ignored. Far swimmers are out of scope, as Nick
+  pointed out.
+- **RT-DETR recipe v2:** scale and crop jitter (0.5–1.5×), 2-epoch learning-rate warm-up, EMA of
+  the weights (0.999), 100 epochs; backbone frozen vs 0.1× (about 1.2 GPU h on 2× T4).
+
+| Model | In range @ 20 / 50 / 100 false | All frames @ 20 / 50 / 100 |
+|---|---|---|
+| Off-the-shelf `11n-head` | 31.8 / 39.7 / 39.7% | 10.2 / 14.5 / 19.2% |
+| YOLO11n, synthetic only | 35.1 / 56.3 / 60.9% | 10.1 / 22.0 / 36.8% |
+| RT-DETRv2 recipe v1, frozen | 15.9 / 30.5 / 49.7% | 4.1 / 11.4 / 22.0% |
+| **RT-DETRv2 recipe v2, frozen, best (epoch 21)** | **39.1 / 55.6 / 75.5%** | 6.1 / 16.7 / 25.3% |
+| RT-DETRv2 recipe v2, frozen, last (epoch 100) | 8.6 / 16.6 / 18.5% | 1.9 / 3.7 / 6.4% |
+| RT-DETRv2 recipe v2, backbone 0.1×, best (epoch 15) | 13.9 / 31.1 / 49.0% | 0.0 / 6.0 / 10.2% |
+
+- **Reading:**
+  - With augmentation, warm-up and EMA, RT-DETR (Apache) matches or beats the synthetic-trained
+    YOLO in range. Far, out-of-range heads still favour YOLO.
+  - **Training longer on synthetic data hurts real-world results**: the same run collapses from
+    75.5% to 18.5% between epoch 21 and epoch 100. The model drifts toward the synthetic look.
+    Checkpoint choice matters more than any other knob here. It needs a real validation signal
+    (a few real labelled frames), or a fixed early stop, rather than luck with synthetic
+    validation loss.
+  - Unfreezing the backbone hurts in both recipes; keep it frozen at this data size.
+  - RT-DETR's scores stay below 0.25, so its operating threshold must be set on real validation
+    data.
+  - Still one test set of 151 in-range swimmers (one swimmer = 0.7 points) and one run each.
