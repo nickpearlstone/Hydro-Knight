@@ -9,7 +9,7 @@ from pathlib import Path
 
 here = Path(__file__).parent
 src = (here / "batch_kernel.py").read_text()
-for plan in ("a", "b"):
+for plan in ("a", "b", "c"):
     d = here / f"batch_{plan}"
     d.mkdir(exist_ok=True)
     (d / "batch_kernel.py").write_text(src.replace('PLAN = "a"', f'PLAN = "{plan}"', 1))

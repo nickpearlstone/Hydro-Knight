@@ -229,3 +229,42 @@ training and evaluation later.
     3 configs × 50 frames;
   - 4-frame water clips, CUDA, one Blender worker per T4;
   - the render guard stops at 9.5 h so post and export finish inside Kaggle's 12 h limit.
+
+## First head-detector test (10-20): trained on synthetic only, scored on real frames
+
+- **Data:**
+  - batch c re-rendered after fixing the deck clutter, which had put people and lifeguards in
+    the water in 297 of the first 300 frames;
+  - 150 frames (6 cameras × 25) → 810 training tiles of 640 px (17,313 head boxes) and 90
+    validation tiles from held-out frames;
+  - the first 300-frame batch is set aside because of that bug.
+- **Training:** Kaggle 2× T4, private notebook `hk-synth-train`, about 1 h.
+  - **YOLO11n:** COCO weights, backbone frozen (10 layers), 60 epochs. Synthetic validation
+    mAP50 0.91.
+  - **RT-DETRv2-R18:** COCO weights, 40 epochs. Frozen backbone: best validation loss at epoch 24.
+    Backbone at 0.1× learning rate: best at epoch 7, then overfit.
+- **Test:** 10 real hand-counted frames (736 swimmers), 640 px tiles, "fair" head rule, compared
+  at matched false boxes (`synthetic/train/score_heads.py`):
+
+| Model | Found @ 20 false | @ 50 | @ 100 |
+|---|---|---|---|
+| Off-the-shelf `11n-head` (real crowd photos, AGPL) | 10.2% | 14.5% | 19.2% |
+| **YOLO11n, synthetic only** | 10.1% | **22.0%** | **36.8%** |
+| RT-DETRv2, backbone frozen | 4.1% | 11.4% | 22.0% |
+| RT-DETRv2, backbone 0.1× | 2.7% | 5.3% | 13.6% |
+
+- **Reading:**
+  - A detector trained only on renders, never on a real pool frame, finds about twice as many
+    real swimmers as an off-the-shelf head detector at 100 false boxes, and matches it at 20.
+    On the busiest frame (6f5c) it finds 89 of 227 with 24 false boxes; most misses are tiny
+    far heads.
+  - RT-DETR underperformed. Likely causes are a recipe that's too short (the authors fine-tune
+    for 72+ epochs), many tiny objects per tile, and 150 frames being too few for a
+    transformer decoder.
+  - These are one run each, no seeds yet.
+- **Next:**
+  1. Label about 40 real frames with head boxes and run the real comparison: COCO → real vs
+     COCO → synthetic → real.
+  2. A longer RT-DETR recipe (more epochs, unfrozen backbone with warm-up) on the full batch.
+  3. Several seeds per arm.
+  4. Render the other 150 frames next week.
