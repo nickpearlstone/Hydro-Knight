@@ -18,11 +18,11 @@ from pathlib import Path
 import numpy as np
 
 PLAN = "a"  # set per notebook folder by synthetic/kaggle/make_batch.py
-CONFIGS = {
-    "a": ["ref_6f5c", "ref_dc93", "ref_9992"],
-    "b": ["ref_1d50", "ref_644c", "ref_8c83"],
-}[PLAN]
-FRAMES = 50
+ALL = ["ref_6f5c", "ref_dc93", "ref_9992", "ref_1d50", "ref_644c", "ref_8c83"]
+CONFIGS = {"a": ALL[:3], "b": ALL[3:], "c": ALL}[PLAN]
+FRAMES = {"a": 50, "b": 50, "c": 25}[
+    PLAN
+]  # c: all six cameras in one notebook (half-size batch)
 MAX_HOURS = 9.5  # leaves ~1 h for post + export before Kaggle's 12 h limit
 W = "/kaggle/working"
 BL_URL = (
@@ -65,7 +65,7 @@ procs = []
 for gpu in (0, 1):
     lines = ["set -u"]
     for name in CONFIGS:
-        seed0 = 1000 * (CONFIGS.index(name) + 1) + (0 if PLAN == "a" else 50000)
+        seed0 = 1000 * (ALL.index(name) + 1) + {"a": 0, "b": 50000, "c": 90000}[PLAN]
         out = f"{W}/batch_{PLAN}/{name}/gpu{gpu}"  # own folder: frame numbers come from file counts
         lines.append(f"mkdir -p {out}")
         lines.append(

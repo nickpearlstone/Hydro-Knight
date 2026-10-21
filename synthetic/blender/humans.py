@@ -519,11 +519,14 @@ def _cyl(loc, r, h, m, rot=(0, 0, 0), verts=16):
     return o
 
 
-def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None):
+def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None, half_w=None):
     """Deck and pool furniture that real false boxes come from. Returns labelled deck people."""
     white = mat("white_paint", (0.92, 0.92, 0.9), rough=0.5)
     steel = mat("steel", (0.8, 0.8, 0.82), rough=0.25, metal=1.0)
     people = []
+    # half pool width at a given y: fan-shaped pools are wider toward the beach, so everything on a side
+    # deck is placed relative to the wall at its own y (a rectangle put deck people in the water)
+    hw = half_w or (lambda y: pool_w / 2)
     # rope line with floats across the pool
     yr = rng.uniform(6, 14) if rope_y is None else rope_y
     rope = mat("rope", (0.9, 0.85, 0.3), rough=0.7)
@@ -552,7 +555,7 @@ def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None):
     # ladders + railings on both sides
     for side in (-1, 1):
         for y in rng.uniform(3, pool_l - 5, 2):
-            x = side * (pool_w / 2 - 0.1)
+            x = side * (hw(y) - 0.1)
             for dx in (-0.3, 0.3):
                 _cyl((x, y + dx, 0.5), 0.025, 1.0, steel)
                 _cyl(
@@ -564,7 +567,8 @@ def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None):
                 )
     # lifeguard stand on a side deck with a guard on it
     side = rng.choice([-1, 1])
-    gx, gy = side * (pool_w / 2 + 1.2), rng.uniform(8, 22)
+    gy = rng.uniform(0.25, 0.75) * pool_l
+    gx = side * (hw(gy) + 1.2)
     for dx in (-0.35, 0.35):
         for dy in (-0.35, 0.35):
             _cyl((gx + dx, gy + dy, 1.2), 0.04, 2.0, white)
@@ -589,8 +593,8 @@ def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None):
     ]
     for _ in range(int(rng.integers(6, 12))):
         side = rng.choice([-1, 1])
-        x = side * rng.uniform(pool_w / 2 + 2, pool_w / 2 + 9)
         y = rng.uniform(0, pool_l + 4)
+        x = side * (hw(min(y, pool_l)) + rng.uniform(2, 9))
         _cyl((x, y, 1.4), 0.025, 2.2, white)
         bpy.ops.mesh.primitive_cone_add(
             vertices=12, radius1=rng.uniform(1.0, 1.5), depth=0.4, location=(x, y, 2.6)
@@ -601,10 +605,8 @@ def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None):
         if rng.random() < 0.25:  # far end deck
             x, y = rng.uniform(-pool_w / 2, pool_w / 2), pool_l + rng.uniform(1, 4)
         else:
-            x, y = (
-                side * rng.uniform(pool_w / 2 + 0.8, pool_w / 2 + 8),
-                rng.uniform(0, pool_l),
-            )
+            y = rng.uniform(0, pool_l)
+            x = side * (hw(y) + rng.uniform(0.8, 8))
         p, r = build_person(rng, next_pid, "stand", role="deck")
         p.location = (x, y, 0.4 + 1.62 * p.scale[2] - 0.04)
         p.rotation_euler = (0, 0, rng.uniform(0, 6.3))

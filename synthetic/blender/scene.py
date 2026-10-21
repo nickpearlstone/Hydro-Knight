@@ -658,6 +658,7 @@ def build_scene(rng):
         waves,
         len(spots) + 1,
         rope_y=CFG["scene"].get("rope_y"),
+        half_w=half_w,
     )
     bpy.context.view_layer.update()
     for ob, r, role in extra:
