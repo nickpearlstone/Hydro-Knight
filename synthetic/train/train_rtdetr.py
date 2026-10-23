@@ -10,6 +10,9 @@
 4. Scale/crop jitter (0.5-1.5x), warm-up, an EMA of the weights. After each epoch, compute
    validation loss (EMA weights) and keep the best weights (save_pretrained) in
    <out>/best/, loadable with AutoModelForObjectDetection.from_pretrained.
+5. Seed runs: --seed fixes the random start (new class head, shuffling, augmentation);
+   --stop-after N trains only the first N epochs of the --epochs learning-rate schedule;
+   --save-every K also keeps the EMA weights at epochs K, 2K, ... in <out>/epoch_NNN/.
 
     uv run --with transformers python synthetic/train/train_rtdetr.py synthetic/renders/tiles_c --epochs 40
 """
@@ -128,8 +131,27 @@ def main():
         "--ema", type=float, default=0.999, help="EMA decay of the weights (0 = off)"
     )
     ap.add_argument("--max-steps", type=int, default=0, help="stop early (smoke tests)")
+    ap.add_argument(
+        "--stop-after",
+        type=int,
+        default=0,
+        help="train only the first N epochs of the --epochs schedule (0 = all)",
+    )
+    ap.add_argument(
+        "--save-every",
+        type=int,
+        default=0,
+        help="also keep the EMA weights every N epochs in <out>/epoch_NNN/ (0 = off)",
+    )
+    ap.add_argument(
+        "--seed", type=int, default=None, help="seed Python, NumPy and torch"
+    )
     ap.add_argument("--out", default="synthetic/renders/train/rtdetrv2_head")
     a = ap.parse_args()
+    if a.seed is not None:  # before the model loads: the new class head is random too
+        random.seed(a.seed)
+        np.random.seed(a.seed)
+        torch.manual_seed(a.seed)  # all devices, and the DataLoader workers' seeds
     from transformers import AutoImageProcessor, AutoModelForObjectDetection
 
     dev = (
@@ -209,7 +231,7 @@ def main():
 
     best, history, step = float("inf"), [], 0
     out = Path(a.out)
-    for ep in range(a.epochs):
+    for ep in range(a.stop_after or a.epochs):
         model.train()
         t0, tr = time.time(), []
         for b in dl:
@@ -242,6 +264,9 @@ def main():
             best = row["val_loss"]
             ema.save_pretrained(out / "best")
             proc.save_pretrained(out / "best")
+        if a.save_every and ep and ep % a.save_every == 0:
+            ema.save_pretrained(out / f"epoch_{ep:03d}")
+            proc.save_pretrained(out / f"epoch_{ep:03d}")
         if a.max_steps and step >= a.max_steps:
             break
     ema.save_pretrained(out / "last")
