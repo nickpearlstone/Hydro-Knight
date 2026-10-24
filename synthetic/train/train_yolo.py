@@ -28,6 +28,15 @@ def main():
     ap.add_argument("--device", default=None)
     ap.add_argument("--project", default="synthetic/renders/train")
     ap.add_argument("--name", default="yolo11n_head")
+    ap.add_argument(
+        "--seed", type=int, default=0, help="Ultralytics' seed (its default is 0)"
+    )
+    ap.add_argument(
+        "--save-period",
+        type=int,
+        default=-1,
+        help="also keep weights/epochN.pt every N epochs (-1 = off)",
+    )
     a = ap.parse_args()
     from ultralytics import YOLO
 
@@ -45,6 +54,8 @@ def main():
         ),  # relative paths get a runs/detect/ prefix
         name=a.name,
         exist_ok=True,
+        seed=a.seed,
+        save_period=a.save_period,
         patience=15,  # stop early if validation mAP stops improving
         cos_lr=True,
         mosaic=1.0,  # stitches 4 tiles per sample: more crowd context per batch

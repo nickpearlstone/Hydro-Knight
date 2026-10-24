@@ -1,7 +1,7 @@
-"""Write the two private Kaggle notebook folders for the batch (synthetic/kaggle/batch_a, batch_b).
+"""Write the private Kaggle notebook folders for the batches (synthetic/kaggle/batch_a ... batch_d).
 
 uv run python synthetic/kaggle/make_batch.py
-uvx --from "kaggle>=1.8" kaggle kernels push -p synthetic/kaggle/batch_a   # and batch_b
+uvx --from "kaggle>=1.8" kaggle kernels push -p synthetic/kaggle/batch_a   # and b, c, d
 """
 
 import json
@@ -9,7 +9,7 @@ from pathlib import Path
 
 here = Path(__file__).parent
 src = (here / "batch_kernel.py").read_text()
-for plan in ("a", "b", "c"):
+for plan in ("a", "b", "c", "d"):
     d = here / f"batch_{plan}"
     d.mkdir(exist_ok=True)
     (d / "batch_kernel.py").write_text(src.replace('PLAN = "a"', f'PLAN = "{plan}"', 1))

@@ -19,10 +19,10 @@ import numpy as np
 
 PLAN = "c"  # set per notebook folder by synthetic/kaggle/make_batch.py
 ALL = ["ref_6f5c", "ref_dc93", "ref_9992", "ref_1d50", "ref_644c", "ref_8c83"]
-CONFIGS = {"a": ALL[:3], "b": ALL[3:], "c": ALL}[PLAN]
-FRAMES = {"a": 50, "b": 50, "c": 25}[
+CONFIGS = {"a": ALL[:3], "b": ALL[3:], "c": ALL, "d": ALL}[PLAN]
+FRAMES = {"a": 50, "b": 50, "c": 25, "d": 25}[
     PLAN
-]  # c: all six cameras in one notebook (half-size batch)
+]  # c, d: all six cameras in one notebook (half-size batch); d = more of c, new seeds
 MAX_HOURS = 9.5  # leaves ~1 h for post + export before Kaggle's 12 h limit
 W = "/kaggle/working"
 BL_URL = (
@@ -65,7 +65,10 @@ procs = []
 for gpu in (0, 1):
     lines = ["set -u"]
     for name in CONFIGS:
-        seed0 = 1000 * (ALL.index(name) + 1) + {"a": 0, "b": 50000, "c": 90000}[PLAN]
+        seed0 = (
+            1000 * (ALL.index(name) + 1)
+            + {"a": 0, "b": 50000, "c": 90000, "d": 130000}[PLAN]
+        )
         out = f"{W}/batch_{PLAN}/{name}/gpu{gpu}"  # own folder: frame numbers come from file counts
         lines.append(f"mkdir -p {out}")
         lines.append(
