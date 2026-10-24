@@ -1,24 +1,35 @@
 """
 Train the v2 TCN autoencoder sizes on non-victim swimmers and compare them on
-held-out clips.
+clips they never trained on.
 
     uv run hydroknight train tcn-v2 --sizes small medium large --seeds 0 1 2 --out runs/v2_sizes
     uv run hydroknight train tcn-v2 --sizes medium --rates capped --out runs/v2_rates_capped
+    uv run hydroknight train tcn-v2 --holdout --seeds 0      # old single 20% hold-out, one model
     uv run hydroknight train tcn-v2 --smoke        # code-path check before labels exist
 
-Each seed picks its own whole-clip train/test split and initialization. For every
-(size, seed) it reports two checks on the held-out clips:
+Grouped K-fold (default, --folds 5): each seed gives every usable clip one fold
+(eval/split.assign_folds) and its own initialization. Each fold's model trains on the other
+folds and scores only its own, so every clip is tested exactly once per seed, by a model
+that never saw it; the K held-out score tables are then pooled (eval/kfold.py), each model's
+scores divided by the median score of its own training windows so one alarm threshold
+means the same for every fold. --holdout instead trains one model per seed on a random
+~80% of clips (split_clips) and tests the rest, as before.
+
+For every (size, seed) it reports two checks on the pooled held-out clips, and the same
+per fold:
   1. reconstruction error on normal swimmers (median, p90): can the size describe
      normal swimming it never saw?
   2. victim separation (eval/separation.py): do the victim's windows between onset and
      guard contact score as more unusual than everyone else's? Always next to the same
      number for random scores.
+--detection adds recall at false-alarm targets with the threshold picked on the scored
+clips themselves (an upper bound) and, for K-fold, picked on the other folds (honest).
 Clips whose labels a review marked "not_good" (data/annotations/label_reviews.json) are
 left out until fixed, and Claude-labeled clips with no review verdict yet are held out
-until reviewed. Writes runs/<out>/summary.json and one checkpoint per (size, seed),
-runs/<out>/model_<size>_s<seed>.pt (load with tcn_ae_v2.load_checkpoint).
---load-dir skips training and re-scores the checkpoints of an earlier run, so an
-evaluation change can be measured on the exact same models.
+until reviewed. Writes runs/<out>/summary.json and one checkpoint per model,
+runs/<out>/model_<size>_s<seed>_f<fold>.pt (model_<size>_s<seed>.pt with --holdout; load
+with tcn_ae_v2.load_checkpoint). --load-dir skips training and re-scores the checkpoints
+of an earlier run, so an evaluation change can be measured on the exact same models.
 """
 
 from __future__ import annotations
@@ -26,18 +37,32 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from hydro_knight.annotate import review
-from hydro_knight.eval import run_meta
-from hydro_knight.eval.detection_v2 import alarm_table, clip_evals, operating_points
+from hydro_knight.eval import kfold, run_meta
+from hydro_knight.eval.detection_v2 import (
+    alarm_table,
+    clip_evals,
+    crossfit_points,
+    operating_points,
+)
 from hydro_knight.eval.figures import loss_curves
 from hydro_knight.eval.separation import victim_separation
-from hydro_knight.features.dataset_v2 import build_datasets, victim_windows
+from hydro_knight.eval.split import assign_folds, split_clips
+from hydro_knight.features.dataset_v2 import (
+    DatasetReport,
+    load_clips,
+    split_windows,
+    victim_windows,
+)
 from hydro_knight.features.track_series import RATE_MODES
+from hydro_knight.features.windows_v2 import WindowSet
 from hydro_knight.ingest.manifest import Manifest
 from hydro_knight.models.tcn_ae_v2 import (
     SIZES,
@@ -73,7 +98,15 @@ def main() -> None:
     p.add_argument("--steps", type=int, default=2000)
     p.add_argument("--batch", type=int, default=256)
     p.add_argument("--lr", type=float, default=1e-3)
-    p.add_argument("--test-frac", type=float, default=0.2)
+    p.add_argument(
+        "--folds", type=int, default=5, help="grouped K-fold: number of folds"
+    )
+    p.add_argument(
+        "--holdout",
+        action="store_true",
+        help="old single random hold-out per seed (about --test-frac of clips) instead of K-fold",
+    )
+    p.add_argument("--test-frac", type=float, default=0.2, help="with --holdout")
     p.add_argument("--coord-weight", type=float, default=0.0)
     p.add_argument("--joint-velocity", action="store_true")
     p.add_argument("--rates", default="raw", choices=RATE_MODES)
@@ -133,6 +166,7 @@ def main() -> None:
     if args.smoke:
         print("SMOKE TEST: unlabeled clips, victims NOT removed. Not a result.")
         args.steps = 30
+        args.folds = min(args.folds, 3)  # only 3 clips
     # A smoke run must never overwrite a real result.
     args.out = args.out or ("runs/v2_smoke" if args.smoke else "runs/v2_sizes")
 
@@ -205,12 +239,15 @@ def _flat_args(args) -> dict:
 def _parent_note(args, rejected) -> str:
     return (
         f"**train_v2** `{Path(args.out).name}`: sizes {' '.join(args.sizes)}, "
-        f"seeds {' '.join(map(str, args.seeds))}, {args.steps} steps, rates `{args.rates}`"
+        f"seeds {' '.join(map(str, args.seeds))}, "
+        + ("one random hold-out per seed" if args.holdout else f"{args.folds}-fold")
+        + f", {args.steps} steps, rates `{args.rates}`"
         + (f", re-scoring `{args.load_dir}`" if args.load_dir else "")
         + (", with detection tables" if args.detection else "")
         + f". {len(rejected)} clips left out (rejected or unreviewed labels).\n\n"
-        "One child run per (size, seed): per-step `train_loss`, train/test clip lists "
-        "under Datasets, the checkpoint under Artifacts. Mean and SD across seeds here."
+        "One child run per (size, seed): per-step `train_loss` (one series per fold), "
+        "train/test clip lists under Datasets, the checkpoints under Artifacts, pooled "
+        "held-out metrics plus `fold<f>.` per-fold ones. Mean and SD across seeds here."
     )
 
 
@@ -232,31 +269,51 @@ def _child(tracking, args, size: str, seed: int):
     )
 
 
-def _log_child(tracking, args, row, model, rep, train, test, ckpt: Path) -> None:
-    """Everything one (size, seed) child run carries: params, loss per step, metrics, datasets, files."""
+def _log_child(tracking, args, row, fits, parts, ckpts) -> None:
+    """Everything one (size, seed) child run carries: params, loss per step, metrics, datasets, files.
+
+    K-fold runs log one loss series, dataset pair and checkpoint per fold, the pooled
+    metrics unprefixed and each fold's metrics under `fold<f>.`.
+    """
     out = Path(args.out)
     size, seed = row["size"], row["seed"]
-    tracking.set_tags({"checkpoint_sha256": run_meta.file_sha256(ckpt)})
+    shas = {
+        p.fold: run_meta.file_sha256(ck) for p, ck in zip(parts, ckpts, strict=True)
+    }
+    tags = {"checkpoint_sha256": next(iter(shas.values()))}  # fold 0 with K-fold
+    if not args.holdout:
+        tags |= {f"checkpoint_sha256.f{f}": sha for f, sha in shas.items()}
+    tracking.set_tags(tags)
     tracking.log_config(_flat_args(args) | {"sizes": size, "seeds": seed})
-    tracking.log_series("train_loss", model.loss_history_)
     metrics = run_meta.numeric_items(row)
-    for key in ("detection", "detection_random"):
+    for key in (
+        "detection",
+        "detection_random",
+        "detection_crossfit",
+        "detection_crossfit_random",
+    ):
         for pt in row.get(key, []):
             metrics |= run_meta.numeric_items(pt, f"{key}.fa{pt['fa_target']:g}.")
+    for part, fit in zip(parts, fits, strict=True):
+        tag = "" if part.fold is None else f".f{part.fold}"
+        tracking.log_series(f"train_loss{tag}", fit["model"].loss_history_)
+        if part.fold is not None:
+            metrics |= run_meta.numeric_items(fit["row"], f"fold{part.fold}.")
+        tracking.log_dataset(
+            run_meta.split_table(part.rep.used_train, _clips_of(part.train)),
+            f"train-s{seed}{tag}",
+            "training",
+            args.manifest,
+        )
+        tracking.log_dataset(
+            run_meta.split_table(part.rep.used_test, _clips_of(part.test)),
+            f"test-s{seed}{tag}",
+            "evaluation",
+            args.manifest,
+        )
     tracking.log_metrics(metrics)
-    tracking.log_dataset(
-        run_meta.split_table(rep.used_train, _clips_of(train)),
-        f"train-s{seed}",
-        "training",
-        args.manifest,
-    )
-    tracking.log_dataset(
-        run_meta.split_table(rep.used_test, _clips_of(test)),
-        f"test-s{seed}",
-        "evaluation",
-        args.manifest,
-    )
-    tracking.log_artifact(ckpt, "checkpoint")
+    for ck in ckpts:
+        tracking.log_artifact(ck, "checkpoint")
     for name in (
         f"sweep_{size}_s{seed}.csv",
         f"sweep_random_{size}_s{seed}.csv",
@@ -302,10 +359,13 @@ def _demo_video(args, records, rep, alarms, det, held, size, seed) -> None:
 
 
 def _summarize(args, results: list[dict]) -> list[dict]:
+    """Mean and SD across seeds of each size's pooled rows (per-fold rows are skipped)."""
     summary_rows = []
     for size in args.sizes:
-        rows = [r for r in results if r["size"] == size]
+        rows = [r for r in results if r["size"] == size and "fold" not in r]
         agg = {"size": size, "params": rows[0]["params"], "seeds": len(rows)}
+        if not args.holdout:
+            agg["folds"] = args.folds
         for key in (
             "test_median",
             "test_p90",
@@ -320,155 +380,290 @@ def _summarize(args, results: list[dict]) -> list[dict]:
     return summary_rows
 
 
-def _train_all(args, records, rejected, tracking):
-    """Train (or re-load) and score every (size, seed); returns (result rows, dataset reports, loss histories)."""
-    results, reports = [], {}
-    histories: dict[str, dict[int, list[float]]] = {s: {} for s in args.sizes}
-    for seed in args.seeds:
-        train, test, rep = build_datasets(
-            args.keypoints,
-            records,
-            test_frac=args.test_frac,
+@dataclass
+class _Part:
+    """One model's data: its fold (None for --holdout), windows, report and victim windows."""
+
+    fold: int | None
+    train: WindowSet
+    test: WindowSet
+    rep: DatasetReport
+    vic: WindowSet | None
+    in_event: np.ndarray | None
+
+
+def _splits(args, clip_ids: list[str], seed: int) -> list[tuple[int | None, list[str]]]:
+    """(fold, test clips) for every model of one seed: the hold-out, or one per fold."""
+    if args.holdout:
+        return [(None, split_clips(clip_ids, args.test_frac, seed)[1])]
+    folds = assign_folds(clip_ids, args.folds, seed)
+    return [(f, [c for c in clip_ids if folds[c] == f]) for f in range(args.folds)]
+
+
+def _ckpt_path(args, size: str, seed: int, fold: int | None, load: bool) -> Path:
+    tag = "" if fold is None else f"_f{fold}"
+    return Path(args.load_dir if load else args.out) / f"model_{size}_s{seed}{tag}.pt"
+
+
+def _fold_label(fold: int | None) -> str:
+    return "" if fold is None else f" fold {fold}"
+
+
+def _fit(args, part: _Part, size: str, seed: int) -> dict:
+    """Train (or re-load) one model, score its held-out clips; returns its scores and row.
+
+    K-fold models also score a sample of their own training windows: its median is the
+    model's common-scale unit (eval/kfold.py). The hold-out model keeps raw scores.
+    """
+    if args.load_dir:
+        ckpt = _ckpt_path(args, size, seed, part.fold, load=True)
+        model, scaler, _ = load_checkpoint(ckpt, args.device)
+        model.loss_history_ = [float("nan")]
+    else:
+        model, scaler = train_v2(
+            part.train,
+            size,
+            args.steps,
+            args.batch,
+            args.lr,
+            seed,
+            args.coord_weight,
+            args.device,
+        )
+    score = partial(score_v2, model, scaler=scaler, coord_weight=args.coord_weight)
+    ref = 1.0
+    if part.fold is not None:
+        ref = kfold.scale_reference(
+            score(kfold.training_sample(part.train), device=args.device)
+        )
+    if not args.load_dir:
+        Path(args.out).mkdir(parents=True, exist_ok=True)
+        ckpt = _ckpt_path(args, size, seed, part.fold, load=False)
+        save_checkpoint(
+            ckpt,
+            model,
+            scaler,
+            {
+                "size": size,
+                "seed": seed,
+                "fold": part.fold,
+                "folds": None if part.fold is None else args.folds,
+                "score_scale": ref,
+                "rates": args.rates,
+                "joint_velocity": args.joint_velocity,
+                "coord_weight": args.coord_weight,
+                "min_track_s": args.min_track_s,
+                "train_clips": part.rep.used_train,
+                "test_clips": part.rep.used_test,
+            },
+        )
+    held = score(part.test, device=args.device)
+    vs = (
+        score(part.vic, device=args.device)
+        if part.vic is not None and len(part.vic)
+        else np.empty(0)
+    )
+    row = _score_row(size, seed, model, held, part.test, vs, part)
+    if part.fold is not None:
+        row = {"fold": part.fold, "score_scale": ref} | row
+    return {
+        "model": model,
+        "ckpt": ckpt,
+        "held": held,
+        "vs": vs,
+        "ref": ref,
+        "row": row,
+    }
+
+
+def _score_row(size, seed, model, held, test, vs, part) -> dict:
+    """Reconstruction error and victim separation of one set of held-out scores."""
+    row = {
+        "size": size,
+        "seed": seed,
+        "params": n_params(model),
+        "train_loss_final": float(np.mean(model.loss_history_[-20:])),
+        "test_windows": int(len(held)),
+        "test_median": float(np.median(held)) if len(held) else None,
+        "test_p90": float(np.percentile(held, 90)) if len(held) else None,
+    }
+    if part.vic is not None and len(part.vic):
+        sep = victim_separation(
+            held,
+            _clips_of(test),
+            vs[part.in_event],
+            _clips_of(part.vic)[part.in_event],
             seed=seed,
-            joint_velocity=args.joint_velocity,
-            require_labels=not args.smoke,
-            max_clips=3 if args.smoke else None,
-            rates=args.rates,
-            exclude_clips=frozenset(rejected),
-            path_fragments=not args.no_path_fragments,
-            min_track_s=args.min_track_s,
         )
-        reports[seed] = rep.__dict__
-        n_frag = sum(len(v) for v in rep.path_fragments.values())
-        print(
-            f"seed {seed}: train {len(rep.used_train)} clips, {len(train)} windows | "
-            f"test {len(rep.used_test)} clips, {len(test)} windows | "
-            f"{n_frag} path fragments removed"
+        row.update({k: v for k, v in sep.items() if k != "per_clip_rank"})
+        row["per_clip_rank"] = sep["per_clip_rank"]
+    return row
+
+
+def _pooled(
+    parts: list[_Part], fits: list[dict], rep
+) -> tuple[_Part, np.ndarray, np.ndarray]:
+    """All held-out windows of one seed as one part, with their scores on the common scale.
+
+    The hold-out run has one part and scale 1, so this returns it unchanged.
+    """
+    if len(parts) == 1:
+        return parts[0], fits[0]["held"], fits[0]["vs"]
+    vics = [p.vic for p in parts if p.vic is not None]
+    pooled = _Part(
+        None,
+        parts[0].train,  # unused: every clip trained K-1 of the models
+        WindowSet.concat([p.test for p in parts]),
+        rep,
+        WindowSet.concat(vics) if vics else None,
+        np.concatenate([p.in_event for p in parts]) if vics else None,
+    )
+    held = np.concatenate([f["held"] / f["ref"] for f in fits])
+    vs = np.concatenate([f["vs"] / f["ref"] for f in fits])
+    return pooled, held, vs
+
+
+def _alarms(parts: list[_Part], fits: list[dict]) -> pd.DataFrame:
+    """Pooled alarm table: one row per held-out window (normal and victim).
+
+    K-fold tables also carry `raw_score` (before scaling) and `fold`; `score` is the
+    common-scale score, which every evaluation reads.
+    """
+    tables = {}
+    for part, fit in zip(parts, fits, strict=True):
+        frames = [alarm_table(part.test, fit["held"] / fit["ref"])]
+        if part.vic is not None:
+            frames.append(alarm_table(part.vic, fit["vs"] / fit["ref"]))
+        t = pd.concat(frames)
+        if part.fold is None:
+            return t
+        tables[part.fold] = t.assign(raw_score=t["score"] * fit["ref"])
+    return kfold.pool(tables)
+
+
+def _detection(args, records, rep, parts, fits, size, seed, held) -> dict:
+    """Recall at false-alarm targets on the pooled held-out clips, plus random scores; writes sweeps and alarms."""
+    alarms = _alarms(parts, fits)
+    clips = clip_evals(alarms, records, rep)
+    det = operating_points(clips, args.fa_targets)
+    rng = np.random.default_rng(seed)
+    alarms_rand = alarms.assign(score=rng.random(len(alarms)))
+    clips_rand = clip_evals(alarms_rand, records, rep)
+    det_rand = operating_points(clips_rand, args.fa_targets)
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    det["sweep"].to_csv(out_dir / f"sweep_{size}_s{seed}.csv", index=False)
+    det_rand["sweep"].to_csv(out_dir / f"sweep_random_{size}_s{seed}.csv", index=False)
+    alarms.to_parquet(out_dir / f"alarms_{size}_s{seed}.parquet")
+    if args.video:
+        _demo_video(args, records, rep, alarms, det, held, size, seed)
+    row = {
+        "detection": det["points"],
+        "detection_random": det_rand["points"],
+        "detection_events": det["events"],
+        "detection_hours": det["hours"],
+    }
+    if rep.folds:
+        row["detection_crossfit"] = crossfit_points(clips, rep.folds, args.fa_targets)
+        row["detection_crossfit_random"] = crossfit_points(
+            clips_rand, rep.folds, args.fa_targets
         )
-        vic, in_event = (None, None)
-        if not args.smoke:
-            vic, in_event = victim_windows(
-                args.keypoints,
-                records,
-                rep,
-                joint_velocity=args.joint_velocity,
-                rates=args.rates,
-                min_track_s=args.min_track_s,
+    honest = row.get("detection_crossfit", [{}] * len(det["points"]))
+    for pt, pr, ph in zip(det["points"], det_rand["points"], honest, strict=True):
+        line = (
+            f"  <= {pt['fa_target']:g} FA/h: recall {pt['recall']:.2f}"
+            f" (random {pr['recall']:.2f}; threshold picked on these clips, upper bound)"
+        )
+        if ph:
+            line += (
+                f" | threshold from the other folds: recall {ph['recall']:.2f},"
+                f" {ph['fa_per_hour']:.0f} FA/h"
             )
+        print(line)
+    return row
+
+
+def _train_all(args, records, rejected, tracking):
+    """Train (or re-load) and score every (size, seed, fold); returns (result rows, dataset reports, loss histories)."""
+    results, reports = [], {}
+    histories: dict[str, dict] = {s: {} for s in args.sizes}
+    sets, base = load_clips(
+        args.keypoints,
+        records,
+        joint_velocity=args.joint_velocity,
+        require_labels=not args.smoke,
+        max_clips=3 if args.smoke else None,
+        rates=args.rates,
+        exclude_clips=frozenset(rejected),
+        path_fragments=not args.no_path_fragments,
+        min_track_s=args.min_track_s,
+    )
+    n_frag = sum(len(v) for v in base.path_fragments.values())
+    print(f"{len(sets)} usable clips, {n_frag} path fragments removed")
+    for seed in args.seeds:
+        parts = []
+        for fold, test_ids in _splits(args, list(sets), seed):
+            train, test, rep = split_windows(sets, base, test_ids)
+            print(
+                f"seed {seed}{_fold_label(fold)}: train {len(rep.used_train)} clips, "
+                f"{len(train)} windows | test {len(rep.used_test)} clips, {len(test)} windows"
+            )
+            vic, in_event = (None, None)
+            if not args.smoke:
+                vic, in_event = victim_windows(
+                    args.keypoints,
+                    records,
+                    rep,
+                    joint_velocity=args.joint_velocity,
+                    rates=args.rates,
+                    min_track_s=args.min_track_s,
+                )
+            parts.append(_Part(fold, train, test, rep, vic, in_event))
+        if args.holdout:
+            seed_rep = parts[0].rep
+        else:
+            fold_of = {c: p.fold for p in parts for c in p.rep.used_test}
+            seed_rep = kfold.pooled_report(base, {c: fold_of[c] for c in sets})
+        reports[seed] = seed_rep.__dict__
         for size in args.sizes:
             with _child(tracking, args, size, seed):
-                if args.load_dir:
-                    ckpt = Path(args.load_dir) / f"model_{size}_s{seed}.pt"
-                    model, scaler, _ = load_checkpoint(ckpt, args.device)
-                    model.loss_history_ = [float("nan")]
-                else:
-                    model, scaler = train_v2(
-                        train,
-                        size,
-                        args.steps,
-                        args.batch,
-                        args.lr,
-                        seed,
-                        args.coord_weight,
-                        args.device,
+                fits = [_fit(args, part, size, seed) for part in parts]
+                pooled, held, vs = _pooled(parts, fits, seed_rep)
+                first = fits[0]["model"]
+                row = _score_row(size, seed, first, held, pooled.test, vs, pooled)
+                if not args.holdout:
+                    row["folds"] = args.folds
+                    row["train_loss_final"] = float(
+                        np.mean([f["row"]["train_loss_final"] for f in fits])
                     )
-                    Path(args.out).mkdir(parents=True, exist_ok=True)
-                    ckpt = Path(args.out) / f"model_{size}_s{seed}.pt"
-                    save_checkpoint(
-                        ckpt,
-                        model,
-                        scaler,
-                        {
-                            "size": size,
-                            "seed": seed,
-                            "rates": args.rates,
-                            "joint_velocity": args.joint_velocity,
-                            "coord_weight": args.coord_weight,
-                            "min_track_s": args.min_track_s,
-                            "train_clips": rep.used_train,
-                            "test_clips": rep.used_test,
-                        },
+                if args.detection and not args.smoke:
+                    row |= _detection(
+                        args, records, seed_rep, parts, fits, size, seed, held
                     )
-                held = score_v2(
-                    model, test, scaler, args.coord_weight, device=args.device
-                )
-                row = {
-                    "size": size,
-                    "seed": seed,
-                    "params": n_params(model),
-                    "train_loss_final": float(np.mean(model.loss_history_[-20:])),
-                    "test_windows": int(len(held)),
-                    "test_median": float(np.median(held)) if len(held) else None,
-                    "test_p90": float(np.percentile(held, 90)) if len(held) else None,
-                }
-                if vic is not None and len(vic):
-                    vs = score_v2(
-                        model, vic, scaler, args.coord_weight, device=args.device
-                    )
-                    sep = victim_separation(
-                        held,
-                        _clips_of(test),
-                        vs[in_event],
-                        _clips_of(vic)[in_event],
-                        seed=seed,
-                    )
-                    row.update({k: v for k, v in sep.items() if k != "per_clip_rank"})
-                    row["per_clip_rank"] = sep["per_clip_rank"]
-                if args.detection and vic is not None:
-                    vs_all = (
-                        score_v2(
-                            model, vic, scaler, args.coord_weight, device=args.device
-                        )
-                        if len(vic)
-                        else np.empty(0)
-                    )
-                    alarms = pd.concat(
-                        [alarm_table(test, held), alarm_table(vic, vs_all)]
-                    )
-                    det = operating_points(
-                        clip_evals(alarms, records, rep), args.fa_targets
-                    )
-                    rng = np.random.default_rng(seed)
-                    alarms_rand = alarms.assign(score=rng.random(len(alarms)))
-                    det_rand = operating_points(
-                        clip_evals(alarms_rand, records, rep), args.fa_targets
-                    )
-                    out_dir = Path(args.out)
-                    out_dir.mkdir(parents=True, exist_ok=True)
-                    det["sweep"].to_csv(
-                        out_dir / f"sweep_{size}_s{seed}.csv", index=False
-                    )
-                    det_rand["sweep"].to_csv(
-                        out_dir / f"sweep_random_{size}_s{seed}.csv", index=False
-                    )
-                    alarms.to_parquet(out_dir / f"alarms_{size}_s{seed}.parquet")
-                    if args.video:
-                        _demo_video(args, records, rep, alarms, det, held, size, seed)
-                    row["detection"] = det["points"]
-                    row["detection_random"] = det_rand["points"]
-                    row["detection_events"] = det["events"]
-                    row["detection_hours"] = det["hours"]
-                    for pt, pr in zip(det["points"], det_rand["points"], strict=True):
-                        print(
-                            f"  <= {pt['fa_target']:g} FA/h: recall {pt['recall']:.2f}"
-                            f" (random {pr['recall']:.2f}), median time to alarm"
-                            f" {pt.get('median_latency_s')} s"
-                        )
-                histories[size][seed] = list(model.loss_history_)
+                for part, fit in zip(parts, fits, strict=True):
+                    key = seed if part.fold is None else f"{seed} fold {part.fold}"
+                    histories[size][key] = list(fit["model"].loss_history_)
                 if tracking is not None:
-                    _log_child(tracking, args, row, model, rep, train, test, ckpt)
+                    ckpts = [f["ckpt"] for f in fits]
+                    _log_child(tracking, args, row, fits, parts, ckpts)
+                if not args.holdout:
+                    results += [f["row"] for f in fits]
+                    for f in fits:
+                        print(json.dumps(_printable(f["row"])))
                 results.append(row)
-                print(
-                    json.dumps(
-                        {
-                            k: v
-                            for k, v in row.items()
-                            if k
-                            not in ("per_clip_rank", "detection", "detection_random")
-                        }
-                    )
-                )
+                print(json.dumps(_printable(row)))
     return results, reports, histories
+
+
+def _printable(row: dict) -> dict:
+    skip = (
+        "per_clip_rank",
+        "detection",
+        "detection_random",
+        "detection_crossfit",
+        "detection_crossfit_random",
+    )
+    return {k: v for k, v in row.items() if k not in skip}
 
 
 if __name__ == "__main__":

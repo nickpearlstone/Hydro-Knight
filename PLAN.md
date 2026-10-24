@@ -97,7 +97,8 @@ Nothing has passed these yet. They define what v1 has to demonstrate.
    three random hash splits. With 6 to 11 test clips per split, the victim-separation
    AUC (FINDINGS section 5) moves from 0.74 to 0.93 on the split alone. Choose model
    settings without looking at the test folds, and label any threshold picked on test
-   clips as an upper bound.
+   clips as an upper bound. The harness is built (5 folds by default, see
+   docs/EVALUATION.md); the published v2 results still come from the old hold-outs.
 3. **Detection and visibility.** On the v2 runs the victim is in the input tracks for
    only about half of the distress window, and the model scores the victim for 21 to 27%
    of it (its first score comes about 4.5 s into a track, and most victim tracks are
