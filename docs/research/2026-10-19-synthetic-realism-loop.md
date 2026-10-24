@@ -391,3 +391,41 @@ Mean ± standard deviation over 8 seeds (range at 100 false boxes):
   - This is a data point only, not a model choice (Nick, 10-24). Both detectors will be
     compared trained on a mix of real and synthetic data, which is the setting that counts.
     RT-DETR (Apache) stays the commercial path; YOLO is AGPL.
+
+### 300 frames vs 150 (10-24): more synthetic data doesn't help RT-DETR
+
+- **Run:** batch d rendered 150 more frames (same six cameras and settings as batch c, new
+  seeds; 5.9 h on 2× T4). `make_tiles.py` now takes several batches: 300 frames → 1,620
+  training tiles (34,715 heads) and 180 validation tiles. Then the same RT-DETR seed recipe
+  as 10-23 (seeds 1–8, 30 epochs of a 100-epoch schedule), Kaggle `hk-synth-train` version 5,
+  about 2.7 h. Same flags, so each epoch is twice the training steps.
+
+Mean ± standard deviation over 8 seeds, in range (range at 100 false boxes):
+
+| Checkpoint | @ 20 false | @ 50 | @ 100 |
+|---|---|---|---|
+| epoch 5 | 13.0 ± 12.4 | 27.0 ± 18.3 | 40.2 ± 22.8 (1.3–64.2) |
+| epoch 10 | 24.2 ± 9.8 | 38.3 ± 14.2 | 50.8 ± 16.0 (13.2–62.3) |
+| epoch 15 | 22.8 ± 9.9 | 37.2 ± 12.9 | 48.5 ± 13.9 (20.5–62.9) |
+| epoch 20 | 16.9 ± 8.3 | 29.6 ± 13.0 | 39.8 ± 15.4 (15.2–58.9) |
+| epoch 25 | 16.2 ± 7.4 | 28.7 ± 11.3 | 38.6 ± 11.9 (19.2–54.3) |
+| last (epoch 29) | 15.9 ± 5.9 | 27.6 ± 11.7 | 37.1 ± 11.7 (22.5–53.6) |
+| **best (synthetic val loss, epochs 9–13)** | **25.1 ± 11.0** | **40.7 ± 13.4** | **53.2 ± 15.0 (18.5–65.6)** |
+| *150 frames, best (10-23)* | *24.8 ± 9.6* | *40.4 ± 13.9* | *53.6 ± 15.4 (17.9–64.2)* |
+
+- **Reading:**
+  - Twice the synthetic frames gives the same recall (53.2 vs 53.6% at 100 false boxes) and the
+    same seed spread. The ceiling is not the amount of synthetic data.
+  - Recall peaks earlier, around epoch 10, which is the same number of training steps as epoch
+    20 on 150 frames. Then it falls faster: 37 to 40% by epochs 20 to 29, where the 150-frame
+    runs held 52 to 53%. More synthetic steps mean more drift toward the synthetic look, which
+    matches the 10-20 collapse.
+  - Here the synthetic-validation-loss pick (epochs 9 to 13) lands on the peak and is the best
+    choice. A fixed epoch is not, because the peak moves with the data size.
+  - Seed 3 fails again (18.5%) with completely different training frames. The same seed means
+    the same random start for the new class head, so the failure probably comes from that
+    start, not from the data.
+  - With the YOLO result (62.1 ± 1.9% on 150 frames), the next lever for RT-DETR is unlikely to be
+    more synthetic data. Better candidates: real head boxes for fine-tuning and checkpoint
+    choice (labeler PR #57), a recipe that stops the drift (lower learning rate, fewer steps,
+    mixing in real tiles), and an ensemble or several seeds instead of one run.
