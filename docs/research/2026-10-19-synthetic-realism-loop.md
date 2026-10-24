@@ -360,3 +360,34 @@ Per seed, in range at 100 false boxes (%):
      and the operating threshold.
   2. Seeds for the synthetic-only YOLO before comparing the two detectors again.
   3. From now on, report head-detector numbers as mean ± standard deviation over seeds.
+
+### YOLO seed spread (10-24): synthetic-only YOLO is steadier than RT-DETR
+
+- **Run:** the 10-20 YOLO11n recipe (COCO weights, backbone frozen, 60 epochs, patience 15),
+  seeds 1–8, weights every 10 epochs plus `best` (synthetic validation mAP) and `last`.
+  Kaggle `hk-synth-train` version 4, about 40 min on 2× T4. New trainer flags: `--seed`,
+  `--save-period`. Re-scoring the 10-20 weights first gave the same 35.1 / 56.3 / 60.9%.
+- **Test:** as above, in range (151 swimmers), all 56 checkpoints.
+
+Mean ± standard deviation over 8 seeds (range at 100 false boxes):
+
+| Checkpoint | In range @ 20 false | @ 50 | @ 100 |
+|---|---|---|---|
+| epoch 10 | 35.3 ± 4.6 | 57.3 ± 2.7 | 61.4 ± 2.4 (58.9–66.2) |
+| epoch 20 | 39.2 ± 4.8 | 61.5 ± 2.4 | 64.6 ± 2.3 (61.6–67.5) |
+| epoch 30 | 38.5 ± 5.4 | 58.2 ± 3.3 | 61.9 ± 2.3 (58.3–64.9) |
+| epoch 40 | 41.4 ± 6.1 | 59.9 ± 3.0 | 62.8 ± 2.1 (60.3–65.6) |
+| epoch 50 | 42.2 ± 3.8 | 59.0 ± 2.0 | 62.3 ± 2.2 (58.9–66.2) |
+| last | 42.3 ± 3.2 | 59.0 ± 2.0 | 62.1 ± 1.8 (59.6–64.9) |
+| **YOLO best** | **42.1 ± 5.5** | **59.1 ± 1.7** | **62.1 ± 1.9 (59.6–64.2)** |
+| *RT-DETR best (seed spread above)* | *24.8 ± 9.6* | *40.4 ± 13.9* | *53.6 ± 15.4 (17.9–64.2)* |
+
+- **Reading:**
+  - Trained on synthetic frames only, YOLO11n finds more in-range swimmers than RT-DETRv2 at
+    every false-box budget, and its spread across seeds is about 2 points against
+    RT-DETR's 15. No YOLO seed failed.
+  - Recall is reached by epoch 10 and stays flat to epoch 60, so checkpoint choice barely
+    matters for YOLO here.
+  - This is a data point only, not a model choice (Nick, 10-24). Both detectors will be
+    compared trained on a mix of real and synthetic data, which is the setting that counts.
+    RT-DETR (Apache) stays the commercial path; YOLO is AGPL.
