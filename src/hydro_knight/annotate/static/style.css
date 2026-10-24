@@ -224,6 +224,16 @@ kbd {
 .frames li.blank .muted { color: var(--warn); }
 .sw.water { background: #ef4444; border-radius: 50%; }
 .sw.deck { background: #3b82f6; border-radius: 50%; }
+/* head-box mode */
+.modes { display: flex; gap: 4px; }
+.stage.boxing { cursor: crosshair; }
+.stage.boxing.pan-ready { cursor: grab; }
+.tally.tally3 { grid-template-columns: 1fr 1fr 1fr; }
+.review-state { margin: 10px 0 8px; font-size: 12.5px; }
+.sw.box { background: transparent; border: 2px solid; border-radius: 2px; }
+.sw.head-water { border-color: #22c55e; }
+.sw.head-deck { border-color: #3b82f6; }
+.sw.no-head { background: transparent; border: 2px solid #f59e0b; border-radius: 50%; }
 
 /* ---------- review tab ---------- */
 .phase { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; }

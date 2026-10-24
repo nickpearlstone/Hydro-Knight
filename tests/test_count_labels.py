@@ -2,7 +2,8 @@
 Tests for the labeler's Swimmer count tab (annotate/count.py + its /api/count routes).
 
 These pin that clicks round-trip to the label file, that malformed points are refused
-instead of written, and that frame images come from the raw_local cache.
+instead of written, and that frame images come from the raw_local cache. Head boxes and
+the second frame set (?set=val) follow the same rules.
 """
 
 from __future__ import annotations
@@ -20,24 +21,39 @@ FRAMES = [
     {"clip_id": "aaa", "frame": 5, "label": "distress", "water": [], "deck": []},
     {"clip_id": "bbb", "frame": 9, "label": "normal", "water": [[1, 2]], "deck": []},
 ]
+VAL_FRAMES = [
+    {
+        "clip_id": "ccc",
+        "frame": 3,
+        "label": "distress",
+        "water": [],
+        "deck": [],
+        "heads": {"water": [[1, 1, 5, 5]], "deck": [], "no_head": []},
+        "heads_reviewed": False,
+        "heads_source": "model",
+    }
+]
+HEADS = {"water": [[10.04, 20, 18, 29]], "deck": [[1, 1, 4, 4]], "no_head": [[7, 8]]}
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     raw = tmp_path / "raw_local"
     monkeypatch.setattr(download, "RAW_LOCAL", raw)
-    for f in FRAMES:  # cached frame images, so no video is needed
+    for f in FRAMES + VAL_FRAMES:  # cached frame images, so no video is needed
         path = count.frame_path(f)
         path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(path), np.zeros((48, 64, 3), np.uint8))
     count_path = tmp_path / "gt.json"
     count.save({"frames": FRAMES}, count_path)
+    count.save({"frames": VAL_FRAMES}, tmp_path / "val.json")
     Manifest(tmp_path / "manifest.jsonl")
     app = server.create_app(
         tmp_path / "manifest.jsonl",
         tmp_path / "detections",
         Blocklist(tmp_path / "blocklist.txt"),
         count_path=count_path,
+        head_val_path=tmp_path / "val.json",
     )
     return app.test_client(), count_path
 
@@ -78,3 +94,69 @@ def test_image_served_from_cache_and_unknown_frame_404s(client):
     assert res.status_code == 200 and res.mimetype == "image/jpeg"
     assert c.get("/api/count/7/image").status_code == 404
     assert c.post("/api/count/7", json={"water": [], "deck": []}).status_code == 404
+
+
+def test_head_boxes_and_reviewed_flag_round_trip(client):
+    c, path = client
+    body = {"water": [[1, 2]], "deck": [], "heads": HEADS, "heads_reviewed": True}
+    assert c.post("/api/count/0", json=body).status_code == 200
+    f = count.load(path)["frames"][0]
+    assert f["heads"] == {
+        "water": [[10.0, 20.0, 18.0, 29.0]],
+        "deck": [[1.0, 1.0, 4.0, 4.0]],
+        "no_head": [[7.0, 8.0]],
+    }
+    assert f["heads_reviewed"] is True
+    assert f["water"] == [[1.0, 2.0]]  # the dots are saved alongside, unchanged
+
+
+def test_dots_only_save_keeps_existing_head_boxes(client):
+    c, path = client
+    c.post("/api/count/0", json={"water": [], "deck": [], "heads": HEADS})
+    c.post("/api/count/0", json={"water": [[3, 4]], "deck": []})
+    assert count.load(path)["frames"][0]["heads"]["no_head"] == [[7.0, 8.0]]
+
+
+@pytest.mark.parametrize(
+    "heads",
+    [
+        {"water": [[5, 5, 1, 9]], "deck": [], "no_head": []},  # x1 > x2
+        {"water": [[1, 1, 5]], "deck": [], "no_head": []},  # not four numbers
+        {"water": [[-1, 1, 5, 5]], "deck": [], "no_head": []},  # negative
+        {"water": [], "deck": []},  # missing no_head list
+        [[1, 1, 5, 5]],  # not an object
+    ],
+)
+def test_bad_head_boxes_are_refused_and_nothing_is_written(client, heads):
+    c, path = client
+    before = path.read_text()
+    res = c.post("/api/count/0", json={"water": [], "deck": [], "heads": heads})
+    assert res.status_code == 400
+    assert path.read_text() == before
+
+
+def test_reviewed_flag_must_be_a_boolean(client):
+    c, path = client
+    body = {"water": [], "deck": [], "heads_reviewed": "yes"}
+    assert c.post("/api/count/0", json=body).status_code == 400
+
+
+def test_validation_set_reads_and_writes_its_own_file(client, tmp_path):
+    c, path = client
+    bench_before = path.read_text()
+    assert c.get("/api/count?set=val").get_json()[0]["clip_id"] == "ccc"
+    assert c.get("/api/count/0/image?set=val").status_code == 200
+    body = {"water": [], "deck": [], "heads": HEADS, "heads_reviewed": True}
+    assert c.post("/api/count/0?set=val", json=body).status_code == 200
+    val = count.load(tmp_path / "val.json")["frames"][0]
+    assert val["heads_reviewed"] is True and val["heads_source"] == "model"
+    assert path.read_text() == bench_before
+    assert c.get("/api/count?set=nope").status_code == 400
+
+
+def test_missing_validation_file_404s_with_the_command_to_run(client, tmp_path):
+    c, _ = client
+    (tmp_path / "val.json").unlink()
+    res = c.get("/api/count?set=val")
+    assert res.status_code == 404
+    assert b"hydroknight heads frames" in res.data
