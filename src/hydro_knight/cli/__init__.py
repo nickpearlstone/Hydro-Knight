@@ -52,6 +52,12 @@ COMMANDS = [
         PIPELINE,
     ),
     Command(
+        "stack",
+        "stack",
+        "two-level stack MVP (spike): rows, fit, video",
+        PIPELINE,
+    ),
+    Command(
         "eval protocol",
         "eval_protocol",
         "score a saved training run with the two-tier evaluation protocol",
