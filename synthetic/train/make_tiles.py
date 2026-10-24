@@ -9,6 +9,9 @@ Output: <out>/images/{train,val}/*.jpg, <out>/labels/{train,val}/*.txt (class 0 
 and tiles.json (provenance: source frame, camera config, tile offset).
 
     uv run python synthetic/train/make_tiles.py synthetic/renders/batch_out_c synthetic/renders/tiles_c
+    uv run python synthetic/train/make_tiles.py synthetic/renders/batch_out_c synthetic/renders/batch_out_d synthetic/renders/tiles_cd
+
+Tile names start with the batch folder (batch_c, batch_d, ...), so batches can be combined.
 """
 
 import argparse
@@ -44,13 +47,13 @@ def frames(root: Path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("src")
+    ap.add_argument("src", nargs="+", help="one or more render folders")
     ap.add_argument("out")
     ap.add_argument("--val", type=float, default=0.1, help="share of frames held out")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
     out = Path(a.out)
-    items = list(frames(Path(a.src)))
+    items = [item for src in a.src for item in frames(Path(src))]
     random.Random(a.seed).shuffle(items)
     n_val = max(1, int(len(items) * a.val))
     meta = []
@@ -90,7 +93,8 @@ def main():
                     f"0 {((cx0 + cx1) / 2 - ox) / TILE:.6f} {((cy0 + cy1) / 2 - oy) / TILE:.6f} "
                     f"{(cx1 - cx0) / TILE:.6f} {(cy1 - cy0) / TILE:.6f}"
                 )
-            name = f"{cam}_{img_path.parent.name}_{img_path.stem}_{ox}_{oy}"
+            batch = img_path.parents[2].name  # batch_c/<camera>/gpu0/rgbv_0002.png
+            name = f"{batch}_{cam}_{img_path.parent.name}_{img_path.stem}_{ox}_{oy}"
             cv2.imwrite(
                 str(out / "images" / split / f"{name}.jpg"),
                 img[oy : oy + TILE, ox : ox + TILE],

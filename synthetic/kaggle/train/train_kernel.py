@@ -52,13 +52,17 @@ def run(cmd, gpu, log):
 #   python {code}/train_rtdetr.py {tiles} --epochs 100 --stop-after 30 --save-every 5 --batch 8
 #     --seed {seed} --out {W}/train/rtdetr_v3_seed{seed}
 # v4 (10-24) = seed spread of the synthetic-only YOLO11n (the v1 recipe: 60 epochs, patience 15), seeds 1-8,
-# four after another per GPU (~10 min each), weights kept every 10 epochs.
+# four after another per GPU (~10 min each), weights kept every 10 epochs. JOB was:
+#   python {code}/train_yolo.py {tiles}/data.yaml --epochs 60 --batch 16 --device 0 --save-period 10
+#     --seed {seed} --project {W}/train --name yolo_v4_seed{seed}
+# v5 (10-24) = v3 again on 300 frames (batches c + d, dataset hk-synth-tiles-cd): does doubling the
+# synthetic data raise recall or narrow the seed spread? Same flags, so epochs are 2x the steps (~40 min).
 # A seed only starts before START_BY, and `timeout` ends a slow one at HARD_STOP (Kaggle's limit is 12 h).
 START_BY, HARD_STOP = 9 * 3600, 11 * 3600
 JOB, LOG = (
-    "python {code}/train_yolo.py {tiles}/data.yaml --epochs 60 --batch 16 --device 0 --save-period 10 "
-    "--seed {seed} --project {W}/train --name yolo_v4_seed{seed}",
-    "log_yolo_seed{seed}.txt",
+    "python {code}/train_rtdetr.py {tiles} --epochs 100 --stop-after 30 --save-every 5 --batch 8 "
+    "--seed {seed} --out {W}/train/rtdetr_v5_cd_seed{seed}",
+    "log_rtdetr_cd_seed{seed}.txt",
 )
 RUNS = []
 for gpu in (0, 1):

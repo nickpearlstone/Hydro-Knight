@@ -8,7 +8,7 @@
   "enable_gpu": true,
   "enable_internet": true,
   "machine_shape": "NvidiaTeslaT4",
-  "dataset_sources": ["npstone/hk-synth-tiles"],
+  "dataset_sources": ["npstone/hk-synth-tiles-cd"],
   "competition_sources": [],
   "kernel_sources": []
 }
