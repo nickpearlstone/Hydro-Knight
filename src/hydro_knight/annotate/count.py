@@ -10,6 +10,16 @@ and are never committed.
 
 The benchmark script picks the frames (`benchmark_pose.py frames`); the labeler's
 Swimmer count tab edits the points.
+
+Head boxes (the tab's head-box mode) add optional keys to a frame record:
+"heads": {"water": [[x1, y1, x2, y2], ...], "deck": [...], "no_head": [[x, y], ...]}
+("no_head" = a person is visible but their head isn't, so a head detector can't be
+asked to find them), "heads_reviewed" (a person checked every box on the frame) and
+"heads_source" (who drew the boxes first, e.g. a model's pre-labels).
+
+Two frame sets share this format: the benchmark frames (COUNT_PATH, the test set)
+and the head validation frames (VAL_PATH, picked by `hydroknight heads frames` from
+other clips, for choosing checkpoints and thresholds without touching the test set).
 """
 
 from __future__ import annotations
@@ -25,7 +35,9 @@ import numpy as np
 from ..ingest import download
 
 COUNT_PATH = Path("data/annotations/pose_bench_gt.json")
+VAL_PATH = Path("data/annotations/head_val_gt.json")
 KINDS = ("water", "deck")
+HEAD_BOX_KINDS = ("water", "deck")
 
 
 def frame_dir() -> Path:
@@ -74,6 +86,16 @@ def save(data: dict, path: Path = COUNT_PATH) -> None:
     os.replace(tmp, path)
 
 
+def _point(p) -> list[float]:
+    """One [x, y] point: two finite, non-negative numbers, rounded to 0.1 px."""
+    if not (isinstance(p, list | tuple) and len(p) == 2):
+        raise ValueError(f"bad point {p!r}")
+    x, y = float(p[0]), float(p[1])
+    if not (math.isfinite(x) and math.isfinite(y)) or x < 0 or y < 0:
+        raise ValueError(f"bad point {p!r}")
+    return [round(x, 1), round(y, 1)]
+
+
 def clean_points(body: dict) -> dict[str, list[list[float]]]:
     """Validate {"water": [[x, y]...], "deck": [...]} posted by the UI; rounds to 0.1 px.
 
@@ -85,13 +107,37 @@ def clean_points(body: dict) -> dict[str, list[list[float]]]:
         pts = body.get(kind)
         if not isinstance(pts, list):
             raise ValueError(f"missing {kind!r} point list")
+        out[kind] = [_point(p) for p in pts]
+    return out
+
+
+def clean_heads(body: dict) -> dict[str, list[list[float]]]:
+    """Validate {"water": [[x1, y1, x2, y2]...], "deck": [...], "no_head": [[x, y]...]}.
+
+    Boxes are rounded to 0.1 px and must have x1 < x2 and y1 < y2.
+
+    Raises:
+        ValueError: a missing list, or a box or point that isn't finite and non-negative.
+    """
+    if not isinstance(body, dict):
+        raise ValueError("heads must be an object")
+    out = {}
+    for kind in HEAD_BOX_KINDS:
+        boxes = body.get(kind)
+        if not isinstance(boxes, list):
+            raise ValueError(f"missing heads {kind!r} box list")
         clean = []
-        for p in pts:
-            if not (isinstance(p, list | tuple) and len(p) == 2):
-                raise ValueError(f"bad point {p!r}")
-            x, y = float(p[0]), float(p[1])
-            if not (math.isfinite(x) and math.isfinite(y)) or x < 0 or y < 0:
-                raise ValueError(f"bad point {p!r}")
-            clean.append([round(x, 1), round(y, 1)])
+        for b in boxes:
+            if not (isinstance(b, list | tuple) and len(b) == 4):
+                raise ValueError(f"bad box {b!r}")
+            x1, y1, x2, y2 = (round(float(v), 1) for v in b)
+            ok = all(math.isfinite(v) and v >= 0 for v in (x1, y1, x2, y2))
+            if not ok or x1 >= x2 or y1 >= y2:
+                raise ValueError(f"bad box {b!r}")
+            clean.append([x1, y1, x2, y2])
         out[kind] = clean
+    pts = body.get("no_head")
+    if not isinstance(pts, list):
+        raise ValueError("missing heads 'no_head' point list")
+    out["no_head"] = [_point(p) for p in pts]
     return out
