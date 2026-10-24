@@ -8,13 +8,14 @@ are removed, and every other swimmer is normal. Steps outside the clip's trim ar
 dropped. Clips listed in `exclude_clips` (labels a review marked wrong) are skipped.
 For evaluation, the removed victim tracks of test clips are kept as their own window
 set (`victim_windows`). Clips are split whole into train and test, so
-test footage is never seen in training. require_labels=False exists only for smoke
+test footage is never seen in training: one random hold-out (`build_datasets`), or
+grouped K-fold (`load_clips` once, then `split_windows` per fold). require_labels=False exists only for smoke
 tests of the code path, before labels exist.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -40,6 +41,7 @@ class DatasetReport:
     victim_tracks: dict[str, list[int]] = field(default_factory=dict)
     unmatched_clicks: dict[str, int] = field(default_factory=dict)
     path_fragments: dict[str, list[int]] = field(default_factory=dict)
+    folds: dict[str, int] = field(default_factory=dict)  # K-fold: clip -> its test fold
 
 
 def clip_series(
@@ -80,12 +82,10 @@ def clip_series(
     return out
 
 
-def build_datasets(
+def load_clips(
     keypoints_dir,
     records,
     *,
-    test_frac: float = 0.2,
-    seed: int = 0,
     window: int = 90,
     stride_s: float = 0.25,
     joint_velocity: bool = False,
@@ -95,15 +95,15 @@ def build_datasets(
     exclude_clips=frozenset(),
     path_fragments: bool = True,
     min_track_s: float | None = None,
-) -> tuple[WindowSet, WindowSet, DatasetReport]:
-    """Train and test window sets of non-victim swimmers, split by whole clips.
+) -> tuple[dict[str, WindowSet], DatasetReport]:
+    """Every usable clip's window set of non-victim swimmers, before any train/test split.
 
-    Args:
-        rates: box rate handling (track_series.RATE_MODES).
-        exclude_clips: clip ids to skip (labels a review marked wrong).
-        path_fragments: also remove tracks that follow the victim's path between clicks.
-        min_track_s: also score tracks shorter than a window (windows_v2.make_window_set).
+    Loading does not depend on the split, so K-fold reads each keypoint file once and
+    split_windows picks clips per fold. Args as build_datasets.
 
+    Returns:
+        (sets, report): clip_id -> WindowSet in manifest order, and a report whose
+        used_train / used_test are still empty.
     Raises:
         ValueError: no usable clip (label clips first, or pass require_labels=False).
     """
@@ -128,8 +128,7 @@ def build_datasets(
             "no usable clips: label clips first (require_labels=False for a smoke test)"
         )
 
-    train_ids, _ = split_clips([r.clip_id for r, _ in usable], test_frac, seed)
-    parts = {"train": [], "test": []}
+    sets = {}
     for r, path in usable:
         exclude = frozenset()
         if is_labeled(r):
@@ -151,14 +150,59 @@ def build_datasets(
             rep.path_fragments[r.clip_id] = sorted(frags)
             rep.unmatched_clicks[r.clip_id] = len(match.unmatched)
         series = clip_series(path, r, joint_velocity, exclude, rates)
-        side = "train" if r.clip_id in train_ids else "test"
-        parts[side].append(make_window_set(series, window, stride_s, min_track_s))
-        (rep.used_train if side == "train" else rep.used_test).append(r.clip_id)
+        sets[r.clip_id] = make_window_set(series, window, stride_s, min_track_s)
+    return sets, rep
 
-    empty = make_window_set([], window, stride_s)
-    train = WindowSet.concat(parts["train"]) if parts["train"] else empty
-    test = WindowSet.concat(parts["test"]) if parts["test"] else empty
-    return train, test, rep
+
+def split_windows(
+    sets: dict[str, WindowSet], rep: DatasetReport, test_clips
+) -> tuple[WindowSet, WindowSet, DatasetReport]:
+    """(train, test, report) from load_clips output: test_clips are tested, the rest train.
+
+    The returned report is a copy with used_train / used_test filled in manifest order.
+    """
+    test_clips = set(test_clips)
+    out = replace(
+        rep,
+        used_train=[c for c in sets if c not in test_clips],
+        used_test=[c for c in sets if c in test_clips],
+    )
+    any_set = next(iter(sets.values()))
+    empty = WindowSet(
+        any_set.series[:0], any_set.index[:0], any_set.window, any_set.context
+    )
+
+    def joined(ids):
+        return WindowSet.concat([sets[c] for c in ids]) if ids else empty
+
+    return joined(out.used_train), joined(out.used_test), out
+
+
+def build_datasets(
+    keypoints_dir,
+    records,
+    *,
+    test_frac: float = 0.2,
+    seed: int = 0,
+    **load_kw,
+) -> tuple[WindowSet, WindowSet, DatasetReport]:
+    """Train and test window sets of non-victim swimmers, split by whole clips.
+
+    The single random hold-out (split_clips): about test_frac of the clips are tested.
+    K-fold uses load_clips + split_windows instead.
+
+    Args:
+        load_kw: load_clips options, e.g. rates (box rate handling,
+            track_series.RATE_MODES), exclude_clips (labels a review marked wrong),
+            path_fragments (also remove tracks that follow the victim's path between
+            clicks), min_track_s (also score tracks shorter than a window).
+
+    Raises:
+        ValueError: no usable clip (label clips first, or pass require_labels=False).
+    """
+    sets, rep = load_clips(keypoints_dir, records, **load_kw)
+    _, test_ids = split_clips(list(sets), test_frac, seed)
+    return split_windows(sets, rep, test_ids)
 
 
 def victim_windows(

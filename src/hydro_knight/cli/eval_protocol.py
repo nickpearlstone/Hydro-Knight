@@ -3,7 +3,10 @@ Score a saved run with the two-tier evaluation protocol (src/hydro_knight/eval/p
 
 Reads the per-window alarm tables and dataset reports that `hydroknight train tcn-v2 --detection`
 saves, so nothing is retrained. Writes, per seed, a markdown report, the tier-1 per-clip
-table and a JSON summary into --out.
+table and a JSON summary into --out. For a K-fold run each seed's table already pools every
+fold's held-out clips (each clip scored once, by a model that never saw it), so it is scored
+once per seed; the report adds the proxy curve with thresholds picked on the other folds and
+the per-fold spread. Old hold-out runs score as before.
 
     uv run hydroknight eval protocol runs/v2_ckpt_after
     uv run hydroknight eval protocol runs/v2_ckpt_after --pseudo-normal      # tier 2 on pre-onset footage
@@ -106,7 +109,8 @@ def evaluate_seed(
             "PSEUDO-normal (pre-onset rescue footage)",
         )
     tracks = load_tracks(test, args.tracks_dir)
-    t1 = P.tier1(table, truths, cfg, tracks)
+    folds = {c: rep["folds"][c] for c in test} if rep.get("folds") else None
+    t1 = P.tier1(table, truths, cfg, tracks, folds)
     t2 = P.tier2(table, truths, normal, cfg)
     # Second victim definition (Nick, 2026-10-18): click-matched tracks only; the path
     # fragments' rows are dropped from scoring, so they are neither catches nor rivals.
@@ -122,7 +126,7 @@ def evaluate_seed(
         onset_alt=load_onset_alt(args.onset_alt),
         ignore_tracks=frags,
     )
-    t1_click = P.tier1(table, truths_click, cfg, tracks)
+    t1_click = P.tier1(table, truths_click, cfg, tracks, folds)
     return {
         "table": table,
         "truths": truths,
@@ -166,21 +170,23 @@ def compare(run_a: Path, run_b: Path, size: str, records, args, cfg) -> str:
 
 
 def jsonable(t1: dict, t2: dict) -> dict:
-    return {
-        "tier1": {
-            "summary": t1["summary"],
-            "random": t1["random"],
-            "shuffled": t1["shuffled"],
-            "proxy": t1["proxy"],
-            "proxy_random_caught": {
-                str(k): v for k, v in t1["proxy_random_caught"].items()
-            },
-            "proxy_shuffled_caught": {
-                str(k): v for k, v in t1["proxy_shuffled_caught"].items()
-            },
-        },
-        "tier2": {k: v for k, v in t2.items() if k != "amoc"},
+    tier1 = {
+        "summary": t1["summary"],
+        "random": t1["random"],
+        "shuffled": t1["shuffled"],
+        "proxy": t1["proxy"],
     }
+    for key in (
+        "proxy_random_caught",
+        "proxy_shuffled_caught",
+        "crossfit_random_caught",
+        "crossfit_shuffled_caught",
+    ):
+        if key in t1:
+            tier1[key] = {str(k): v for k, v in t1[key].items()}
+    if "fold_spread" in t1:
+        tier1["fold_spread"] = t1["fold_spread"].to_dict(orient="records")
+    return {"tier1": tier1, "tier2": {k: v for k, v in t2.items() if k != "amoc"}}
 
 
 def headline_metrics(r: dict) -> dict[str, float]:
@@ -199,6 +205,15 @@ def headline_metrics(r: dict) -> dict[str, float]:
         out[f"headline.proxy_caught_at_{pt['budget_per_hour']:g}_per_h"] = pt.get(
             "caught", 0
         )
+    for pt in r["t1"]["proxy"].get("crossfit", []):
+        b = f"{pt['budget_per_hour']:g}"
+        out[f"headline.crossfit_caught_at_{b}_per_h"] = pt["caught"]
+        out[f"headline.crossfit_alarms_per_h_at_{b}_per_h"] = pt["fa_per_hour"]
+    spread = r["t1"].get("fold_spread")
+    if spread is not None and len(spread):
+        for col in spread.columns.drop(["fold", "clips"]):
+            out[f"fold_spread.{col}.min"] = spread[col].min()
+            out[f"fold_spread.{col}.max"] = spread[col].max()
     out["tier2.normal_hours"] = r["t2"]["normal_hours"]
     out["tier2.min_verifiable_per_hour"] = r["t2"]["min_verifiable_per_hour"]
     return {k: float(v) for k, v in out.items() if v is not None and np.isfinite(v)}
@@ -226,6 +241,8 @@ def log_seed(
     from hydro_knight.eval import run_meta
 
     ckpt = args.run / f"model_{args.size}_s{seed}.pt"
+    if not ckpt.exists():  # K-fold: the training run is found by its fold-0 checkpoint
+        ckpt = args.run / f"model_{args.size}_s{seed}_f0.pt"
     params = {
         "run_folder": str(args.run),
         "size": args.size,
@@ -379,6 +396,10 @@ def run_seeds(args, records, cfg, out: Path, tracking) -> list[dict]:
             out / f"tier1_per_clip_click_only_{args.size}_s{seed}.csv", index=False
         )
         r["t2"]["amoc"].to_csv(out / f"tier2_amoc_{args.size}_s{seed}.csv", index=False)
+        if "fold_spread" in r["t1"]:
+            r["t1"]["fold_spread"].to_csv(
+                out / f"tier1_fold_spread_{args.size}_s{seed}.csv", index=False
+            )
         (out / f"summary_{args.size}_s{seed}.json").write_text(
             json.dumps(jsonable(r["t1"], r["t2"]), indent=1, default=str)
         )

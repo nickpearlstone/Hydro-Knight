@@ -7,7 +7,8 @@ import pandas as pd
 import pytest
 from v2_fakes import track_rows, write_keypoints
 
-from hydro_knight.features.dataset_v2 import build_datasets
+from hydro_knight.eval.split import assign_folds
+from hydro_knight.features.dataset_v2 import build_datasets, load_clips, split_windows
 from hydro_knight.ingest.manifest import (
     CameraView,
     ClipRecord,
@@ -124,3 +125,26 @@ def test_victim_windows_are_the_removed_tracks_inside_the_event(kp_dir):
     # event onset 1.0 s -> contact 3.0 s; a 3 s window overlaps it if it starts < 3.0
     assert in_event.any() and (starts[in_event] < 3.0).all()
     assert not in_event[starts >= 3.0].any()
+
+
+def test_kfold_tests_every_clip_once_and_never_trains_on_it(kp_dir):
+    sets, rep = load_clips(kp_dir, RECORDS)
+    folds = assign_folds(list(sets), k=3, seed=0)
+    tested = []
+    for f in range(3):
+        train, test, frep = split_windows(
+            sets, rep, [c for c, g in folds.items() if g == f]
+        )
+        assert {s.clip_id for s in test.series} == set(frep.used_test)
+        assert {s.clip_id for s in train.series} == set(frep.used_train)
+        assert set(frep.used_train).isdisjoint(frep.used_test)
+        tested += frep.used_test
+    assert sorted(tested) == ["lab1", "lab2", "lab3"]
+    assert rep.used_test == []  # the loaded report is never modified
+
+
+def test_holdout_matches_load_then_split(kp_dir):
+    train, test, rep = build_datasets(kp_dir, RECORDS, test_frac=0.5, seed=0)
+    sets, base = load_clips(kp_dir, RECORDS)
+    train2, test2, rep2 = split_windows(sets, base, rep.used_test)
+    assert rep2 == rep and len(train2) == len(train) and len(test2) == len(test)

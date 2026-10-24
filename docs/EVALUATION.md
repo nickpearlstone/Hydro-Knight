@@ -22,11 +22,27 @@ window is also scored, on the same clips and the same rules, by:
 - negative box height,
 
 and the model is retrained with all pose coordinates removed. These baselines are required
-but not yet built into the harness. Results should come from grouped K-fold over all labeled
-clips, so each clip is tested exactly once.
+but not yet built into the harness.
 
 ## Shared rules
 
+- **Splits: grouped K-fold.** `hydroknight train tcn-v2` gives every labelled clip one of 5
+  folds (`--folds`) from a hash of its id and the seed, so a clip keeps its fold as more clips
+  are labelled. Each fold's model trains on the other four folds and scores only its own, so
+  every clip is tested exactly once per seed, by a model that never saw any of its footage.
+  The five held-out score tables are pooled and scored once per seed. Each seed draws new
+  folds and new starting weights, and the spread across seeds shows how repeatable a result
+  is. The report also lists each fold's own numbers, to show whether one fold carries the
+  result. `--holdout` keeps the old single random 20% hold-out.
+- **One score scale.** Each fold's model has its own error level, so its scores are divided
+  by the median score of its own training windows before pooling. This never reorders
+  swimmers within a clip, so it only matters for measures that use one alarm threshold across
+  clips.
+- **Thresholds.** Any threshold picked on the clips it is then scored on is an upper bound.
+  The proxy budget curve and `--detection` report two versions: picked on the same clips
+  (upper bound), and picked for each fold on the other folds' clips only, then applied to that
+  fold (honest). The feature scaler is fit on training windows only. Choosing a model size by
+  its K-fold result and then quoting that same result is mildly optimistic.
 - **Input.** Any model reduces to one table: clip, track, time, score. The time is when a live
   system could have raised that score, never earlier.
 - **Catch.** A score at or above the alarm threshold on the victim's own track, between the
@@ -65,7 +81,7 @@ lifeguard actually scans.
 | Victim vs other swimmers, same clip | Chance a victim score beats another swimmer's score in the same clip, averaged over clips. |
 | Share of window victim is top 1 / 3 / 5 (ties split by chance) | If a guard checked the k most suspicious swimmers, how often would the victim be among them? Ties with other swimmers are broken at random, so a detector that gives everyone the same score gets exactly chance (3 of 20 swimmers = 15%). |
 | Clips where victim reaches top k outright | In how many rescues the victim is ever among the k most suspicious before contact, and how soon after onset. Ties count against the victim, so this yes/no measure stays conservative. |
-| Proxy budget curve | Catches against false alarms counted on the rescue footage itself, with exact intervals. Crowded and short, so a proxy only. |
+| Proxy budget curve | Catches against false alarms counted on the rescue footage itself, with exact intervals. Crowded and short, so a proxy only. Shown with thresholds picked on these clips (upper bound) and, for K-fold runs, picked on the other folds (honest). |
 
 ## Tier 2: full protocol (needs normal footage)
 
@@ -86,7 +102,8 @@ window as a clearly labelled stopgap.
 
 ## First reading: v2 autoencoder (3 seeds, 6 to 11 held-out rescues each)
 
-Onset ranges include the independent Z5cc onsets where they exist (`--onset-alt`).
+These numbers predate K-fold: each seed was one random hold-out. Onset ranges include the
+independent Z5cc onsets where they exist (`--onset-alt`).
 
 | Measure | v2 | Random |
 |---|---|---|

@@ -234,6 +234,7 @@ Model size, box speed capped:
 - The test split moves AUC from 0.74 to 0.93, far more than any setting. Each split has
   only 6 to 11 test clips, so single numbers are not precise.
 
-Reproduce: `uv run hydroknight train tcn-v2 --sizes small --seeds 0 1 2 --rates capped
---min-track-s 1.0 --detection --device mps --out runs/v2_ckpt_after`. Model weights are
-saved per seed as `model_small_s<seed>.pt`; `--load-dir` re-scores a saved run.
+Reproduce: `uv run hydroknight train tcn-v2 --holdout --sizes small --seeds 0 1 2 --rates capped
+--min-track-s 1.0 --detection --device mps --out runs/v2_ckpt_after` (`--holdout` is the
+random split these numbers used; K-fold is now the default). Model weights are saved per
+seed as `model_small_s<seed>.pt`; `--load-dir` re-scores a saved run.
