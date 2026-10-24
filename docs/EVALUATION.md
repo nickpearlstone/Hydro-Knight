@@ -100,31 +100,36 @@ lifeguard actually scans.
 Until normal footage exists, `--pseudo-normal` uses the rescue clips' footage before the catch
 window as a clearly labelled stopgap.
 
-## First reading: v2 autoencoder (3 seeds, 6 to 11 held-out rescues each)
+## First reading: v2 autoencoder (5-fold, 46 rescues, 3 seeds)
 
-These numbers predate K-fold: each seed was one random hold-out. Onset ranges include the
-independent Z5cc onsets where they exist (`--onset-alt`).
+Small v2 model, every labelled clip tested once per seed by a model that never trained on it
+(`runs/v2_kfold_small`). Values are seeds 0 / 1 / 2; brackets are the seed-0 95% clip-resampled
+interval. Onset ranges include the independent Z5cc onsets where they exist (`--onset-alt`).
 
-| Measure | v2 | Random |
-|---|---|---|
-| Victim detected (input tracks) | 50 to 51% | (not score-based) |
-| Victim scored by this model | 21 to 27% | (not score-based) |
-| Victim vs other swimmers, same clip | 0.71 to 0.89 | about 0.5 |
-| Share of window victim is top 3 (ties split by chance) | 7 to 8% | 1 to 3% |
-| Clips where victim reaches top 3 outright | 50 to 67% | 13 to 31% |
-| Catches at 20 false alarms per hour (proxy) | 0 | 0 |
+| Measure | v2 | Random | Shuffled |
+|---|---|---|---|
+| Victim detected (input tracks) | 49% / 49% / 49% [40%, 58%] | (not score-based) | |
+| Victim scored by this model | 26% / 26% / 26% [19%, 34%] | (not score-based) | |
+| Victim vs other swimmers, same clip | 0.73 / 0.73 / 0.73 [0.67, 0.80] | 0.49 to 0.50 | 0.50 to 0.51 |
+| Share of window victim is top 3 (ties split by chance) | 7% / 7% / 7% [4%, 10%] | 3 to 4% | 3 to 5% |
+| Clips where victim reaches top 3 outright | 50% / 48% / 50% [35%, 63%] | 26% | 23 to 25% |
+| Catches at 20 false alarms per hour (proxy, upper bound and honest) | 0 / 0 / 0 | 0 | 0 |
+
+The old single hold-outs (6 to 11 clips each) put the same-clip AUC anywhere from 0.71 to 0.89.
+Pooled over all 46 clips it is 0.73 for every seed, so the earlier spread came from which
+clips were tested. Single folds still range from 0.56 to 0.89.
 
 The model ranks victims above other swimmers better than chance, but it never catches one at
 a usable alarm rate, and most of the distress window is lost before ranking starts. The loss
 has two parts of similar size:
 
-- **About half of the window, the input never holds the victim** (detected 50 to 51%). That
-  is the detector and tracker: the head-detector and low-confidence work targets it.
-- **About another quarter, the victim is detected but the model has no score yet** (scored 21
-  to 27%). The v2 model's first score comes about 4.5 s into a track, and 85% of victim tracks
+- **About half of the window, the input never holds the victim** (detected 49%). That is the
+  detector and tracker: the head-detector and low-confidence work targets it.
+- **About another quarter, the victim is detected but the model has no score yet** (scored
+  26%). The v2 model's first score comes about 4.5 s into a track, and 85% of victim tracks
   are shorter than that (median 1.3 s, 157 tracks in 46 clips). Shorter-window models and stitching track
   fragments back together target this part.
 
 So better detection alone is not enough: the scoring model also has to work on short tracks.
-With only click-matched victim tracks (fragments dropped), detected falls to 39 to 45% and
-scored to 17 to 19%.
+With only click-matched victim tracks (fragments dropped), detected falls to 39% and scored
+to 18% (seed 0), and the same-clip AUC stays at 0.72.

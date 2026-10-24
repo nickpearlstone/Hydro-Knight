@@ -142,7 +142,7 @@ Reproduce: `uv run hydroknight benchmark pose run` (and `sweep`). Labels:
 ## 5. Second model (v2): above chance at ranking victims, no catches
 
 **Bottom line.** At false-alarm rates a lifeguard could work with, the v2 model catches
-no drownings on held-out clips, and neither does a random scorer. It does rank the
+no drownings on clips it never trained on, and neither does a random scorer. It does rank the
 victim as more unusual than most other swimmers, which is above chance, but the
 signal is far too weak to raise an alarm.
 
@@ -151,9 +151,10 @@ wrong victim clicked). Each swimmer's track becomes a 30 fps series of 58 featur
 step: pose relative to the box (scaled by box height), all 17 keypoint confidences,
 box confidence, a detected flag, box shape and size, and box speed (capped at 3 box
 heights per second). The model is a dilated TCN autoencoder (small, 35k parameters)
-trained on 3 s windows of non-victim swimmers only. Clips are split whole into train
-and test; each of 3 seeds sets both the split and the initialization. Tracks of at
-least 1 s are scored.
+trained on 3 s windows of non-victim swimmers only. Clips are split whole into 5 folds;
+each fold's model trains on the other four and scores only its own, so every clip is
+tested once per seed. Each of 3 seeds sets both the folds and the initialization. Tracks
+of at least 1 s are scored.
 
 Victim tracks are removed from the normal data and scored separately: tracks under a
 victim click, plus "path fragments" (tracks that stay within one box height of the line
@@ -161,31 +162,37 @@ between clicks for at least 0.3 s, because the tracker splits one swimmer into s
 pieces).
 
 **Detection.** A catch is an alarm on the victim's own track between drowning onset
-and guard contact. Every alarm episode on any other track is a false alarm. Caught
-rescues out of 25 held-out rescues (8 + 11 + 6 over the 3 seeds), at the best
-threshold that stays within each false-alarm budget:
+and guard contact. Every alarm episode on any other track is a false alarm. Rescues caught out of 46, seeds
+0 / 1 / 2:
 
 | False alarms per hour, at most | 120 | 240 | 1,000 | 2,000 | 5,000 |
 |---|---|---|---|---|---|
-| v2 model | 0 | 0 | 2 | 9 | 13 |
-| Random scores | 0 | 0 | 1 | 2 | 3 |
+| v2, threshold picked on these clips (upper bound) | 0 / 0 / 0 | 2 / 1 / 1 | 4 / 6 / 5 | 12 / 12 / 15 | 20 / 21 / 21 |
+| v2, threshold picked on the other folds | 0 / 0 / 0 | 1 / 0 / 0 | 6 / 5 / 4 | 13 / 12 / 14 | 19 / 19 / 19 |
+| Random scores (upper bound) | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 2 / 4 / 2 | 9 / 6 / 5 |
 
-The model beats random only at thousands of false alarms per hour. False alarms are
-counted on the rescue clips themselves (about 3 to 5 minutes of footage per seed),
-since there is no long normal footage yet.
+The model beats random only at thousands of false alarms per hour. With the threshold
+picked on the other folds, the 240 budget actually fires 105 to 195 times per hour and the
+1,000 budget 858 to 916. False alarms are counted on the rescue clips themselves (about
+20 minutes of footage), since there is no long normal footage yet.
 
 **Ranking.** Two numbers measure whether victim moments score higher than everyone
 else's, regardless of any alarm threshold:
 
-- ROC-AUC between victim windows (onset to contact) and all other windows: **0.83**
-  (seeds 0.88 / 0.74 / 0.86), random 0.50.
+- Same clip: the chance a victim moment outscores another swimmer's in the same clip,
+  averaged over clips: **0.73** for every seed (95% interval 0.67 to 0.80), random 0.50
+  (docs/EVALUATION.md).
+- ROC-AUC between victim windows (onset to contact) and all other windows of all clips:
+  **0.65** (seeds 0.66 / 0.64 / 0.64), random 0.50. This pooled number also rewards or
+  punishes score differences between clips, which is why the evaluation leads with the
+  same-clip one.
 - Per-clip rank: the share of a clip's other windows scoring below the victim's best
-  window. Median **0.97**, random 0.90. Random is high because it takes the best of
-  several victim windows.
+  window. Median **0.95** (0.95 / 0.94 / 0.95), random 0.87 to 0.90. Random is high
+  because it takes the best of several victim windows.
 
-A high rank is still far from an alarm. In a clip ranked 0.975, the victim's best
-moment was outscored by 157 moments from 25 other swimmers. Victims peak at about 0.8
-to 0.9, and the alarm threshold for 120 false alarms per hour sits at 2 to 4.
+A high rank is still far from an alarm. On the pooled scale (each fold's scores divided
+by the median score of its own training windows), victims peak at a median of about 2.5,
+and the alarm threshold for 120 false alarms per hour sits at 16 to 18.
 
 **Lifeguards counted as victims.** Watching scores drawn on the video showed that in
 the best-ranked clip, the "victim" tracks were the lifeguard filming in the
@@ -196,15 +203,16 @@ at the click or as its track's median over its whole life. Before the fix, real 
 tracks were at most 2.4 times their neighbors and the wrong ones were 4 to 17 times.
 The fix removed lifeguard or merged boxes from 6 clips.
 
-| Run (small, 3 seeds) | AUC | Rescues caught at 240 FA/h or fewer |
+| Run (small, 3 seeds, old single hold-outs) | AUC | Rescues caught at 240 FA/h or fewer |
 |---|---|---|
 | Before the fix | 0.846 | 1 of 25 (the lifeguard) |
 | Same models, fixed matcher | 0.829 | 0 of 25 |
 | Retrained with the fixed matcher | 0.829 | 0 of 25 |
 
-**Comparing settings (before the matcher fix).** These runs compare feature and size
-choices by AUC, which is fine for choosing between settings, though the absolute
-values are about 0.02 too high.
+**Comparing settings (before the matcher fix and before K-fold).** These runs compare
+feature and size choices by AUC on the old single hold-outs (25 tested clips over 3
+seeds), which is fine for choosing between settings, though the absolute values are
+about 0.02 too high and the seeds differ mainly by which clips were tested.
 
 Box speed is mostly tracker jitter (99th percentile about 7 box heights per second,
 maximum above 100). Medium model:
@@ -231,10 +239,12 @@ Model size, box speed capped:
   that in several of the clips watched the victim has no detection box for much of the
   drowning, and no model built on pose tracks can score a swimmer it never sees.
 - Larger models reconstruct normal swimming better without ranking victims any better.
-- The test split moves AUC from 0.74 to 0.93, far more than any setting. Each split has
-  only 6 to 11 test clips, so single numbers are not precise.
+- On the old single hold-outs, the test split moved AUC from 0.74 to 0.93, far more than
+  any setting. With 5-fold over all 46 clips the same-clip AUC is 0.73 for every seed,
+  though single folds still range from 0.56 to 0.89.
 
-Reproduce: `uv run hydroknight train tcn-v2 --holdout --sizes small --seeds 0 1 2 --rates capped
---min-track-s 1.0 --detection --device mps --out runs/v2_ckpt_after` (`--holdout` is the
-random split these numbers used; K-fold is now the default). Model weights are saved per
-seed as `model_small_s<seed>.pt`; `--load-dir` re-scores a saved run.
+Reproduce: `uv run hydroknight train tcn-v2 --sizes small --seeds 0 1 2 --rates capped
+--min-track-s 1.0 --detection --device mps --out runs/v2_kfold_small`, then
+`uv run hydroknight eval protocol runs/v2_kfold_small --onset-alt scratch/z5cc/label_compare.json`.
+Model weights are saved per seed and fold as `model_small_s<seed>_f<fold>.pt`;
+`--load-dir` re-scores a saved run. The older tables used `--holdout`.
