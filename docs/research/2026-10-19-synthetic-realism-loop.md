@@ -289,7 +289,8 @@ training and evaluation later.
 
 - **Reading:**
   - With augmentation, warm-up and EMA, RT-DETR (Apache) matches or beats the synthetic-trained
-    YOLO in range. Far, out-of-range heads still favour YOLO.
+    YOLO in range. Far, out-of-range heads still favour YOLO. *(Corrected 10-23: this was one
+    lucky run; see the seed spread below.)*
   - **Training longer on synthetic data hurts real-world results**: the same run collapses from
     75.5% to 18.5% between epoch 21 and epoch 100. The model drifts toward the synthetic look.
     Checkpoint choice matters more than any other knob here. It needs a real validation signal
@@ -299,3 +300,63 @@ training and evaluation later.
   - RT-DETR's scores stay below 0.25, so its operating threshold must be set on real validation
     data.
   - Still one test set of 151 in-range swimmers (one swimmer = 0.7 points) and one run each.
+
+### Seed spread (10-23): the 75.5% was a lucky run
+
+- **Run:** recipe v2, backbone frozen, seeds 1–8. Each seed trains the first 30 epochs of the same
+  100-epoch schedule, so up to epoch 29 it follows the 10-20 run except for the random start. The
+  weights are kept every 5 epochs, plus `best` (lowest synthetic validation loss) and `last`.
+  Kaggle `hk-synth-train` version 3, 2× T4, about 1.5 GPU h. New trainer flags: `--seed`,
+  `--stop-after`, `--save-every`.
+- **Test:** as above, in range only (151 swimmers), all 56 checkpoints. Re-scoring the 10-20
+  checkpoint first gave the same 39.1 / 55.6 / 75.5%.
+
+Mean ± standard deviation over the 8 seeds, with the range at 100 false boxes:
+
+| Checkpoint | In range @ 20 false | @ 50 | @ 100 |
+|---|---|---|---|
+| epoch 5 | 8.4 ± 9.5 | 16.1 ± 15.5 | 24.2 ± 20.4 (1.3–51.0) |
+| epoch 10 | 15.8 ± 11.7 | 30.6 ± 17.6 | 41.5 ± 21.3 (0.7–62.9) |
+| epoch 15 | 21.8 ± 10.2 | 38.7 ± 15.9 | 49.6 ± 19.7 (4.0–66.2) |
+| epoch 20 | 25.8 ± 11.2 | 39.5 ± 15.1 | 52.8 ± 16.7 (15.9–66.9) |
+| epoch 25 | 25.3 ± 11.5 | 41.4 ± 14.2 | 53.1 ± 15.7 (24.5–68.2) |
+| last (epoch 29) | 24.7 ± 11.6 | 40.5 ± 15.7 | 52.3 ± 16.1 (25.8–66.9) |
+| **best (synthetic val loss)** | **24.8 ± 9.6** | **40.4 ± 13.9** | **53.6 ± 15.4 (17.9–64.2)** |
+| *10-20 run, best (epoch 21)* | *39.1* | *55.6* | *75.5* |
+
+Per seed, in range at 100 false boxes (%):
+
+| Seed | ep 5 | ep 10 | ep 15 | ep 20 | ep 25 | last | best (its epoch) |
+|---|---|---|---|---|---|---|---|
+| 1 | 1.3 | 19.2 | 44.4 | 55.6 | 60.3 | 64.9 | 57.6 (19) |
+| 2 | 4.0 | 53.6 | 66.2 | 66.9 | 68.2 | 65.6 | 62.9 (18) |
+| 3 | 3.3 | 0.7 | 4.0 | 15.9 | 24.5 | 25.8 | 17.9 (22) |
+| 4 | 51.0 | 62.9 | 58.3 | 61.6 | 66.2 | 66.9 | 64.2 (21) |
+| 5 | 14.6 | 37.7 | 62.3 | 62.3 | 56.3 | 53.6 | 60.3 (22) |
+| 6 | 41.7 | 51.7 | 49.0 | 43.0 | 35.8 | 32.5 | 49.0 (15) |
+| 7 | 39.1 | 55.6 | 57.6 | 63.6 | 64.9 | 63.6 | 63.6 (19) |
+| 8 | 38.4 | 51.0 | 55.0 | 53.6 | 49.0 | 45.7 | 53.6 (20) |
+
+- **Reading:**
+  - The 10-20 result is higher than all 56 checkpoints here (the highest is 68.2%). This recipe
+    typically finds 53.6 ± 15.4% of in-range swimmers at 100 false boxes (median of the 8 `best`
+    checkpoints: 59.0%).
+  - RT-DETR vs the synthetic-only YOLO (60.9%, one run): no clear winner. YOLO needs seeds too
+    before either is called better.
+  - The random seed matters as much as the epoch. Across seeds the spread is about 15 points,
+    roughly four times the test set's own noise (a binomial standard deviation of about 4 points
+    at 151 swimmers). Seed 3 fails at every epoch.
+  - No collapse within 30 epochs: the mean is flat from epoch 20 to 29 (52–53%). A fixed stop at
+    epoch 20–25 does as well as the synthetic-validation-loss pick, which always lands in epochs
+    15–22. The drop to 18.5% seen on 10-20 comes later than epoch 30.
+  - Synthetic validation loss can't tell a good seed from a bad one: seed 3's best validation
+    loss (5.50) sits inside the good seeds' range (5.33–5.54). Picking a seed or checkpoint needs real labelled
+    frames, kept separate from these 10 test frames.
+  - Caveat: Kaggle installs the newest `transformers` on each run, so this run may use a newer
+    version than 10-20. A library effect can't be ruled out, but 75.5% sitting above the whole
+    spread is what a lucky draw looks like.
+- **Next:**
+  1. A few real validation frames (not the 10 test frames) to choose the seed, the checkpoint
+     and the operating threshold.
+  2. Seeds for the synthetic-only YOLO before comparing the two detectors again.
+  3. From now on, report head-detector numbers as mean ± standard deviation over seeds.
