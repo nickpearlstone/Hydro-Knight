@@ -23,7 +23,14 @@ import pandas as pd
 
 from ..features.track_series import TARGET_FPS
 from ..features.windows_v2 import WindowSet
-from .metrics import DET_COLUMNS, ClipEval, event_catches, sweep_recall_fa
+from .metrics import (
+    DET_COLUMNS,
+    ClipEval,
+    event_catches,
+    false_alarm_episodes,
+    footage_hours,
+    sweep_recall_fa,
+)
 
 
 def alarm_table(ws: WindowSet, scores: np.ndarray) -> pd.DataFrame:
@@ -87,6 +94,9 @@ def operating_points(
 ) -> dict:
     """Best recall at or under each false-alarm budget, plus the full sweep.
 
+    Each threshold is picked on the same clips it is then scored on: an upper bound.
+    crossfit_points gives the honest version for K-fold runs.
+
     Returns:
         {"sweep": DataFrame, "points": [{fa_target, threshold, recall, fa_per_hour,
         median_latency_s, caught, events}], "events", "hours"}.
@@ -121,3 +131,50 @@ def operating_points(
         "events": n_events,
         "hours": float(sum(c.duration_s for c in clips) / 3600),
     }
+
+
+def crossfit_points(
+    clips: list[ClipEval],
+    folds: dict[str, int],
+    fa_targets=(30, 60, 120, 240),
+    n_thresholds: int = 200,
+) -> list[dict]:
+    """operating_points without hindsight, for a pooled K-fold table on one score scale.
+
+    Each fold's threshold per target is picked (operating_points) on the other folds'
+    clips only, then applied to that fold; catches and false alarms are summed over
+    folds, so the pooled alarm rate can exceed the target.
+
+    Returns:
+        [{fa_target, recall, fa_per_hour, caught, events, median_latency_s,
+        threshold_by_fold}] in fa_targets order.
+    """
+    by_fold: dict[int, list[ClipEval]] = {}
+    for c in clips:
+        by_fold.setdefault(folds[c.clip_id], []).append(c)
+    totals = {t: {"caught": 0, "fa": 0, "lat": [], "thr": {}} for t in fa_targets}
+    for f, test in sorted(by_fold.items()):
+        train = [c for c in clips if folds[c.clip_id] != f]
+        picked = operating_points(train, fa_targets, n_thresholds)["points"]
+        for pt in picked:
+            tot = totals[pt["fa_target"]]
+            thr = pt.get("threshold", np.inf)
+            tot["thr"][str(f)] = float(thr)
+            catches = [e for c in test for e in event_catches(c, thr)]
+            tot["caught"] += sum(e["caught"] for e in catches)
+            tot["lat"] += [e["latency_s"] for e in catches if e["caught"]]
+            tot["fa"] += sum(false_alarm_episodes(c, thr) for c in test)
+    n_events = sum(len(c.events) for c in clips)
+    hours = footage_hours(clips)
+    return [
+        {
+            "fa_target": t,
+            "recall": tot["caught"] / n_events if n_events else float("nan"),
+            "fa_per_hour": tot["fa"] / hours if hours else float("nan"),
+            "caught": tot["caught"],
+            "events": n_events,
+            "median_latency_s": float(np.median(tot["lat"])) if tot["lat"] else None,
+            "threshold_by_fold": tot["thr"],
+        }
+        for t, tot in totals.items()
+    ]

@@ -30,3 +30,32 @@ def split_clips(
         test.remove(max(test, key=lambda c: _unit(c, seed)))
     train = [c for c in ids if c not in test]
     return train, test
+
+
+def assign_folds(clip_ids: list[str], k: int = 5, seed: int = 0) -> dict[str, int]:
+    """Give every clip one fold in 0..k-1 for grouped K-fold (each clip tested exactly once).
+
+    A clip's fold is floor(k * hash), the same hash split_clips uses, so with k = 5 fold 0
+    is exactly split_clips' 20% test set for that seed, and adding clips moves no one.
+    Folds are uneven. If a fold would be empty, the clip whose hash lies closest to that
+    fold's range moves in from a fold with more than one clip; only then can adding clips
+    change an assignment.
+
+    Raises:
+        ValueError: fewer clips than folds, or k < 2.
+    """
+    ids = sorted(set(clip_ids))
+    if k < 2 or len(ids) < k:
+        raise ValueError(f"need k >= 2 and at least k clips (k={k}, {len(ids)} clips)")
+    fold = {c: min(int(_unit(c, seed) * k), k - 1) for c in ids}
+    for f in range(k):
+        sizes = [list(fold.values()).count(g) for g in range(k)]
+        if sizes[f]:
+            continue
+        centre = (f + 0.5) / k
+        donor = min(
+            (c for c in ids if sizes[fold[c]] > 1),
+            key=lambda c: (abs(_unit(c, seed) - centre), c),
+        )
+        fold[donor] = f
+    return fold

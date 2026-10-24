@@ -7,7 +7,12 @@ from types import SimpleNamespace
 import numpy as np
 from v2_fakes import series_of
 
-from hydro_knight.eval.detection_v2 import alarm_table, clip_evals, operating_points
+from hydro_knight.eval.detection_v2 import (
+    alarm_table,
+    clip_evals,
+    crossfit_points,
+    operating_points,
+)
 from hydro_knight.eval.metrics import event_catches
 from hydro_knight.features.track_series import TrackSeries
 from hydro_knight.features.windows_v2 import WindowSet, make_window_set
@@ -18,10 +23,10 @@ def _ws(track_id, n=300, clip="c"):
     return make_window_set([TrackSeries(clip, track_id, 0.0, feats, det)], window=90)
 
 
-def _record(onset=5.0, contact=8.0):
+def _record(onset=5.0, contact=8.0, clip="c"):
     ev = {"start": onset, "contact": contact, "end": 9.0, "label": "distress"}
     return SimpleNamespace(
-        clip_id="c", events=[ev], trim_start=None, to_file_time=lambda t: t
+        clip_id=clip, events=[ev], trim_start=None, to_file_time=lambda t: t
     )
 
 
@@ -60,3 +65,29 @@ def test_victim_with_no_windows_is_a_miss():
 def test_empty_window_set_gives_empty_alarms():
     empty = WindowSet([], np.empty((0, 2), np.int64), 90, 44)
     assert alarm_table(empty, np.empty(0)).empty
+
+
+def _clip_alarms(clip, base, victim_peak):
+    """Normal swimmer scores `base`; the victim scores `victim_peak` inside the event."""
+    normal, victim = _ws(1, clip=clip), _ws(7, clip=clip)
+    av = alarm_table(victim, np.full(len(victim), float(base)))
+    s_v = av["score"].to_numpy().copy()
+    s_v[((av["t"] > 5.0) & (av["t"] < 8.0)).to_numpy()] = victim_peak
+    return __import__("pandas").concat(
+        [alarm_table(normal, np.full(len(normal), float(base))), av.assign(score=s_v)]
+    )
+
+
+def test_crossfit_points_pick_each_folds_threshold_on_the_other_folds():
+    # Fold 0's model scores low (0, victim 10); fold 1's runs high (50, victim 100).
+    alarms = __import__("pandas").concat(
+        [_clip_alarms("a", 0, 10), _clip_alarms("b", 50, 100)]
+    )
+    rep = SimpleNamespace(used_test=["a", "b"], victim_tracks={"a": [7], "b": [7]})
+    clips = clip_evals(alarms, [_record(clip="a"), _record(clip="b")], rep)
+    (upper,) = operating_points(clips, fa_targets=(0,))["points"]
+    (honest,) = crossfit_points(clips, {"a": 0, "b": 1}, fa_targets=(0,))
+    assert upper["caught"] == 1 and upper["fa_per_hour"] == 0  # line above 50: b only
+    # b's line comes from a alone (10), so b's normal swimmer fires: alarms appear.
+    assert honest["threshold_by_fold"]["1"] == 10 and honest["fa_per_hour"] > 0
+    assert honest["threshold_by_fold"]["0"] > 50 and honest["events"] == 2

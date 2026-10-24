@@ -459,3 +459,41 @@ def test_clumpy_no_skill_detectors_match_their_track_shuffle(make):
             pc = P._tier1_per_clip(rowshuf, truths, FAST)
             old.append(P._tier1_summary(pc, FAST)["reach_top3"]["value"])
         assert np.mean(old) - model > 0.15
+
+
+def _two_scale_folds():
+    """Fold 0's model scores low (noise < 0.5, victim 0.9); fold 1's runs high (noise 1 to 1.5, victim 2)."""
+    a = make_table(victim_score=0.9, clip="a1")
+    b = make_table(victim_score=1.0, clip="b1").assign(score=lambda d: d["score"] + 1.0)
+    truths = {"a1": truth("a1"), "b1": truth("b1")}
+    return pd.concat([a, b]), truths, {"a1": 0, "b1": 1}
+
+
+def test_crossfit_threshold_comes_from_the_other_folds_only():
+    table, truths, folds = _two_scale_folds()
+    groups = P._by_clip(table)
+    out = P.proxy_operating_points(groups, truths, FAST, folds)
+    upper, honest = out["points"][0], out["crossfit"][0]  # budget 0.1 per hour
+    # Picked on both clips, the line clears fold 1's noise: no false alarms, b1 caught.
+    assert upper["fa_per_hour"] == 0 and upper["caught"] == 1
+    # Fold 1's line is picked on fold 0 alone (at most a1's victim score), so it fires
+    # on fold 1's noise: the honest curve breaks the budget the upper bound kept.
+    assert honest["threshold_by_fold"]["1"] <= 0.9
+    assert honest["threshold_by_fold"]["0"] > 1.4
+    assert honest["fa_per_hour"] > 0.1
+
+
+def test_without_folds_there_is_no_crossfit():
+    table, truths, _ = _two_scale_folds()
+    assert "crossfit" not in P.proxy_operating_points(P._by_clip(table), truths, FAST)
+
+
+def test_tier1_with_folds_reports_the_spread_and_both_curves():
+    table, truths, folds = _two_scale_folds()
+    t1 = P.tier1(table, truths, FAST, folds=folds)
+    spread = t1["fold_spread"]
+    assert list(spread["fold"]) == [0, 1] and spread["clips"].sum() == 2
+    assert set(t1["crossfit_random_caught"]) == set(FAST.budgets_per_hour)
+    md = P.format_report("demo", t1, None, FAST)
+    assert "upper bound" in md and "from the other folds" in md
+    assert "Per-fold spread" in md and "lowest to highest" in md

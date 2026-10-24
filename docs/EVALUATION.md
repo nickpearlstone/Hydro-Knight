@@ -22,11 +22,27 @@ window is also scored, on the same clips and the same rules, by:
 - negative box height,
 
 and the model is retrained with all pose coordinates removed. These baselines are required
-but not yet built into the harness. Results should come from grouped K-fold over all labeled
-clips, so each clip is tested exactly once.
+but not yet built into the harness.
 
 ## Shared rules
 
+- **Splits: grouped K-fold.** `hydroknight train tcn-v2` gives every labelled clip one of 5
+  folds (`--folds`) from a hash of its id and the seed, so a clip keeps its fold as more clips
+  are labelled. Each fold's model trains on the other four folds and scores only its own, so
+  every clip is tested exactly once per seed, by a model that never saw any of its footage.
+  The five held-out score tables are pooled and scored once per seed. Each seed draws new
+  folds and new starting weights, and the spread across seeds shows how repeatable a result
+  is. The report also lists each fold's own numbers, to show whether one fold carries the
+  result. `--holdout` keeps the old single random 20% hold-out.
+- **One score scale.** Each fold's model has its own error level, so its scores are divided
+  by the median score of its own training windows before pooling. This never reorders
+  swimmers within a clip, so it only matters for measures that use one alarm threshold across
+  clips.
+- **Thresholds.** Any threshold picked on the clips it is then scored on is an upper bound.
+  The proxy budget curve and `--detection` report two versions: picked on the same clips
+  (upper bound), and picked for each fold on the other folds' clips only, then applied to that
+  fold (honest). The feature scaler is fit on training windows only. Choosing a model size by
+  its K-fold result and then quoting that same result is mildly optimistic.
 - **Input.** Any model reduces to one table: clip, track, time, score. The time is when a live
   system could have raised that score, never earlier.
 - **Catch.** A score at or above the alarm threshold on the victim's own track, between the
@@ -65,7 +81,7 @@ lifeguard actually scans.
 | Victim vs other swimmers, same clip | Chance a victim score beats another swimmer's score in the same clip, averaged over clips. |
 | Share of window victim is top 1 / 3 / 5 (ties split by chance) | If a guard checked the k most suspicious swimmers, how often would the victim be among them? Ties with other swimmers are broken at random, so a detector that gives everyone the same score gets exactly chance (3 of 20 swimmers = 15%). |
 | Clips where victim reaches top k outright | In how many rescues the victim is ever among the k most suspicious before contact, and how soon after onset. Ties count against the victim, so this yes/no measure stays conservative. |
-| Proxy budget curve | Catches against false alarms counted on the rescue footage itself, with exact intervals. Crowded and short, so a proxy only. |
+| Proxy budget curve | Catches against false alarms counted on the rescue footage itself, with exact intervals. Crowded and short, so a proxy only. Shown with thresholds picked on these clips (upper bound) and, for K-fold runs, picked on the other folds (honest). |
 
 ## Tier 2: full protocol (needs normal footage)
 
@@ -84,30 +100,36 @@ lifeguard actually scans.
 Until normal footage exists, `--pseudo-normal` uses the rescue clips' footage before the catch
 window as a clearly labelled stopgap.
 
-## First reading: v2 autoencoder (3 seeds, 6 to 11 held-out rescues each)
+## First reading: v2 autoencoder (5-fold, 46 rescues, 3 seeds)
 
-Onset ranges include the independent Z5cc onsets where they exist (`--onset-alt`).
+Small v2 model, every labelled clip tested once per seed by a model that never trained on it
+(`runs/v2_kfold_small`). Values are seeds 0 / 1 / 2; brackets are the seed-0 95% clip-resampled
+interval. Onset ranges include the independent Z5cc onsets where they exist (`--onset-alt`).
 
-| Measure | v2 | Random |
-|---|---|---|
-| Victim detected (input tracks) | 50 to 51% | (not score-based) |
-| Victim scored by this model | 21 to 27% | (not score-based) |
-| Victim vs other swimmers, same clip | 0.71 to 0.89 | about 0.5 |
-| Share of window victim is top 3 (ties split by chance) | 7 to 8% | 1 to 3% |
-| Clips where victim reaches top 3 outright | 50 to 67% | 13 to 31% |
-| Catches at 20 false alarms per hour (proxy) | 0 | 0 |
+| Measure | v2 | Random | Shuffled |
+|---|---|---|---|
+| Victim detected (input tracks) | 49% / 49% / 49% [40%, 58%] | (not score-based) | |
+| Victim scored by this model | 26% / 26% / 26% [19%, 34%] | (not score-based) | |
+| Victim vs other swimmers, same clip | 0.73 / 0.73 / 0.73 [0.67, 0.80] | 0.49 to 0.50 | 0.50 to 0.51 |
+| Share of window victim is top 3 (ties split by chance) | 7% / 7% / 7% [4%, 10%] | 3 to 4% | 3 to 5% |
+| Clips where victim reaches top 3 outright | 50% / 48% / 50% [35%, 63%] | 26% | 23 to 25% |
+| Catches at 20 false alarms per hour (proxy, upper bound and honest) | 0 / 0 / 0 | 0 | 0 |
+
+The old single hold-outs (6 to 11 clips each) put the same-clip AUC anywhere from 0.71 to 0.89.
+Pooled over all 46 clips it is 0.73 for every seed, so the earlier spread came from which
+clips were tested. Single folds still range from 0.56 to 0.89.
 
 The model ranks victims above other swimmers better than chance, but it never catches one at
 a usable alarm rate, and most of the distress window is lost before ranking starts. The loss
 has two parts of similar size:
 
-- **About half of the window, the input never holds the victim** (detected 50 to 51%). That
-  is the detector and tracker: the head-detector and low-confidence work targets it.
-- **About another quarter, the victim is detected but the model has no score yet** (scored 21
-  to 27%). The v2 model's first score comes about 4.5 s into a track, and 85% of victim tracks
+- **About half of the window, the input never holds the victim** (detected 49%). That is the
+  detector and tracker: the head-detector and low-confidence work targets it.
+- **About another quarter, the victim is detected but the model has no score yet** (scored
+  26%). The v2 model's first score comes about 4.5 s into a track, and 85% of victim tracks
   are shorter than that (median 1.3 s, 157 tracks in 46 clips). Shorter-window models and stitching track
   fragments back together target this part.
 
 So better detection alone is not enough: the scoring model also has to work on short tracks.
-With only click-matched victim tracks (fragments dropped), detected falls to 39 to 45% and
-scored to 17 to 19%.
+With only click-matched victim tracks (fragments dropped), detected falls to 39% and scored
+to 18% (seed 0), and the same-clip AUC stays at 0.72.

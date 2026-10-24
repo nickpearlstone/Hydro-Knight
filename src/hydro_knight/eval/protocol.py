@@ -545,67 +545,147 @@ def _thresholds(scores: np.ndarray, n: int) -> np.ndarray:
     return np.r_[q, np.inf]
 
 
-def proxy_operating_points(
-    groups: dict[str, pd.DataFrame], truths: dict[str, EventTruth], cfg: ProtocolConfig
-) -> dict:
-    """Catches vs false alarms counted on the rescue footage itself (start..contact): a proxy budget curve."""
-    hours = sum(t.contact - t.start for t in truths.values()) / 3600
-    scores = (
-        np.concatenate([g["score"].to_numpy(float) for g in groups.values()])
-        if groups
-        else np.array([])
-    )
-    sweep = []
-    for thr in _thresholds(scores, cfg.n_thresholds):
-        caught = [
-            first_catch(groups.get(c, _empty()), t, thr, cfg.onset_tol_s)
-            for c, t in truths.items()
-        ]
-        fa = sum(
-            false_alarms(
-                groups.get(c, _empty()),
+def _proxy_counts(
+    groups: dict[str, pd.DataFrame],
+    truths: dict[str, EventTruth],
+    thresholds: np.ndarray,
+    cfg: ProtocolConfig,
+) -> tuple[list[str], np.ndarray, np.ndarray]:
+    """Per clip and threshold: delay of the first catch (nan = missed) and false-alarm count.
+
+    Returns:
+        (clip ids in truths order, latency (clips, thresholds), false alarms (clips, thresholds)).
+    """
+    ids = list(truths)
+    lat = np.full((len(ids), len(thresholds)), np.nan)
+    fa = np.zeros((len(ids), len(thresholds)), int)
+    for i, c in enumerate(ids):
+        g, t = groups.get(c, _empty()), truths[c]
+        for j, thr in enumerate(thresholds):
+            hit = first_catch(g, t, thr, cfg.onset_tol_s)
+            lat[i, j] = math.nan if hit is None else hit
+            fa[i, j] = false_alarms(
+                g,
                 thr,
                 truth=t,
                 onset_tol_s=cfg.onset_tol_s,
                 merge_gap_s=cfg.merge_gap_s,
             )
-            for c, t in truths.items()
-        )
-        sweep.append(
-            {
-                "threshold": float(thr),
-                "caught": sum(c is not None for c in caught),
-                "false_alarms": fa,
-                "latencies": [c for c in caught if c is not None],
-            }
-        )
+    return ids, lat, fa
+
+
+def _pick(
+    lat: np.ndarray, fa: np.ndarray, hours: float, thresholds: np.ndarray, budget: float
+) -> int | None:
+    """Threshold index catching the most events within the alarm budget (ties: the higher threshold)."""
+    if hours <= 0:
+        return None
+    caught, rate = np.isfinite(lat).sum(0), fa.sum(0) / hours
+    ok = np.flatnonzero(rate <= budget)
+    if not len(ok):
+        return None
+    return int(max(ok, key=lambda j: (caught[j], thresholds[j])))
+
+
+def _budget_point(
+    budget: float,
+    latencies: np.ndarray,
+    n_alarms: int,
+    hours: float,
+    n_events: int,
+    cfg: ProtocolConfig,
+    **extra,
+) -> dict:
+    """One budget row: catches with an exact binomial interval, alarm rate with a Garwood interval."""
+    caught = latencies[np.isfinite(latencies)]
+    rate, lo, hi = garwood(int(n_alarms), hours, cfg.conf)
+    rec, rlo, rhi = clopper_pearson(len(caught), n_events, cfg.conf)
+    return {
+        "budget_per_hour": budget,
+        **extra,
+        "caught": len(caught),
+        "events": n_events,
+        "recall": rec,
+        "recall_lo": rlo,
+        "recall_hi": rhi,
+        "fa_per_hour": rate,
+        "fa_lo": lo,
+        "fa_hi": hi,
+        "median_latency_s": float(np.median(caught)) if len(caught) else math.nan,
+    }
+
+
+def proxy_operating_points(
+    groups: dict[str, pd.DataFrame],
+    truths: dict[str, EventTruth],
+    cfg: ProtocolConfig,
+    folds: dict[str, int] | None = None,
+) -> dict:
+    """Catches vs false alarms counted on the rescue footage itself (start..contact): a proxy budget curve.
+
+    "points" picks each budget's threshold on the same clips it then counts, so they are
+    an upper bound. With `folds` (clip -> K-fold test fold), "crossfit" also gives the
+    honest version: each fold's threshold is picked on the other folds' clips only, then
+    applied to that fold, and catches and alarms are summed over folds. Candidate
+    thresholds are quantiles of all scores (values only, no labels) in both.
+    """
+
+    def hours_of(rows) -> float:
+        return sum(truths[ids[i]].contact - truths[ids[i]].start for i in rows) / 3600
+
+    scores = (
+        np.concatenate([g["score"].to_numpy(float) for g in groups.values()])
+        if groups
+        else np.array([])
+    )
+    thresholds = _thresholds(scores, cfg.n_thresholds)
+    ids, lat, fa = _proxy_counts(groups, truths, thresholds, cfg)
+    every = np.arange(len(ids))
+    hours, n_events = hours_of(every), len(ids)
     points = []
     for b in cfg.budgets_per_hour:
-        ok = [s for s in sweep if hours > 0 and s["false_alarms"] / hours <= b]
-        if not ok:
-            points.append({"budget_per_hour": b, "caught": 0, "events": len(truths)})
+        j = _pick(lat, fa, hours, thresholds, b)
+        if j is None:
+            points.append({"budget_per_hour": b, "caught": 0, "events": n_events})
             continue
-        best = max(ok, key=lambda s: (s["caught"], s["threshold"]))
-        rate, lo, hi = garwood(best["false_alarms"], hours, cfg.conf)
-        rec, rlo, rhi = clopper_pearson(best["caught"], len(truths), cfg.conf)
         points.append(
-            {
-                "budget_per_hour": b,
-                "threshold": best["threshold"],
-                "caught": best["caught"],
-                "events": len(truths),
-                "recall": rec,
-                "recall_lo": rlo,
-                "recall_hi": rhi,
-                "fa_per_hour": rate,
-                "fa_lo": lo,
-                "fa_hi": hi,
-                "median_latency_s": float(np.median(best["latencies"]))
-                if best["latencies"]
-                else math.nan,
-            }
+            _budget_point(
+                b,
+                lat[:, j],
+                fa[:, j].sum(),
+                hours,
+                n_events,
+                cfg,
+                threshold=float(thresholds[j]),
+            )
         )
-    return {"hours": hours, "points": points}
+    out = {"hours": hours, "points": points}
+    if folds is None:
+        return out
+    fold_of = np.array([folds[c] for c in ids])
+    crossfit = []
+    for b in cfg.budgets_per_hour:
+        caught, n_alarms, thr_by_fold = [], 0, {}
+        for f in np.unique(fold_of):
+            inner, outer = np.flatnonzero(fold_of != f), fold_of == f
+            j = _pick(lat[inner], fa[inner], hours_of(inner), thresholds, b)
+            thr_by_fold[str(f)] = math.inf if j is None else float(thresholds[j])
+            if j is not None:
+                caught.append(lat[outer, j])
+                n_alarms += int(fa[outer, j].sum())
+        crossfit.append(
+            _budget_point(
+                b,
+                np.concatenate(caught) if caught else np.array([]),
+                n_alarms,
+                hours,
+                n_events,
+                cfg,
+                threshold_by_fold=thr_by_fold,
+            )
+        )
+    out["crossfit"] = crossfit
+    return out
 
 
 def tier1(
@@ -613,6 +693,7 @@ def tier1(
     truths: dict[str, EventTruth],
     cfg: ProtocolConfig | None = None,
     tracks: dict[str, pd.DataFrame] | None = None,
+    folds: dict[str, int] | None = None,
 ) -> dict:
     """Direction check from rescue clips alone: victim detected and scored, rank among swimmers in view, proxy budget curve.
 
@@ -621,11 +702,14 @@ def tier1(
         truths: clip_id -> EventTruth for the evaluated rescue clips.
         tracks: clip_id -> the input track table (columns t, track_id) for the model-free
             "victim detected" row; None leaves that row empty.
+        folds: clip_id -> K-fold test fold, for a pooled K-fold table: adds the
+            cross-fitted proxy curve (see proxy_operating_points) and the per-fold spread.
     Returns:
         {"per_clip": DataFrame, "summary": {...}, "random": {...} and "shuffled": {...}
         (summary values averaged over n_random noise / within-clip shuffle tables),
         "proxy": proxy_operating_points, "proxy_random_caught" and "proxy_shuffled_caught"
-        (budget -> mean events caught)}.
+        (budget -> mean events caught)}; with folds also "crossfit_random_caught",
+        "crossfit_shuffled_caught" and "fold_spread" (fold_spread).
     """
     cfg = cfg or ProtocolConfig()
     groups = _drop_ignored(_by_clip(table), truths)
@@ -636,22 +720,55 @@ def tier1(
     for _ in range(cfg.n_random):
         rg = _drop_ignored(_by_clip(randomize(table, rng)), truths)
         rand_runs.append(_tier1_summary(_tier1_per_clip(rg, truths, cfg), quick))
-        proxy_rand.append(proxy_operating_points(rg, truths, quick)["points"])
+        proxy_rand.append(proxy_operating_points(rg, truths, quick, folds))
     rng_s = np.random.default_rng(cfg.seed + 1)
     shuf_runs, proxy_shuf = [], []
     for _ in range(cfg.n_random):
         sg = shuffle_within_clip(groups, rng_s)
         shuf_runs.append(_tier1_summary(_tier1_per_clip(sg, truths, cfg), quick))
-        proxy_shuf.append(proxy_operating_points(sg, truths, quick)["points"])
-    return {
+        proxy_shuf.append(proxy_operating_points(sg, truths, quick, folds))
+    out = {
         "per_clip": per_clip,
         "summary": _tier1_summary(per_clip, cfg),
         "random": _mean_summary(rand_runs),
         "shuffled": _mean_summary(shuf_runs),
-        "proxy": proxy_operating_points(groups, truths, cfg),
-        "proxy_random_caught": _mean_caught(proxy_rand),
-        "proxy_shuffled_caught": _mean_caught(proxy_shuf),
+        "proxy": proxy_operating_points(groups, truths, cfg, folds),
+        "proxy_random_caught": _mean_caught([r["points"] for r in proxy_rand]),
+        "proxy_shuffled_caught": _mean_caught([r["points"] for r in proxy_shuf]),
     }
+    if folds is not None:
+        out["crossfit_random_caught"] = _mean_caught(
+            [r["crossfit"] for r in proxy_rand]
+        )
+        out["crossfit_shuffled_caught"] = _mean_caught(
+            [r["crossfit"] for r in proxy_shuf]
+        )
+        out["fold_spread"] = fold_spread(per_clip, folds, cfg)
+    return out
+
+
+def fold_spread(
+    per_clip: pd.DataFrame, folds: dict[str, int], cfg: ProtocolConfig
+) -> pd.DataFrame:
+    """Tier-1 headline values per K-fold test fold (clip means, no intervals: folds are small).
+
+    Shows whether one fold carries the pooled result. Columns: fold, clips, detected,
+    scored, within_clip_auc, time_in_top<k>, reach_top<k> (k = 3, or the first top_k).
+    """
+    k = 3 if 3 in cfg.top_k else cfg.top_k[0]
+    pc = per_clip.assign(
+        fold=per_clip["clip_id"].map(folds),
+        **{f"reach_top{k}": np.isfinite(per_clip[f"first_top{k}_s"].to_numpy(float))},
+    )
+    cols = ["detected", "scored", "within_clip_auc", f"time_in_top{k}", f"reach_top{k}"]
+    rows = []
+    for f, g in pc.groupby("fold"):
+        rec = {"fold": int(f), "clips": len(g)}
+        for c in cols:
+            x = g[c].to_numpy(float)
+            rec[c] = float(np.nanmean(x)) if np.isfinite(x).any() else math.nan
+        rows.append(rec)
+    return pd.DataFrame(rows, columns=["fold", "clips", *cols])
 
 
 def _mean_summary(runs: list[dict]) -> dict[str, float]:
@@ -865,6 +982,38 @@ def format_variants(variants: dict[str, dict], cfg: ProtocolConfig) -> str:
     return "\n".join(lines)
 
 
+def format_fold_spread(spread: pd.DataFrame) -> str:
+    """Markdown table of fold_spread, plus the lowest and highest fold per column."""
+    if spread.empty:
+        return ""
+    cols = [c for c in spread.columns if c not in ("fold", "clips")]
+    pct = [c for c in cols if c != "within_clip_auc"]
+
+    def cell(c, x):
+        return _pct(x) if c in pct else ("-" if not np.isfinite(x) else f"{x:.2f}")
+
+    lines = [
+        "**Per-fold spread** (clip means within each test fold; folds are small, so no intervals):",
+        "",
+        "| Fold | Clips | " + " | ".join(cols) + " |",
+        "|---" * (len(cols) + 2) + "|",
+    ]
+    for _, r in spread.iterrows():
+        lines.append(
+            f"| {int(r['fold'])} | {int(r['clips'])} | "
+            + " | ".join(cell(c, r[c]) for c in cols)
+            + " |"
+        )
+    lines.append(
+        "| lowest to highest | | "
+        + " | ".join(
+            f"{cell(c, spread[c].min())} to {cell(c, spread[c].max())}" for c in cols
+        )
+        + " |"
+    )
+    return "\n".join(lines)
+
+
 def format_report(
     name: str, t1: dict | None, t2: dict | None, cfg: ProtocolConfig
 ) -> str:
@@ -904,7 +1053,8 @@ def format_report(
         p = t1["proxy"]
         lines += [
             f"**Proxy budget curve** (false alarms counted on {p['hours'] * 60:.0f} min of rescue footage, crowded and "
-            "next to a rescue; not normal footage):",
+            "next to a rescue; not normal footage). Each budget's threshold is picked on these same clips, so "
+            "this is an **upper bound**:",
             "",
             "| Budget / h | Caught (95%) | Random caught | Shuffled caught | Alarms / h (95%) | Median delay |",
             "|---|---|---|---|---|---|",
@@ -922,6 +1072,26 @@ def format_report(
                 f"| {pt['fa_per_hour']:.1f} ({pt['fa_lo']:.1f}-{pt['fa_hi']:.1f}) | {_s(pt['median_latency_s'])} |"
             )
         lines.append("")
+        if "crossfit" in p:
+            lines += [
+                "**Proxy budget curve, threshold from the other folds** (honest): each fold's threshold is",
+                "picked on the other folds' clips only, then applied to that fold; catches and alarms summed.",
+                "The alarm rate can exceed the budget, because the threshold never saw these clips.",
+                "",
+                "| Budget / h | Caught (95%) | Random caught | Shuffled caught | Alarms / h (95%) | Median delay |",
+                "|---|---|---|---|---|---|",
+            ]
+            for pt in p["crossfit"]:
+                b = pt["budget_per_hour"]
+                lines.append(
+                    f"| {b:g} | {pt['caught']}/{pt['events']} ({100 * pt['recall_lo']:.0f}-{100 * pt['recall_hi']:.0f}%) "
+                    f"| {t1['crossfit_random_caught'].get(b, math.nan):.1f} "
+                    f"| {t1['crossfit_shuffled_caught'].get(b, math.nan):.1f} "
+                    f"| {pt['fa_per_hour']:.1f} ({pt['fa_lo']:.1f}-{pt['fa_hi']:.1f}) | {_s(pt['median_latency_s'])} |"
+                )
+            lines.append("")
+        if "fold_spread" in t1:
+            lines += [format_fold_spread(t1["fold_spread"]), ""]
     if t2:
         lines += [
             "## Tier 2: full protocol (false alarms on normal footage)",
