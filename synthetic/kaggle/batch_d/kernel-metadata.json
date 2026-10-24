@@ -1,0 +1,16 @@
+{
+  "id": "npstone/hk-synth-batch-d",
+  "title": "hk-synth-batch-d",
+  "code_file": "batch_kernel.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "machine_shape": "NvidiaTeslaT4",
+  "dataset_sources": [
+    "npstone/hk-synth"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}
