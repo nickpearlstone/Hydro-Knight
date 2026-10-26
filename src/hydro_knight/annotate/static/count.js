@@ -12,12 +12,15 @@ const ctx = overlay.getContext("2d");
 const stage = $("#stage");
 const zoomer = $("#zoomer");
 
+const URL_ARGS = new URLSearchParams(location.search);
+
 const S = {
   frames: [],
   idx: -1,
   w: 1, h: 1,
-  set: localStorage.getItem("hk.countSet") === "val" ? "val" : "bench",
-  mode: localStorage.getItem("hk.countMode") === "heads" ? "heads" : "dots",
+  // ?set=val&mode=dots in the URL wins over the last choice remembered in this browser
+  set: (URL_ARGS.get("set") || localStorage.getItem("hk.countSet")) === "val" ? "val" : "bench",
+  mode: (URL_ARGS.get("mode") || localStorage.getItem("hk.countMode")) === "heads" ? "heads" : "dots",
   history: [],       // [{idx, snap}] snapshots for undo
   zoom: { k: 1, tx: 0, ty: 0, bx: 0, by: 0, bw: 0, bh: 0 },
   saveTimer: null,

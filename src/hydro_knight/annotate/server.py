@@ -189,6 +189,12 @@ def create_app(
     blocklist = blocklist or Blocklist()
     lock = threading.Lock()  # manifest rewrites are whole-file; serialize them
 
+    @app.after_request
+    def no_cache(resp):
+        """Pages and scripts change while the labeler is in use; a plain reload must get them."""
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
     def get_record(clip_id: str):
         for r in manifest.load():
             if r.clip_id == clip_id:

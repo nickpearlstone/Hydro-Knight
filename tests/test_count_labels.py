@@ -199,3 +199,8 @@ def test_head_truth_uses_reviewed_boxes_else_dots():
     assert count.head_truth(boxed) == ([[2.0, 1.0]], [[11.0, 11.0], [7, 7]])
     unreviewed = boxed | {"heads_reviewed": False}
     assert count.head_truth(unreviewed) == count.head_truth(dots)
+
+
+def test_pages_are_never_cached(client):
+    c, _ = client
+    assert c.get("/count").headers["Cache-Control"] == "no-store"
