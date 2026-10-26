@@ -126,6 +126,23 @@ def ignored(frame: dict) -> list:
     return list(frame.get("deck", [])) + list(frame.get("hidden", []))
 
 
+def head_truth(frame: dict) -> tuple[list, list]:
+    """(heads to find, points ignored) for scoring a head detector on one frame.
+
+    A frame whose head boxes a person reviewed is scored on them: the centre of each
+    in-water head box must be found; out-of-water heads and "no head visible" marks are
+    ignored. Other frames fall back to the dots (water to find, deck + hidden ignored).
+    """
+    h = frame.get("heads")
+    if not (frame.get("heads_reviewed") and h):
+        return list(frame["water"]), ignored(frame)
+
+    def centres(boxes):
+        return [[(x1 + x2) / 2, (y1 + y2) / 2] for x1, y1, x2, y2 in boxes]
+
+    return centres(h["water"]), centres(h["deck"]) + list(h["no_head"])
+
+
 def clean_heads(body: dict) -> dict[str, list[list[float]]]:
     """Validate {"water": [[x1, y1, x2, y2]...], "deck": [...], "no_head": [[x, y]...]}.
 

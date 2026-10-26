@@ -183,3 +183,19 @@ def test_bad_hidden_dot_is_refused(client):
 def test_ignored_is_deck_plus_hidden():
     assert count.ignored({"deck": [[1, 1]], "hidden": [[2, 2]]}) == [[1, 1], [2, 2]]
     assert count.ignored({"deck": [[1, 1]]}) == [[1, 1]]
+
+
+def test_head_truth_uses_reviewed_boxes_else_dots():
+    dots = {"water": [[1, 1]], "deck": [[2, 2]], "hidden": [[3, 3]]}
+    assert count.head_truth(dots) == ([[1, 1]], [[2, 2], [3, 3]])
+    boxed = dots | {
+        "heads": {
+            "water": [[0, 0, 4, 2]],
+            "deck": [[10, 10, 12, 12]],
+            "no_head": [[7, 7]],
+        },
+        "heads_reviewed": True,
+    }
+    assert count.head_truth(boxed) == ([[2.0, 1.0]], [[11.0, 11.0], [7, 7]])
+    unreviewed = boxed | {"heads_reviewed": False}
+    assert count.head_truth(unreviewed) == count.head_truth(dots)
