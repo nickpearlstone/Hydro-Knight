@@ -4,7 +4,11 @@ Swimmer-count labels: every person clicked on a handful of still frames.
 This is the ground truth behind hydroknight benchmark pose. Each frame record is
 {"clip_id", "frame", "label", "water": [[x, y], ...], "deck": [[x, y], ...]}:
 one point per person, in original-frame pixels, "water" for people in the pool and
-"deck" for people out of it (deck, stairs, guard stand). The file holds points only,
+"deck" for people out of it (deck, stairs, guard stand). An optional "hidden" list marks
+people whose head isn't visible in the still (fully under water with only a shadow showing,
+only an arm or back visible, the head blocked by a tube, person or splash, or not sure it's
+a person). Scoring ignores deck and hidden points alike (`ignored`): a detector is neither
+penalised for missing them nor for boxing them. The file holds points only,
 no pixels, so it is safe to commit. The frame images are cached under raw_local/
 and are never committed.
 
@@ -37,7 +41,9 @@ from ..ingest import download
 COUNT_PATH = Path("data/annotations/pose_bench_gt.json")
 VAL_PATH = Path("data/annotations/head_val_gt.json")
 KINDS = ("water", "deck")
+OPTIONAL_KINDS = ("hidden",)
 HEAD_BOX_KINDS = ("water", "deck")
+OPTIONAL_KINDS = ("hidden",)
 
 
 def frame_dir() -> Path:
@@ -97,18 +103,27 @@ def _point(p) -> list[float]:
 
 
 def clean_points(body: dict) -> dict[str, list[list[float]]]:
-    """Validate {"water": [[x, y]...], "deck": [...]} posted by the UI; rounds to 0.1 px.
+    """Validate {"water": [[x, y]...], "deck": [...], "hidden": [...]} posted by the UI.
+
+    "hidden" is optional (older clients and files don't send it). Rounds to 0.1 px.
 
     Raises:
         ValueError: a missing kind, or a point that isn't two finite, non-negative numbers.
     """
     out = {}
-    for kind in KINDS:
+    for kind in KINDS + OPTIONAL_KINDS:
         pts = body.get(kind)
+        if pts is None and kind in OPTIONAL_KINDS:
+            continue
         if not isinstance(pts, list):
             raise ValueError(f"missing {kind!r} point list")
         out[kind] = [_point(p) for p in pts]
     return out
+
+
+def ignored(frame: dict) -> list:
+    """Points a detector is scored on neither way: people on the deck and hidden heads."""
+    return list(frame.get("deck", [])) + list(frame.get("hidden", []))
 
 
 def clean_heads(body: dict) -> dict[str, list[list[float]]]:

@@ -2,7 +2,7 @@
 
 Each model runs on the 10 swimmer-count frames with the same tiling it was trained for: 640 px tiles
 at native resolution with 25% overlap, boxes merged across tiles (IoU-or-IoS, as in extraction).
-Ground truth is Nick's clicks (one per swimmer, 736 in the water; deck clicks are allowed but not
+Ground truth is Nick's clicks (one per swimmer, 736 in the water; deck and hidden clicks are allowed but not
 counted). A click is found when a box covers it with the "fair" head rule from the 10-16 bake-off:
 padding of half the box height (min 6 px), since a head box can sit just above a click on the body.
 One box per click (greedy, most confident first); boxes covering no click are false boxes.
@@ -174,7 +174,7 @@ def main():
             inr, out = in_range_split(
                 f, imgs[f"{f['clip_id']}_{f['frame']}"], zs.get(f["clip_id"])
             )
-            f["water"], f["deck"] = inr, list(f["deck"]) + out
+            f["water"], f["deck"], f["hidden"] = inr, count.ignored(f) + out, []
             f["zone"] = zs.get(f["clip_id"])
     total = sum(len(f["water"]) for f in frames)
     results = {}
@@ -197,7 +197,7 @@ def main():
                     k &= zones.in_zone(
                         fr["zone"], (b[:, 0] + b[:, 2]) / 2, (b[:, 1] + b[:, 3]) / 2
                     )
-                f, p = match(b[k], c[k], fr["water"], fr["deck"])
+                f, p = match(b[k], c[k], fr["water"], count.ignored(fr))
                 f_tot, fp_tot = f_tot + f, fp_tot + p
             rows.append((cut, f_tot / total, fp_tot))
         res = {"total_clicks": total}

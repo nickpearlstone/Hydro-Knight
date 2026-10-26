@@ -52,6 +52,7 @@
       <div class="legend" data-mode="dots">
         <span><i class="sw water"></i>In the water</span>
         <span><i class="sw deck"></i>Out of the water</span>
+        <span><i class="sw no-head"></i>Head hidden (not scored)</span>
       </div>
       <div class="legend" data-mode="heads" hidden>
         <span><i class="sw box head-water"></i>Head in the water</span>
@@ -67,6 +68,11 @@
         <ul class="keys">
           <li><b>Click</b> a person in the water</li>
           <li><b>Shift-click</b> a person out of the water (deck, stairs, guard stand)</li>
+          <li><b>Alt-click</b> a person whose head isn't visible: fully under with only a shadow,
+            only an arm or back showing, blocked by a tube, person or splash, or not sure
+            it's a person. Not scored either way.</li>
+          <li>Any part of the head at or above the surface (even just the top of the head at
+            the waterline) is a normal click.</li>
           <li><b>Right-click</b> a dot to remove it</li>
           <li><b>Scroll</b> to zoom, <b>drag</b> to pan</li>
         </ul>
@@ -86,9 +92,10 @@
 
       <div class="card">
         <h2>This frame</h2>
-        <div class="tally" data-mode="dots">
+        <div class="tally tally3" data-mode="dots">
           <div><span class="muted">In water</span><b id="nWater">0</b></div>
           <div><span class="muted">Out of water</span><b id="nDeck">0</b></div>
+          <div><span class="muted">Head hidden</span><b id="nHidden">0</b></div>
         </div>
         <div data-mode="heads" hidden>
           <div class="tally tally3">

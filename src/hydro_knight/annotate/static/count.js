@@ -30,7 +30,8 @@ const api = (path) => `/api/count${path}?set=${S.set}`;
 const idxKey = () => (S.set === "bench" ? "hk.countIdx" : "hk.countIdx.val");
 const heads = (f) => (f.heads ||= { water: [], deck: [], no_head: [] });
 const snap = (f) => JSON.parse(JSON.stringify({
-  water: f.water, deck: f.deck, heads: f.heads ?? null, heads_reviewed: f.heads_reviewed ?? null,
+  water: f.water, deck: f.deck, hidden: f.hidden ?? [],
+  heads: f.heads ?? null, heads_reviewed: f.heads_reviewed ?? null,
 }));
 
 // ---------------------------------------------------------------- feedback
@@ -112,7 +113,7 @@ async function undo() {
   if (!prev) { toast("Nothing to undo", "warn"); return; }
   if (prev.idx !== S.idx) await openFrame(prev.idx);
   const f = cur(), s = prev.snap;
-  Object.assign(f, { water: s.water, deck: s.deck });
+  Object.assign(f, { water: s.water, deck: s.deck, hidden: s.hidden });
   // A frame that had no head boxes yet gets empty lists (not none), so the save clears them.
   f.heads = s.heads ?? (f.heads ? { water: [], deck: [], no_head: [] } : undefined);
   f.heads_reviewed = s.heads_reviewed ?? (typeof f.heads_reviewed === "boolean" ? false : undefined);
@@ -138,6 +139,7 @@ async function flushSave() {
 // The dots always; head boxes and the reviewed flag only once the frame has them.
 function body(f) {
   const out = { water: f.water, deck: f.deck };
+  if (f.hidden) out.hidden = f.hidden;
   if (f.heads) out.heads = f.heads;
   if (typeof f.heads_reviewed === "boolean") out.heads_reviewed = f.heads_reviewed;
   return out;
@@ -175,8 +177,9 @@ const clampY = (y) => Math.min(S.h, Math.max(0, y));
 function addPoint(e) {
   const [x, y] = toFrame(e.clientX, e.clientY);
   if (!inFrame(x, y)) return;
-  const kind = e.shiftKey ? "deck" : "water";
-  edit((f) => f[kind].push([r1(x), r1(y)]));
+  // alt = a person whose head isn't visible here (under, blocked, or not sure): ignored in scoring
+  const kind = e.altKey ? "hidden" : e.shiftKey ? "deck" : "water";
+  edit((f) => (f[kind] ||= []).push([r1(x), r1(y)]));
 }
 
 function addNoHead(e) {
@@ -220,8 +223,8 @@ function removeNearest(e) {
     edit((g) => heads(g)[best.kind].splice(best.j, 1));
     return;
   }
-  for (const kind of ["water", "deck"]) {
-    f[kind].forEach(([px, py], j) => {
+  for (const kind of ["water", "deck", "hidden"]) {
+    (f[kind] || []).forEach(([px, py], j) => {
       const d = Math.hypot(px - x, py - y);
       if (d <= reach && (!best || d < best.d)) best = { kind, j, d };
     });
@@ -322,7 +325,9 @@ window.addEventListener("resize", () => fitStage(false));
 
 // ---------------------------------------------------------------- rendering
 
-const COLORS = { water: "#ef4444", deck: "#3b82f6", headWater: "#22c55e", noHead: "#f59e0b" };
+const COLORS = {
+  water: "#ef4444", deck: "#3b82f6", hidden: "#f59e0b", headWater: "#22c55e", noHead: "#f59e0b",
+};
 
 function drawOverlay() {
   ctx.clearRect(0, 0, overlay.width, overlay.height);
@@ -342,6 +347,13 @@ function drawOverlay() {
       ctx.fill();
       if (!heading) ctx.stroke();
     }
+  }
+  ctx.strokeStyle = COLORS.hidden; // hidden: hollow amber ring
+  ctx.lineWidth = 2 * u;
+  for (const [x, y] of f.hidden || []) {
+    ctx.beginPath();
+    ctx.arc(x, y, (heading ? 3 : 6) * u, 0, Math.PI * 2);
+    ctx.stroke();
   }
   ctx.globalAlpha = 1;
   if (!heading) return;
@@ -382,8 +394,9 @@ function renderList() {
       text = n ? `${h.water.length} + ${h.deck.length} heads${f.heads_reviewed ? " ✓" : ""}`
         : "no boxes";
     } else {
-      n = f.water.length + f.deck.length;
-      text = n ? `${f.water.length} + ${f.deck.length}` : "not started";
+      const nh = (f.hidden || []).length;
+      n = f.water.length + f.deck.length + nh;
+      text = n ? `${f.water.length} + ${f.deck.length}${nh ? ` + ${nh} hidden` : ""}` : "not started";
     }
     return `<li data-i="${i}" class="${i === S.idx ? "current" : ""} ${n ? "" : "blank"}">
       <span class="mono">${f.clip_id}</span>
@@ -403,6 +416,7 @@ function render() {
   if (!f) return;
   $("#nWater").textContent = f.water.length;
   $("#nDeck").textContent = f.deck.length;
+  $("#nHidden").textContent = (f.hidden || []).length;
   const h = f.heads || { water: [], deck: [], no_head: [] };
   $("#nHeadWater").textContent = h.water.length;
   $("#nHeadDeck").textContent = h.deck.length;

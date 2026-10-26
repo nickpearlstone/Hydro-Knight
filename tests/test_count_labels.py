@@ -160,3 +160,26 @@ def test_missing_validation_file_404s_with_the_command_to_run(client, tmp_path):
     res = c.get("/api/count?set=val")
     assert res.status_code == 404
     assert b"hydroknight heads frames" in res.data
+
+
+def test_hidden_dots_round_trip_and_are_optional(client):
+    c, path = client
+    body = {"water": [[1, 2]], "deck": [], "hidden": [[5.04, 6]]}
+    assert c.post("/api/count/0", json=body).status_code == 200
+    assert count.load(path)["frames"][0]["hidden"] == [[5.0, 6.0]]
+    # an older client that doesn't send "hidden" leaves the saved list alone
+    assert c.post("/api/count/0", json={"water": [], "deck": []}).status_code == 200
+    assert count.load(path)["frames"][0]["hidden"] == [[5.0, 6.0]]
+
+
+def test_bad_hidden_dot_is_refused(client):
+    c, path = client
+    before = path.read_text()
+    body = {"water": [], "deck": [], "hidden": [[-1, 2]]}
+    assert c.post("/api/count/0", json=body).status_code == 400
+    assert path.read_text() == before
+
+
+def test_ignored_is_deck_plus_hidden():
+    assert count.ignored({"deck": [[1, 1]], "hidden": [[2, 2]]}) == [[1, 1], [2, 2]]
+    assert count.ignored({"deck": [[1, 1]]}) == [[1, 1]]
