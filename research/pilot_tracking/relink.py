@@ -62,9 +62,7 @@ def candidate_pairs(
         ok = np.ones(len(cand), bool)
         if geometry:
             ok = (dist <= s.max_dist_h) & (ratio <= s.max_height_ratio)
-        for b, d in zip(cand.index[ok], dist[ok], strict=True):
-            if b != a:
-                rows.append((a, b, d))
+        rows += [(a, b, d) for b, d in zip(cand.index[ok], dist[ok], strict=True)]
     return pd.DataFrame(rows, columns=["a", "b", "dist"])
 
 
@@ -92,10 +90,19 @@ def find_links(table: pd.DataFrame, fps: float, s: RelinkSettings) -> dict:
 
 
 def random_links(
-    table: pd.DataFrame, fps: float, s: RelinkSettings, n: int, rng: np.random.Generator
+    table: pd.DataFrame,
+    fps: float,
+    s: RelinkSettings,
+    n: int,
+    rng: np.random.Generator,
+    gated: bool = False,
 ) -> dict:
-    """Baseline: n one-to-one joins between time-eligible tracks, partners at random (any distance)."""
-    pairs = candidate_pairs(track_ends(table), fps, s, geometry=False)
+    """Baseline: n one-to-one joins, partners at random among time-eligible tracks.
+
+    gated=False: any distance. gated=True: only pairs passing the same distance and size
+    gates as the method, so it tests "closest first" against "anything nearby".
+    """
+    pairs = candidate_pairs(track_ends(table), fps, s, geometry=gated)
     if pairs.empty or n == 0:
         return {}
     return greedy_links(pairs, rng.permutation(len(pairs)), limit=n)

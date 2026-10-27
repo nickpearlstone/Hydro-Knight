@@ -2,7 +2,9 @@
 Score a track table against victim clicks, without using track ids as the answer key.
 
 A click is held by a track if one of its boxes within `frame_tol` frames contains the click
-or has its center within `radius_h` box heights (the matcher's rule in eval/victims.py).
+or has its center within `radius_h` box heights, skipping boxes taller than `max_ratio` times
+the local typical height at that moment or as their track's median (the matcher's rule in
+eval/victims.py, which keeps a lifeguard's or a merged crowd box from holding the victim).
 Coverage = share of clicks held by any track. Continuity = largest share held by one id.
 
 Detector-agnostic: needs frame, track_id, bx1, by1, bx2, by2 only.
@@ -10,17 +12,22 @@ Detector-agnostic: needs frame, track_id, bx1, by1, bx2, by2 only.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
 from matplotlib.path import Path as Polygon
+
+from hydro_knight.eval.victims import local_height
 
 
 @dataclass(frozen=True)
 class ScoreSettings:
     frame_tol: int = 2
     radius_h: float = 0.75
+    max_ratio: float = 3.0
 
 
 @dataclass
@@ -47,14 +54,34 @@ def clicks_for(record, fps: float) -> Clicks:
     return Clicks(np.array(f), np.array(x, float), np.array(y, float))
 
 
+def local_height_fn(reference: pd.DataFrame, fps: float) -> Callable:
+    """Cached local_height(frame, y) on a reference table (the clip's original tracks).
+
+    Swimmer size near a point is a property of the scene, so every relinked variant of a
+    clip is checked against the same reference.
+    """
+    det = reference[reference["track_id"] >= 0]
+
+    @lru_cache(maxsize=None)
+    def ref(frame: int, y: int):
+        return local_height(det, frame, y, fps)
+
+    return lambda frame, y: ref(int(frame), int(round(y)))
+
+
 class ClickScorer:
     """Precomputes a frame-sorted view of one clip's confirmed track rows."""
 
-    def __init__(self, table: pd.DataFrame, s: ScoreSettings = ScoreSettings()):
+    def __init__(
+        self, table: pd.DataFrame, ref_height: Callable | None = None, s: ScoreSettings = ScoreSettings()
+    ):
         t = table[table["track_id"] >= 0].sort_values("frame", kind="stable")
         self.f = t["frame"].to_numpy()
         self.id = t["track_id"].to_numpy()
         self.b = t[["bx1", "by1", "bx2", "by2"]].to_numpy(float)
+        h = t["by2"] - t["by1"]
+        self.track_h = t["track_id"].map(h.groupby(t["track_id"]).median()).to_numpy(float)
+        self.ref_height = ref_height
         self.s = s
 
     def held(self, frame: int, x: float, y: float) -> set[int]:
@@ -66,7 +93,11 @@ class ClickScorer:
         h = np.maximum(b[:, 3] - b[:, 1], 1e-6)
         inside = (b[:, 0] <= x) & (x <= b[:, 2]) & (b[:, 1] <= y) & (y <= b[:, 3])
         d = np.hypot((b[:, 0] + b[:, 2]) / 2 - x, (b[:, 1] + b[:, 3]) / 2 - y) / h
-        return {int(i) for i in self.id[lo:hi][inside | (d <= self.s.radius_h)]}
+        ok = inside | (d <= self.s.radius_h)
+        ref = self.ref_height(frame, y) if self.ref_height else None
+        if ref is not None:
+            ok &= np.maximum(h, self.track_h[lo:hi]) <= self.s.max_ratio * ref
+        return {int(i) for i in self.id[lo:hi][ok]}
 
     def score(self, c: Clicks) -> dict:
         """coverage and continuity for one path of clicks (NaN if no clicks)."""

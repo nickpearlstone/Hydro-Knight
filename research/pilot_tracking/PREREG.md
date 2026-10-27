@@ -88,7 +88,7 @@ also reported on the victims, marked as exploratory.
 - Pre-contact only, but relinking may use any frame of the clip (offline). An online
   version could only look backward; G bounds how far forward this one looks.
 
-## Amendment, 22:56 (after the first run, before the rerun)
+## Amendment, 22:50 (after the first run, before the rerun)
 
 The code-sanity review found problems. The first results had already been read when it
 arrived: the preregistered configuration (G 0.5 s, R 0.5) gave +0.011 continuity

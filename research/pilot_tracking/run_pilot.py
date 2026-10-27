@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from clickscore import ClickScorer, clicks_for, shifted_paths, translated_paths
+from clickscore import ClickScorer, clicks_for, local_height_fn, shifted_paths, translated_paths
 from hydro_knight.eval.protocol import ProtocolConfig, truths_from_records, victim_detected_share
 from hydro_knight.eval.victims import is_labeled, match_victim_tracks, near_path_tracks
 from hydro_knight.ingest.manifest import Manifest
@@ -31,6 +31,7 @@ TRACKS = MAIN / "data/keypoints_tiled"
 COLS = ["frame", "track_id", "bx1", "by1", "bx2", "by2"]
 GRID = [RelinkSettings(g, r) for g, r in itertools.product([0.5, 1, 2, 4], [0.5, 1, 2])]
 N_PATHS, N_RANDOM_RELINK = 20, 5
+VICTIMS_CSV = "victims_v2.csv"  # v1 (victims.csv) lacked the oversize rule; kept for the report
 
 
 def clips():
@@ -44,7 +45,9 @@ def clips():
         if not p.exists():
             continue
         prov = read_provenance(p)
-        fps = prov["video"]["fps"] / provenance_frame_step(prov)
+        assert provenance_frame_step(prov) == 1, "frame step > 1 untested"
+        # frame numbers keep the video's own numbering, so seconds = frame / video fps
+        fps = prov["video"]["fps"]
         yield r, pd.read_parquet(p, columns=COLS), fps
 
 
@@ -100,7 +103,7 @@ def run_gaps(out_dir: Path):
         .unstack()
         .round(3)
     )
-    summ["n"] = df.groupby(["max_gap_s", "max_dist_h"]).size() // 1
+    summ["n"] = df.groupby(["max_gap_s", "max_dist_h"]).size()
     print(summ)
     summ.to_csv(out_dir / "gaps_summary.csv")
 
@@ -119,8 +122,8 @@ def victim_detected(table, record, fps):
     return victim_detected_share(t, truth[record.clip_id], ProtocolConfig())
 
 
-def path_scores(table, paths):
-    sc = ClickScorer(table)
+def path_scores(table, paths, ref):
+    sc = ClickScorer(table, ref)
     vals = [sc.score(p) for p in paths]
     if not vals:
         return np.nan, np.nan
@@ -141,10 +144,12 @@ def run_victims(out_dir: Path):
         zone = zones.get(r.clip_id)
         moved = translated_paths(c, np.array(zone["points"]), N_PATHS, rng) if zone else []
 
+        ref = local_height_fn(table, fps)
+
         def row(name, tbl, n_links, s=None, **extra):
-            v = ClickScorer(tbl).score(c)
-            mcov, mcon = path_scores(tbl, moved)
-            scov, scon = path_scores(tbl, shifted)
+            v = ClickScorer(tbl, ref).score(c)
+            mcov, mcon = path_scores(tbl, moved, ref)
+            scov, scon = path_scores(tbl, shifted, ref)
             return dict(
                 clip=r.clip_id, method=name, n_clicks=len(c.frame), n_links=n_links,
                 max_gap_s=s.max_gap_s if s else np.nan, max_dist_h=s.max_dist_h if s else np.nan,
@@ -162,9 +167,11 @@ def run_victims(out_dir: Path):
             for k in range(N_RANDOM_RELINK):
                 rs = random_links(table, fps, s, len(succ), rng)
                 rows.append(row("random_relink", apply_links(table, rs), len(rs), s, draw=k))
+                gs = random_links(table, fps, s, len(succ), rng, gated=True)
+                rows.append(row("gated_random_relink", apply_links(table, gs), len(gs), s, draw=k))
         print(r.clip_id, len(c.frame), "clicks", flush=True)
     df = pd.DataFrame(rows)
-    df.to_csv(out_dir / "victims.csv", index=False)
+    df.to_csv(out_dir / VICTIMS_CSV, index=False)
 
 
 # ---------------------------------------------------------------- summary
@@ -178,7 +185,7 @@ def boot(x: np.ndarray, rng, n=2000):
 
 
 def summary(out_dir: Path, g: float, r: float):
-    df = pd.read_csv(out_dir / "victims.csv")
+    df = pd.read_csv(out_dir / VICTIMS_CSV)
     rng = np.random.default_rng(0)
     today = df[df.method == "today"].set_index("clip")
     sel = df[(df.max_gap_s == g) & (df.max_dist_h == r)]
@@ -186,13 +193,14 @@ def summary(out_dir: Path, g: float, r: float):
     per = {m: sel[sel.method == m].groupby("clip")[num].mean() for m in sel.method.unique()}
     per["today"] = today[num]
     lines = [f"Config G={g} s, R={r} box heights; {len(today)} clips\n"]
-    for m in ["today", "relink", "relink_fill", "random_relink"]:
+    methods = ["relink", "relink_fill", "random_relink", "gated_random_relink"]
+    for m in ["today", *methods]:
         p = per[m]
         for col in ["continuity", "coverage", "moved_continuity", "shifted_continuity", "detected"]:
             if col in p and p[col].notna().any():
                 mu, lo_, hi_ = boot(p[col].to_numpy(float), rng)
                 lines.append(f"{m:14s} {col:20s} {mu:.3f} [{lo_:.3f}, {hi_:.3f}]")
-    for m in ["relink", "relink_fill", "random_relink"]:
+    for m in methods:
         for col in ["continuity", "coverage", "moved_continuity", "shifted_continuity"]:
             d = (per[m][col] - per["today"][col]).dropna().to_numpy(float)
             mu, lo_, hi_ = boot(d, rng)
@@ -200,9 +208,10 @@ def summary(out_dir: Path, g: float, r: float):
                 f"diff {m:14s} {col:20s} {mu:+.3f} [{lo_:+.3f}, {hi_:+.3f}]  "
                 f"better {(d > 1e-9).sum()} same {(np.abs(d) <= 1e-9).sum()} worse {(d < -1e-9).sum()}"
             )
-    d = (per["relink"]["continuity"] - per["random_relink"]["continuity"]).to_numpy(float)
-    mu, lo_, hi_ = boot(d, rng)
-    lines.append(f"relink minus random_relink continuity {mu:+.3f} [{lo_:+.3f}, {hi_:+.3f}]")
+    for base in ["random_relink", "gated_random_relink"]:
+        d = (per["relink"]["continuity"] - per[base]["continuity"]).to_numpy(float)
+        mu, lo_, hi_ = boot(d, rng)
+        lines.append(f"relink minus {base} continuity {mu:+.3f} [{lo_:+.3f}, {hi_:+.3f}]")
     txt = "\n".join(lines)
     print(txt)
     (out_dir / f"summary_G{g}_R{r}.txt").write_text(txt + "\n")
