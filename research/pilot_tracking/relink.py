@@ -22,8 +22,12 @@ BOX = ["bx1", "by1", "bx2", "by2"]
 
 @dataclass(frozen=True)
 class RelinkSettings:
-    max_gap_s: float = 1.0  # G: latest start of the later track after the earlier one ends
-    max_dist_h: float = 1.0  # R: center distance, in heights of the earlier track's last box
+    max_gap_s: float = (
+        1.0  # G: latest start of the later track after the earlier one ends
+    )
+    max_dist_h: float = (
+        1.0  # R: center distance, in heights of the earlier track's last box
+    )
     max_height_ratio: float = 1.5  # S: larger / smaller box height at the join
 
 
@@ -55,8 +59,12 @@ def candidate_pairs(
         cand = starts.iloc[lo:hi]
         ha = r["e_by2"] - r["e_by1"]
         hb = (cand["s_by2"] - cand["s_by1"]).to_numpy()
-        dx = (cand["s_bx1"] + cand["s_bx2"]).to_numpy() / 2 - (r["e_bx1"] + r["e_bx2"]) / 2
-        dy = (cand["s_by1"] + cand["s_by2"]).to_numpy() / 2 - (r["e_by1"] + r["e_by2"]) / 2
+        dx = (cand["s_bx1"] + cand["s_bx2"]).to_numpy() / 2 - (
+            r["e_bx1"] + r["e_bx2"]
+        ) / 2
+        dy = (cand["s_by1"] + cand["s_by2"]).to_numpy() / 2 - (
+            r["e_by1"] + r["e_by2"]
+        ) / 2
         dist = np.hypot(dx, dy) / max(ha, 1e-6)
         ratio = np.maximum(hb, ha) / np.maximum(np.minimum(hb, ha), 1e-6)
         ok = np.ones(len(cand), bool)
@@ -66,7 +74,9 @@ def candidate_pairs(
     return pd.DataFrame(rows, columns=["a", "b", "dist"])
 
 
-def greedy_links(pairs: pd.DataFrame, order: np.ndarray, limit: int | None = None) -> dict:
+def greedy_links(
+    pairs: pd.DataFrame, order: np.ndarray, limit: int | None = None
+) -> dict:
     """One-to-one joins taken in `order` (indices into pairs); returns successor map a -> b."""
     succ, pred = {}, set()
     a_col, b_col = pairs["a"].to_numpy(), pairs["b"].to_numpy()
@@ -141,7 +151,11 @@ def apply_links(table: pd.DataFrame, succ: dict, fill: bool = False) -> pd.DataF
             boxes = b0 + w * (b1 - b0)
             rows.append(
                 pd.DataFrame(
-                    {"frame": frames, "track_id": a, **dict(zip(BOX, boxes.T, strict=True))}
+                    {
+                        "frame": frames,
+                        "track_id": a,
+                        **dict(zip(BOX, boxes.T, strict=True)),
+                    }
                 ).assign(virtual=True)
             )
         if rows:

@@ -67,7 +67,18 @@ print("raw det near click (conf>=.25):", df.raw.mean().round(3))
 print("raw det conf>=0.5 near click:", (df.raw_conf >= 0.5).mean().round(3))
 print("confirmed track near click:", df.tracked.mean().round(3))
 print("raw but not tracked:", (df.raw & ~df.tracked).mean().round(3))
-print("raw conf quantiles:", df.raw_conf.quantile([0.1, 0.25, 0.5, 0.75]).round(2).tolist())
-print("victim box h quantiles:", df.raw_h.quantile([0.1, 0.25, 0.5, 0.75]).round(0).tolist())
+print(
+    "raw conf quantiles:",
+    df.raw_conf.quantile([0.1, 0.25, 0.5, 0.75]).round(2).tolist(),
+)
+print(
+    "victim box h quantiles:",
+    df.raw_h.quantile([0.1, 0.25, 0.5, 0.75]).round(0).tolist(),
+)
 pc = df.groupby("clip")[["raw", "tracked"]].mean()
-print("per clip raw/tracked median:", pc.median().round(2).tolist(), "clips with 0 tracked:", (pc.tracked == 0).sum())
+print(
+    "per clip raw/tracked median:",
+    pc.median().round(2).tolist(),
+    "clips with 0 tracked:",
+    (pc.tracked == 0).sum(),
+)

@@ -73,14 +73,19 @@ class ClickScorer:
     """Precomputes a frame-sorted view of one clip's confirmed track rows."""
 
     def __init__(
-        self, table: pd.DataFrame, ref_height: Callable | None = None, s: ScoreSettings = ScoreSettings()
+        self,
+        table: pd.DataFrame,
+        ref_height: Callable | None = None,
+        s: ScoreSettings = ScoreSettings(),
     ):
         t = table[table["track_id"] >= 0].sort_values("frame", kind="stable")
         self.f = t["frame"].to_numpy()
         self.id = t["track_id"].to_numpy()
         self.b = t[["bx1", "by1", "bx2", "by2"]].to_numpy(float)
         h = t["by2"] - t["by1"]
-        self.track_h = t["track_id"].map(h.groupby(t["track_id"]).median()).to_numpy(float)
+        self.track_h = (
+            t["track_id"].map(h.groupby(t["track_id"]).median()).to_numpy(float)
+        )
         self.ref_height = ref_height
         self.s = s
 
@@ -125,8 +130,16 @@ def translated_paths(
     for _ in range(tries):
         if len(out) == n:
             break
-        dx = rng.uniform(x0 - c.x.min(), x1 - c.x.max()) if x1 - x0 > np.ptp(c.x) else None
-        dy = rng.uniform(y0 - c.y.min(), y1 - c.y.max()) if y1 - y0 > np.ptp(c.y) else None
+        dx = (
+            rng.uniform(x0 - c.x.min(), x1 - c.x.max())
+            if x1 - x0 > np.ptp(c.x)
+            else None
+        )
+        dy = (
+            rng.uniform(y0 - c.y.min(), y1 - c.y.max())
+            if y1 - y0 > np.ptp(c.y)
+            else None
+        )
         if dx is None or dy is None:
             break
         if poly.contains_points(np.c_[c.x + dx, c.y + dy]).all():
