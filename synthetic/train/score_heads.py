@@ -17,6 +17,9 @@ boxes centred outside the zone, are ignored: neither found nor false.
 Models are compared at MATCHED false boxes over all 10 frames (20 / 50 / 100), so a detector that
 fires everywhere cannot win, plus the raw numbers at conf 0.25.
 
+--val scores Nick's 12 head-validation frames (count.VAL_PATH, dots) instead, for picking a seed and
+checkpoint; the test frames are scored only once, on the pick. Results go to head_scores_val.json.
+
     uv run --with transformers python synthetic/train/score_heads.py \\
         rtdetr=synthetic/renders/train/rtdetrv2_head/best yolo=runs/yolo11n_head/weights/best.pt \\
         ref11n=scratch/heads/11n-head.pt
@@ -161,18 +164,14 @@ def in_range_split(frame, img, zone):
 
 def main():
     in_range = "--in-range" in sys.argv
-    sys.argv = [x for x in sys.argv if x != "--in-range"]
-    gt = json.loads(count.COUNT_PATH.read_text())["frames"]
+    val = "--val" in sys.argv
+    sys.argv = [x for x in sys.argv if x not in ("--in-range", "--val")]
+    gt = count.load(count.VAL_PATH if val else count.COUNT_PATH)["frames"]
     frames = [f for f in gt if f["water"]]
     for f in frames:  # reviewed head boxes replace the dots (count.head_truth)
         f["water"], f["deck"] = count.head_truth(f)
         f["hidden"] = []
-    imgs = {
-        f"{f['clip_id']}_{f['frame']}": cv2.imread(
-            f"raw_local/pose_bench/{f['clip_id']}_{f['frame']}.png"
-        )
-        for f in frames
-    }
+    imgs = {f"{f['clip_id']}_{f['frame']}": count.read_frame(f) for f in frames}
     if in_range:  # out-of-range clicks become "allowed" points like deck clicks
         zs = zones.load()
         for f in frames:
@@ -217,7 +216,7 @@ def main():
         print(name, json.dumps(res), flush=True)
     Path("synthetic/renders/train").mkdir(parents=True, exist_ok=True)
     Path(
-        f"synthetic/renders/train/head_scores{'_in_range' if in_range else ''}.json"
+        f"synthetic/renders/train/head_scores{'_in_range' if in_range else ''}{'_val' if val else ''}.json"
     ).write_text(json.dumps(results, indent=1))
 
 
