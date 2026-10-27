@@ -87,3 +87,29 @@ also reported on the victims, marked as exploratory.
   going under. The real wrong-join rate on victims may be higher.
 - Pre-contact only, but relinking may use any frame of the clip (offline). An online
   version could only look backward; G bounds how far forward this one looks.
+
+## Amendment, 22:56 (after the first run, before the rerun)
+
+The code-sanity review found problems. The first results had already been read when it
+arrived: the preregistered configuration (G 0.5 s, R 0.5) gave +0.011 continuity
+[+0.000, +0.029], with 2 clips better and 44 the same. Those numbers stay in the report as
+the original metric. Changes for the rerun:
+
+1. **Oversize boxes no longer hold a click.** Same rule as the matcher: a box taller than
+   3 times the local typical height (`local_height` in `eval/victims.py`), at that moment or
+   as its track's median, is skipped. Without it, lifeguard boxes counted as the victim in
+   7 clips.
+2. **Success criteria 2 and 3 can't fail.** Joining ids only merges them, so continuity can
+   never drop and "worse" is always 0. The criteria that carry weight are the comparison with
+   random relinking and the wrong-join rate. A stricter random baseline is added:
+   **gated random relinking**, which makes the same number of joins with partners drawn at
+   random from pairs that pass the same distance and size gates. It tests "closest first"
+   against "anything nearby". The success rule becomes: relinked minus gated-random
+   continuity has a 95% interval above 0, at the configuration chosen by the gap check.
+3. **The time-shifted path is a "same place, other moment" control, not a null.** Victims
+   often stay put, so it can still be the victim. The moved path inside the pool zone is
+   the null.
+4. Frame numbers keep the video's own numbering, so seconds = frame / video fps (identical
+   today, since every file has frame step 1).
+
+The configuration choice (gap check, no victim labels) doesn't change: G 0.5 s, R 0.5.
