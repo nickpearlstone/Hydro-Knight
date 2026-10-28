@@ -5,6 +5,11 @@
     uv run hydroknight eval protocol runs/stack_mvp --size ranker
     uv run hydroknight stack video CLIP_ID            # ghost timers drawn on a clip, to time by hand
 
+Head tracks (RT-DETR head boxes in data/detections_heads/raw/, from Kaggle hk-heads-detect):
+
+    uv run hydroknight stack heads-track              # merge + track + weak flag -> tracks_kept/
+    uv run hydroknight stack heads-run                # churn + size flicker -> runs/stack_heads_{rank,raw}
+
 `fit` writes a run folder in the format `hydroknight eval protocol` reads (summary.json +
 alarms_<name>_s<seed>.parquet), one <name> per scorer, so every scorer gets the same
 protocol report, baselines and bootstrap.
@@ -123,6 +128,74 @@ def cmd_video(args) -> None:
         print(f"{cid}: {out or 'not written (ffmpeg or video missing)'}")
 
 
+def cmd_heads_track(args) -> None:
+    from hydro_knight.stack import heads
+
+    kept, ev = heads.HEADS / "tracks_kept", heads.HEADS / "tracks_eval"
+    kept.mkdir(exist_ok=True)
+    ev.mkdir(exist_ok=True)
+    for p in sorted((heads.HEADS / "raw").glob("*.npz")):
+        if (kept / f"{p.stem}.parquet").exists() and not args.force:
+            continue
+        t0 = time.time()
+        df = heads.track_clip(p.stem)
+        df.to_parquet(kept / f"{p.stem}.parquet", index=False)
+        heads.write_eval_tracks(df, p.stem, ev)
+        print(
+            f"{p.stem}: {df.track_id.nunique()} tracks, {time.time() - t0:.0f} s",
+            flush=True,
+        )
+
+
+def cmd_heads_run(args) -> None:
+    from hydro_knight.annotate import zones
+    from hydro_knight.ingest.manifest import Manifest
+    from hydro_knight.stack import heads
+
+    base = json.loads((Path(args.base) / "summary.json").read_text())["reports"]
+    clips = base[str(args.seeds[0])]["used_test"]
+    recs = {
+        r.clip_id: r for r in Manifest(Path("data/manifests/pool_footage.jsonl")).load()
+    }
+    zs = zones.load()
+    parts, vt, pf = [], {}, {}
+    for cid in clips:
+        rows, click, frags = heads.clip_rows(recs[cid], zs.get(cid), zones.in_zone)
+        parts.append(rows)
+        vt[cid], pf[cid] = click + frags, frags
+        print(
+            f"{cid}: {len(rows)} rows, victim {len(click)} + {len(frags)} fragments",
+            flush=True,
+        )
+    rows = pd.concat(parts, ignore_index=True)
+    for name in ("rank", "raw"):
+        out = Path(f"{args.run}_{name}")
+        out.mkdir(parents=True, exist_ok=True)
+        reports = {}
+        for seed in args.seeds:
+            rep = dict(base[str(seed)])
+            score = (
+                heads.rank_score(rows)
+                if name == "rank"
+                else heads.raw_score(rows, rep["folds"])
+            )
+            rows[["clip_id", "track_id", "t"]].assign(
+                score=score, fold=rows.clip_id.map(rep["folds"])
+            ).to_parquet(out / f"alarms_small_s{seed}.parquet", index=False)
+            reports[str(seed)] = rep | {
+                "victim_tracks": vt,
+                "path_fragments": pf,
+                "unmatched_clicks": {},
+            }
+        (out / "summary.json").write_text(
+            json.dumps({"reports": reports, "base": args.base, "score": name}, indent=1)
+        )
+        print(
+            f"wrote {out}: uv run hydroknight eval protocol {out} "
+            f"--tracks-dir {heads.HEADS / 'tracks_eval'}"
+        )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -135,8 +208,26 @@ def main() -> None:
     v = sub.add_parser("video", help="ghost timers drawn on clips, to time by hand")
     v.add_argument("clips", nargs="+")
     v.add_argument("--run", default=str(RUN))
+    ht = sub.add_parser(
+        "heads-track", help="RT-DETR head boxes -> weak-kept head tracks"
+    )
+    ht.add_argument("--force", action="store_true")
+    hr = sub.add_parser(
+        "heads-run", help="churn + size flicker -> protocol run folders"
+    )
+    hr.add_argument("--run", default="runs/stack_heads")
+    hr.add_argument(
+        "--base", default="runs/v2_kfold_small", help="clips, folds, seeds from here"
+    )
+    hr.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
     args = ap.parse_args()
-    {"rows": cmd_rows, "fit": cmd_fit, "video": cmd_video}[args.cmd](args)
+    {
+        "rows": cmd_rows,
+        "fit": cmd_fit,
+        "video": cmd_video,
+        "heads-track": cmd_heads_track,
+        "heads-run": cmd_heads_run,
+    }[args.cmd](args)
 
 
 if __name__ == "__main__":
