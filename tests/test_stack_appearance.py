@@ -72,3 +72,31 @@ def test_unembedded_rows_stay_nan():
 def test_whole_frame_input_keeps_aspect_in_multiples_of_32():
     assert whole_frame.input_size(1920, 1080, 640) == (640, 352)
     assert whole_frame.input_size(1280, 720, 1280) == (1280, 704)
+
+
+def _frag(tid, f0, f1, x, h=20.0):
+    f = np.arange(f0, f1)
+    return pd.DataFrame(
+        {"frame": f, "track_id": tid, "x0": x, "y0": 100.0, "x1": x + h, "y1": 100 + h}
+    )
+
+
+def test_stitch_joins_a_nearby_fragment_and_leaves_far_ones():
+    from hydro_knight.stack import stitch
+
+    t = pd.concat(
+        [_frag(1, 0, 30, 50), _frag(2, 40, 70, 54), _frag(3, 40, 70, 400)],
+        ignore_index=True,
+    )
+    s = stitch.stitch(t, 30.0, stitch.StitchSettings(1.0, 0.5))
+    assert set(s[s.frame >= 40].track_id) == {1, 3}
+    assert stitch.stitch(t, 30.0, stitch.StitchSettings(0.2, 0.5)).equals(
+        t
+    )  # gap too long
+
+
+def test_gap_check_counts_a_clean_rejoin():
+    from hydro_knight.stack import stitch
+
+    t = _frag(5, 0, 300, 50)
+    assert stitch.gap_check(t, 30.0, stitch.StitchSettings(4.0, 0.5)) == (1, 1, 0)

@@ -40,6 +40,7 @@ PATH_R = (
 VICTIM_ID = 999_999  # one track id for the victim's rows (the tracker's ids never get this high)
 WINDOW_S = 2.0
 STEP_S = 0.5  # row spacing (the protocol's rank timeline step)
+STITCH = None  # stitch.StitchSettings to join track fragments before features (heads-rows --stitch)
 
 
 def read_meta(clip_id: str) -> dict:
@@ -232,7 +233,12 @@ def clip_rows(record, zone, in_zone) -> tuple[pd.DataFrame, pd.DataFrame]:
     meta = read_meta(cid)
     fps, step = meta["fps"], meta["step"]
     d = pd.read_parquet(HEADS / "tracks_kept" / f"{cid}.parquet")
-    d = with_geometry(d[d.track_id >= 0])
+    d = d[d.track_id >= 0]
+    if STITCH is not None:
+        from .stitch import stitch
+
+        d = stitch(d, fps, STITCH)
+    d = with_geometry(d)
     click, frags = victim_tracks(d, record, fps, step)
     d = add_features(d, fps)  # per tracker track, before any relabelling
     d["label"] = victim_label(d, record, fps, click + frags)

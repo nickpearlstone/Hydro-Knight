@@ -215,6 +215,10 @@ def cmd_heads_rows(args) -> None:
         r.clip_id: r for r in Manifest(Path("data/manifests/pool_footage.jsonl")).load()
     }
     zs = zones.load()
+    if args.stitch:
+        from hydro_knight.stack.stitch import StitchSettings
+
+        heads.STITCH = StitchSettings(*args.stitch)
     run = Path(args.run)
     run.mkdir(parents=True, exist_ok=True)
     parts, meta = [], {}
@@ -256,7 +260,7 @@ def cmd_heads_rows(args) -> None:
         )
     pd.concat(parts, ignore_index=True).to_parquet(run / "rows.parquet")
     (run / "clips.json").write_text(
-        json.dumps({"base": args.base, "clips": meta}, indent=1)
+        json.dumps({"base": args.base, "stitch": args.stitch, "clips": meta}, indent=1)
     )
     print(f"wrote {run}/rows.parquet ({len(meta)} clips)")
 
@@ -411,6 +415,13 @@ def main() -> None:
     hw.add_argument("--base", default="runs/v2_kfold_small", help="clips from here")
     hw.add_argument(
         "--splash-from", help="rows.parquet of an earlier run: reuse its splash"
+    )
+    hw.add_argument(
+        "--stitch",
+        nargs=2,
+        type=float,
+        metavar=("GAP_S", "DIST_H"),
+        help="join track fragments first (gap-check pick on whole-frame heads: 2 0.5)",
     )
     hf = sub.add_parser(
         "heads-fit", help="v3 within-moment ranker, base run's folds and seeds"
