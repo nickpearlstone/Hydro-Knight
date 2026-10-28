@@ -10,6 +10,9 @@ Head tracks (RT-DETR head boxes in data/detections_heads/raw/, from Kaggle hk-he
     uv run hydroknight stack heads-track              # merge + track + weak flag -> tracks_kept/
     uv run hydroknight stack heads-run                # churn + size flicker -> runs/stack_heads_{rank,raw}
     uv run hydroknight stack heads-rows               # v3 rows: head features + splash -> runs/v3_ranker
+    uv run hydroknight stack heads-embed              # DINOv2 crop embeddings, cached per track (heads extra)
+    uv run hydroknight stack heads-fit --appear       # v3 ranker + appearance feature (size ranker_appear)
+    uv run hydroknight stack heads-detect             # whole-frame head boxes on this machine (no tiles)
     uv run hydroknight stack heads-fit                # v3: within-moment ranker, v2's folds and seeds
 
 `fit` writes a run folder in the format `hydroknight eval protocol` reads (summary.json +
@@ -269,12 +272,24 @@ def cmd_heads_fit(args) -> None:
     base = json.loads((Path(meta["base"]) / "summary.json").read_text())["reports"]
     clips = meta["clips"]
     F = heads.v3_features(rows)
+    names = ["ranker", "equal"]
+    if args.appear:
+        from hydro_knight.stack import appearance
+
+        a = np.load(run / "appear.npz")
+        X = np.full((len(rows), a["emb"].shape[1]), np.nan, np.float32)
+        X[a["idx"]] = a["emb"]
+        every = float(a["every"])
+        g = rank.training_groups(rows, clips)
+        labelled = rows.index.isin(g.index)
+        names.append("ranker_appear")
+        print(f"appearance: {len(a['idx'])} embedded rows, cache every {every} s")
     reports = {}
     for seed in args.seeds:
         rep = dict(base[str(seed)])
         folds = rep["folds"]
         fold = rows.clip_id.map(folds).to_numpy()
-        scores = {k: np.full(len(rows), np.nan) for k in ("ranker", "equal")}
+        scores = {k: np.full(len(rows), np.nan) for k in names}
         weights = {}
         for f in sorted(set(folds.values())):
             test = fold == f
@@ -290,6 +305,23 @@ def cmd_heads_fit(args) -> None:
             )
             scores["ranker"][test] = Z[test][heads.V3_FEATURES].to_numpy() @ w
             scores["equal"][test] = Z[test][heads.V3_SIGNED].sum(1).to_numpy()
+            if args.appear:
+                ap = appearance.stacked_feature(
+                    X, rows.victim.to_numpy(), labelled, fold, f
+                )
+                Fa = F.assign(f_appear=appearance.carry_forward(rows, ap, every))
+                Za = rank.Scaler.fit(Fa[~test])(Fa)
+                feats = [*heads.V3_FEATURES, "f_appear"]
+                wa = rank.fit_ranker(
+                    Za[~test],
+                    rank.training_groups(rows[~test], clips),
+                    feats,
+                    [*heads.V3_SIGNED, "f_appear"],
+                )
+                weights[f]["with_appear"] = dict(
+                    zip(feats, np.round(wa, 3).tolist(), strict=True)
+                )
+                scores["ranker_appear"][test] = Za[test][feats].to_numpy() @ wa
         for name, s in scores.items():
             rows[["clip_id", "track_id", "t"]].assign(
                 score=rank.relative(rows, s), fold=fold
@@ -307,6 +339,46 @@ def cmd_heads_fit(args) -> None:
     print(
         f"wrote {run}: uv run hydroknight eval protocol {run} --size ranker "
         f"--tracks-dir {run / 'tracks'}"
+    )
+
+
+def cmd_heads_embed(args) -> None:
+    import numpy as np
+
+    from hydro_knight.stack import appearance
+
+    run = Path(args.run)
+    rows = pd.read_parquet(run / "rows.parquet")
+    clips = json.loads((run / "clips.json").read_text())["clips"]
+    pick = appearance.cache_rows(rows, args.every)
+    print(f"{pick.sum()} of {len(rows)} rows get a crop (cache every {args.every} s)")
+    emb = appearance.embed_rows(
+        rows[pick],
+        {c: m["fps"] for c, m in clips.items()},
+        Path(args.videos),
+        appearance.Embedder(),
+    )
+    np.savez(
+        run / "appear.npz",
+        idx=np.flatnonzero(pick),
+        emb=emb,
+        every=args.every,
+        model=appearance.MODEL,
+    )
+    print(
+        f"wrote {run}/appear.npz; next: hydroknight stack heads-fit --run {run} --appear"
+    )
+
+
+def cmd_heads_detect(args) -> None:
+    from hydro_knight.stack import whole_frame
+
+    whole_frame.detect_clips(
+        args.clips or None,
+        Path(args.model),
+        Path(args.out),
+        args.width,
+        args.base,
     )
 
 
@@ -345,7 +417,42 @@ def main() -> None:
     )
     hf.add_argument("--run", default="runs/v3_ranker")
     hf.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
+    hf.add_argument(
+        "--appear",
+        action="store_true",
+        help="add the appearance feature (run heads-embed first) as size ranker_appear",
+    )
+    he = sub.add_parser(
+        "heads-embed", help="frozen DINOv2 embeddings of head-and-shoulder crops"
+    )
+    he.add_argument("--run", default="runs/v3_ranker")
+    he.add_argument(
+        "--every",
+        type=float,
+        default=2.0,
+        help="one crop per track per this many seconds, carried forward (0 = every row)",
+    )
+    he.add_argument("--videos", default="raw_local")
+    hd = sub.add_parser(
+        "heads-detect",
+        help="head detector on the whole frame (no tiles), on this machine",
+    )
+    hd.add_argument("clips", nargs="*", help="default: the base run's clips")
+    hd.add_argument("--model", default="data/detections_heads/model_rtdetr_v7_s1")
+    hd.add_argument("--out", default="data/detections_heads_whole")
+    hd.add_argument("--width", type=int, default=640)
+    hd.add_argument("--base", default="runs/v2_kfold_small", help="clips from here")
+    for p in (ht, hw):
+        p.add_argument(
+            "--heads-dir",
+            default="data/detections_heads",
+            help="raw/ in, tracks_kept/ out (data/detections_heads_whole for no tiling)",
+        )
     args = ap.parse_args()
+    if getattr(args, "heads_dir", None):
+        from hydro_knight.stack import heads
+
+        heads.HEADS = Path(args.heads_dir)
     {
         "rows": cmd_rows,
         "fit": cmd_fit,
@@ -354,6 +461,8 @@ def main() -> None:
         "heads-run": cmd_heads_run,
         "heads-rows": cmd_heads_rows,
         "heads-fit": cmd_heads_fit,
+        "heads-embed": cmd_heads_embed,
+        "heads-detect": cmd_heads_detect,
     }[args.cmd](args)
 
 
