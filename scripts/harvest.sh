@@ -51,7 +51,7 @@ git commit -q -m "Harvest ${STAMP}: new clips and Claude labels (pending review)
 
 ${SUMMARY}
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+"
 git push -q -u origin "$BRANCH"
 gh pr create --base main --head "$BRANCH" \
   --title "Harvest ${STAMP}: new clips (labels pending review)" \

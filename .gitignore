@@ -55,14 +55,15 @@ wandb/
 # Model weight files (auto-downloaded, large, not source)
 *.pt
 
-# Extracted keypoint tables — regenerable from video; can be large.
-# (commit strategy for the final training set TBD; ignored during dev)
-data/keypoints/
-data/keypoints_*/
-
-# Raw tiled detections from extraction — large, regenerable from video
-data/detections/
-data/detections_*/
+# data/ is an allowlist: everything in it is ignored unless named below. Detections,
+# keypoint tables and anything a new script writes stay out by default; committing a
+# new kind of data takes a deliberate edit here. The named files are small, hold no
+# pixels, and can't be regenerated: they are the reproducibility record.
+data/*
+!data/manifests/
+!data/annotations/
+!data/harvest/
+!data/blocklist.txt
 
 # Raw video files are never committed (size, copyright, privacy)
 raw_local/
@@ -71,9 +72,6 @@ raw_local/
 *.webm
 *.avi
 *.mov
-
-# Manifests and annotations ARE committed — they are the reproducibility record
-# (no ignore rules for data/manifests/ or data/annotations/)
 
 # --- Python ---
 # Byte-compiled / optimized / DLL files
