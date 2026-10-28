@@ -34,6 +34,10 @@ HEADS = Path("data/detections_heads")
 FLOOR = 0.1  # ByteTrack's second round never looks below this
 WEAK_BELOW = 0.4
 MATCH = 1.5  # head heights
+PATH_R = (
+    2.0  # a victim-track row counts as the victim only this close to the click path
+)
+VICTIM_ID = 999_999  # one track id for the victim's rows (the tracker's ids never get this high)
 WINDOW_S = 2.0
 STEP_S = 0.5  # row spacing (the protocol's rank timeline step)
 
@@ -91,6 +95,7 @@ def track_clip(clip_id: str) -> pd.DataFrame:
 def write_eval_tracks(df: pd.DataFrame, clip_id: str, out: Path) -> None:
     """Confirmed (frame, track_id) with fps provenance, the form `eval protocol --tracks-dir` reads."""
     meta = read_meta(clip_id)
+    out.mkdir(parents=True, exist_ok=True)
     tab = pa.Table.from_pandas(
         df.loc[df.track_id >= 0, ["frame", "track_id"]].reset_index(drop=True),
         preserve_index=False,
@@ -184,15 +189,57 @@ def add_features(d: pd.DataFrame, fps: float) -> pd.DataFrame:
     return d.assign(**cols)
 
 
-def clip_rows(record, zone, in_zone) -> tuple[pd.DataFrame, list[int], list[int]]:
-    """Scored rows (clip_id, track_id, t, features, head box, victim) every ~STEP_S in the zone."""
+def victim_label(d: pd.DataFrame, record, fps: float, tracks) -> np.ndarray:
+    """Per row: 1 victim, 0 someone else, -1 unknown (dropped). d needs frame, track_id, cx, cy, hh.
+
+    Whole-track labels go wrong when a track switches people or a neighbour drifts along the
+    victim's path (644cb555b4d9: a matched track started 250 px away, 7 s before onset). So a row
+    of a victim track is the victim only within PATH_R head heights of where the clicks put the
+    victim at that time: the interpolated click path between the first and last click, else the
+    nearest click if it is at most 1 s away. One row per frame at most (the nearest); the other
+    rows of victim tracks are unknown. Rows of other tracks stay 0.
+    """
+    clicks = sorted(record.events[0]["victim"], key=lambda c: c["t"])
+    ct = np.array([record.to_file_time(c["t"]) for c in clicks])
+    t = d.frame.to_numpy() / fps
+    px = np.interp(t, ct, [c["x"] for c in clicks])
+    py = np.interp(t, ct, [c["y"] for c in clicks])
+    dist = np.hypot(d.cx.to_numpy() - px, d.cy.to_numpy() - py) / np.maximum(
+        d.hh.to_numpy(), 1
+    )
+    gap = np.where(
+        (t >= ct[0]) & (t <= ct[-1]), 0, np.minimum(abs(t - ct[0]), abs(t - ct[-1]))
+    )
+    on = d.track_id.isin(tracks).to_numpy()
+    ok = on & (dist <= PATH_R) & (gap <= 1.0)
+    label = np.where(on, -1, 0)
+    if ok.any():
+        cand = pd.DataFrame(
+            {"frame": d.frame.to_numpy()[ok], "dist": dist[ok]},
+            index=np.flatnonzero(ok),
+        )
+        label[cand.groupby("frame").dist.idxmin().to_numpy()] = 1
+    return label
+
+
+def clip_rows(record, zone, in_zone) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Scored rows every ~STEP_S in the zone, and the clip's (frame, track_id) for the protocol.
+
+    Rows: clip_id, track_id (VICTIM_ID for the victim), src_track (the tracker's id), t, features,
+    head box, victim. Rows victim_label() can't attribute are dropped from both tables.
+    """
     cid = record.clip_id
     meta = read_meta(cid)
     fps, step = meta["fps"], meta["step"]
     d = pd.read_parquet(HEADS / "tracks_kept" / f"{cid}.parquet")
     d = with_geometry(d[d.track_id >= 0])
     click, frags = victim_tracks(d, record, fps, step)
-    d = add_features(d, fps)
+    d = add_features(d, fps)  # per tracker track, before any relabelling
+    d["label"] = victim_label(d, record, fps, click + frags)
+    d = d[d.label >= 0]
+    d["src_track"] = d.track_id
+    d.loc[d.label == 1, "track_id"] = VICTIM_ID
+    tracks = d[["frame", "track_id"]].reset_index(drop=True)
     start = 0.0 if record.trim_start is None else record.to_file_time(record.trim_start)
     end = (
         d.frame.max() / fps
@@ -212,6 +259,7 @@ def clip_rows(record, zone, in_zone) -> tuple[pd.DataFrame, list[int], list[int]
         {
             "clip_id": cid,
             "track_id": w.track_id.to_numpy(),
+            "src_track": w.src_track.to_numpy(),
             "t": w.frame.to_numpy() / fps,
             "churn": w.churn.to_numpy(),
             "size_flick": w.size_flick.to_numpy(),
@@ -222,10 +270,10 @@ def clip_rows(record, zone, in_zone) -> tuple[pd.DataFrame, list[int], list[int]
             "y": w.cy.to_numpy(),
             "hh": w.hh.to_numpy(),
             "hw": (w.x1 - w.x0).to_numpy(),
-            "victim": w.track_id.isin(click + frags).to_numpy(),
+            "victim": (w.label == 1).to_numpy(),
         }
     )
-    return rows, click, frags
+    return rows, tracks
 
 
 def rank_score(rows: pd.DataFrame) -> np.ndarray:

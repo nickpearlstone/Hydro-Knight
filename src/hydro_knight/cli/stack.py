@@ -162,12 +162,12 @@ def cmd_heads_run(args) -> None:
     zs = zones.load()
     parts, vt, pf = [], {}, {}
     for cid in clips:
-        rows, click, frags = heads.clip_rows(recs[cid], zs.get(cid), zones.in_zone)
+        rows, tracks = heads.clip_rows(recs[cid], zs.get(cid), zones.in_zone)
+        heads.write_eval_tracks(tracks, cid, Path(f"{args.run}_tracks"))
         parts.append(rows)
-        vt[cid], pf[cid] = click + frags, frags
+        vt[cid], pf[cid] = [heads.VICTIM_ID], []
         print(
-            f"{cid}: {len(rows)} rows, victim {len(click)} + {len(frags)} fragments",
-            flush=True,
+            f"{cid}: {len(rows)} rows, victim rows {int(rows.victim.sum())}", flush=True
         )
     rows = pd.concat(parts, ignore_index=True)
     for name in ("rank", "raw"):
@@ -194,7 +194,7 @@ def cmd_heads_run(args) -> None:
         )
         print(
             f"wrote {out}: uv run hydroknight eval protocol {out} "
-            f"--tracks-dir {heads.HEADS / 'tracks_eval'}"
+            f"--tracks-dir {args.run}_tracks"
         )
 
 
@@ -215,26 +215,42 @@ def cmd_heads_rows(args) -> None:
     run = Path(args.run)
     run.mkdir(parents=True, exist_ok=True)
     parts, meta = [], {}
+    old = pd.read_parquet(args.splash_from) if args.splash_from else None
     t0 = time.time()
     for cid in clips:
         r = recs[cid]
-        rows, click, frags = heads.clip_rows(r, zs.get(cid), zones.in_zone)
+        rows, tracks = heads.clip_rows(r, zs.get(cid), zones.in_zone)
+        heads.write_eval_tracks(tracks, cid, run / "tracks")
         fps = heads.read_meta(cid)["fps"]
-        # add_splash sizes its patches as 0.3 x w, so w = head width / 0.3 gives head-sized patches
-        rows = add_splash(
-            rows.assign(w=rows.hw / 0.3),
-            SimpleNamespace(clip_id=cid, fps=fps, zone=zs.get(cid)),
-        ).drop(columns="w")
+        if old is not None:  # splash depends only on the tracker's box: reuse it
+            prev = old.loc[
+                old.clip_id == cid,
+                ["src_track" if "src_track" in old else "track_id", "t", "splash"],
+            ]
+            rows = rows.merge(
+                prev.set_axis(["src_track", "t", "splash"], axis=1),
+                on=["src_track", "t"],
+                how="left",
+            )
+        else:
+            # add_splash sizes its patches as 0.3 x w, so w = head width / 0.3 gives head-sized patches
+            rows = add_splash(
+                rows.assign(w=rows.hw / 0.3),
+                SimpleNamespace(clip_id=cid, fps=fps, zone=zs.get(cid)),
+            ).drop(columns="w")
         parts.append(rows)
         ev = r.events[0]
         meta[cid] = {
             "fps": fps,
             "onset": r.to_file_time(ev["start"]),
             "contact": r.to_file_time(ev["contact"]),
-            "victim_tracks": click + frags,
-            "path_fragments": frags,
+            "victim_tracks": [heads.VICTIM_ID],
+            "path_fragments": [],
         }
-        print(f"{cid}: {len(rows)} rows, {time.time() - t0:.0f} s", flush=True)
+        print(
+            f"{cid}: {len(rows)} rows, victim rows {int(rows.victim.sum())}, {time.time() - t0:.0f} s",
+            flush=True,
+        )
     pd.concat(parts, ignore_index=True).to_parquet(run / "rows.parquet")
     (run / "clips.json").write_text(
         json.dumps({"base": args.base, "clips": meta}, indent=1)
@@ -290,7 +306,7 @@ def cmd_heads_fit(args) -> None:
     )
     print(
         f"wrote {run}: uv run hydroknight eval protocol {run} --size ranker "
-        f"--tracks-dir {heads.HEADS / 'tracks_eval'}"
+        f"--tracks-dir {run / 'tracks'}"
     )
 
 
@@ -321,6 +337,9 @@ def main() -> None:
     hw = sub.add_parser("heads-rows", help="v3 rows: head-track features + splash")
     hw.add_argument("--run", default="runs/v3_ranker")
     hw.add_argument("--base", default="runs/v2_kfold_small", help="clips from here")
+    hw.add_argument(
+        "--splash-from", help="rows.parquet of an earlier run: reuse its splash"
+    )
     hf = sub.add_parser(
         "heads-fit", help="v3 within-moment ranker, base run's folds and seeds"
     )
