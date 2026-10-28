@@ -9,6 +9,8 @@ Head tracks (RT-DETR head boxes in data/detections_heads/raw/, from Kaggle hk-he
 
     uv run hydroknight stack heads-track              # merge + track + weak flag -> tracks_kept/
     uv run hydroknight stack heads-run                # churn + size flicker -> runs/stack_heads_{rank,raw}
+    uv run hydroknight stack heads-rows               # v3 rows: head features + splash -> runs/v3_ranker
+    uv run hydroknight stack heads-fit                # v3: within-moment ranker, v2's folds and seeds
 
 `fit` writes a run folder in the format `hydroknight eval protocol` reads (summary.json +
 alarms_<name>_s<seed>.parquet), one <name> per scorer, so every scorer gets the same
@@ -196,6 +198,102 @@ def cmd_heads_run(args) -> None:
         )
 
 
+def cmd_heads_rows(args) -> None:
+    from types import SimpleNamespace
+
+    from hydro_knight.annotate import zones
+    from hydro_knight.ingest.manifest import Manifest
+    from hydro_knight.stack import heads
+    from hydro_knight.stack.splash import add_splash
+
+    base = json.loads((Path(args.base) / "summary.json").read_text())["reports"]
+    clips = base[next(iter(base))]["used_test"]
+    recs = {
+        r.clip_id: r for r in Manifest(Path("data/manifests/pool_footage.jsonl")).load()
+    }
+    zs = zones.load()
+    run = Path(args.run)
+    run.mkdir(parents=True, exist_ok=True)
+    parts, meta = [], {}
+    t0 = time.time()
+    for cid in clips:
+        r = recs[cid]
+        rows, click, frags = heads.clip_rows(r, zs.get(cid), zones.in_zone)
+        fps = heads.read_meta(cid)["fps"]
+        # add_splash sizes its patches as 0.3 x w, so w = head width / 0.3 gives head-sized patches
+        rows = add_splash(
+            rows.assign(w=rows.hw / 0.3),
+            SimpleNamespace(clip_id=cid, fps=fps, zone=zs.get(cid)),
+        ).drop(columns="w")
+        parts.append(rows)
+        ev = r.events[0]
+        meta[cid] = {
+            "fps": fps,
+            "onset": r.to_file_time(ev["start"]),
+            "contact": r.to_file_time(ev["contact"]),
+            "victim_tracks": click + frags,
+            "path_fragments": frags,
+        }
+        print(f"{cid}: {len(rows)} rows, {time.time() - t0:.0f} s", flush=True)
+    pd.concat(parts, ignore_index=True).to_parquet(run / "rows.parquet")
+    (run / "clips.json").write_text(
+        json.dumps({"base": args.base, "clips": meta}, indent=1)
+    )
+    print(f"wrote {run}/rows.parquet ({len(meta)} clips)")
+
+
+def cmd_heads_fit(args) -> None:
+    import numpy as np
+
+    from hydro_knight.stack import heads, rank
+
+    run = Path(args.run)
+    rows = pd.read_parquet(run / "rows.parquet")
+    meta = json.loads((run / "clips.json").read_text())
+    base = json.loads((Path(meta["base"]) / "summary.json").read_text())["reports"]
+    clips = meta["clips"]
+    F = heads.v3_features(rows)
+    reports = {}
+    for seed in args.seeds:
+        rep = dict(base[str(seed)])
+        folds = rep["folds"]
+        fold = rows.clip_id.map(folds).to_numpy()
+        scores = {k: np.full(len(rows), np.nan) for k in ("ranker", "equal")}
+        weights = {}
+        for f in sorted(set(folds.values())):
+            test = fold == f
+            Z = rank.Scaler.fit(F[~test])(F)
+            w = rank.fit_ranker(
+                Z[~test],
+                rank.training_groups(rows[~test], clips),
+                heads.V3_FEATURES,
+                heads.V3_SIGNED,
+            )
+            weights[f] = dict(
+                zip(heads.V3_FEATURES, np.round(w, 3).tolist(), strict=True)
+            )
+            scores["ranker"][test] = Z[test][heads.V3_FEATURES].to_numpy() @ w
+            scores["equal"][test] = Z[test][heads.V3_SIGNED].sum(1).to_numpy()
+        for name, s in scores.items():
+            rows[["clip_id", "track_id", "t"]].assign(
+                score=rank.relative(rows, s), fold=fold
+            ).to_parquet(run / f"alarms_{name}_s{seed}.parquet", index=False)
+        reports[str(seed)] = rep | {
+            "victim_tracks": {c: clips[c]["victim_tracks"] for c in clips},
+            "path_fragments": {c: clips[c]["path_fragments"] for c in clips},
+            "unmatched_clicks": {},
+            "ranker_weights": weights,
+        }
+        print(f"seed {seed}: weights per fold {weights}", flush=True)
+    (run / "summary.json").write_text(
+        json.dumps({"reports": reports, "base": meta["base"]}, indent=1)
+    )
+    print(
+        f"wrote {run}: uv run hydroknight eval protocol {run} --size ranker "
+        f"--tracks-dir {heads.HEADS / 'tracks_eval'}"
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -220,6 +318,14 @@ def main() -> None:
         "--base", default="runs/v2_kfold_small", help="clips, folds, seeds from here"
     )
     hr.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
+    hw = sub.add_parser("heads-rows", help="v3 rows: head-track features + splash")
+    hw.add_argument("--run", default="runs/v3_ranker")
+    hw.add_argument("--base", default="runs/v2_kfold_small", help="clips from here")
+    hf = sub.add_parser(
+        "heads-fit", help="v3 within-moment ranker, base run's folds and seeds"
+    )
+    hf.add_argument("--run", default="runs/v3_ranker")
+    hf.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
     args = ap.parse_args()
     {
         "rows": cmd_rows,
@@ -227,6 +333,8 @@ def main() -> None:
         "video": cmd_video,
         "heads-track": cmd_heads_track,
         "heads-run": cmd_heads_run,
+        "heads-rows": cmd_heads_rows,
+        "heads-fit": cmd_heads_fit,
     }[args.cmd](args)
 
 

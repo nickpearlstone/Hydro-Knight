@@ -70,9 +70,14 @@ def training_groups(rows: pd.DataFrame, clips: dict) -> pd.DataFrame:
     return w[has & mixed]
 
 
-def fit_ranker(Z: pd.DataFrame, groups: pd.DataFrame) -> np.ndarray:
-    """Weights for FEATURES (see module docstring); groups = training_groups rows, aligned with Z."""
-    X = Z.loc[groups.index, FEATURES].to_numpy(np.float64)
+def fit_ranker(
+    Z: pd.DataFrame,
+    groups: pd.DataFrame,
+    features: list[str] = FEATURES,
+    signed: list[str] = SIGNED,
+) -> np.ndarray:
+    """Weights for `features` (see module docstring); groups = training_groups rows, aligned with Z."""
+    X = Z.loc[groups.index, features].to_numpy(np.float64)
     pos = groups["victim"].to_numpy()
     gid = groups.groupby(["clip_id", "t"]).ngroup().to_numpy()
     n_g = gid.max() + 1
@@ -96,9 +101,9 @@ def fit_ranker(Z: pd.DataFrame, groups: pd.DataFrame) -> np.ndarray:
         np.add.at(gx, gid, (pa - pv)[:, None] * X)
         return float(gw @ lg + L2 * w @ w), gw @ gx + 2 * L2 * w
 
-    bounds = [(0, None) if f in SIGNED else (None, None) for f in FEATURES]
+    bounds = [(0, None) if f in signed else (None, None) for f in features]
     res = minimize(
-        loss, np.zeros(len(FEATURES)), jac=True, bounds=bounds, method="L-BFGS-B"
+        loss, np.zeros(len(features)), jac=True, bounds=bounds, method="L-BFGS-B"
     )
     return res.x
 
