@@ -24,7 +24,9 @@ position can be matched to whatever the tracker produced afterwards, and a
 click with no detection nearby records that the victim was not detected.
 
 A second tab, Swimmer count (/count), labels every person on a few still frames for
-the pose benchmark; see annotate/count.py for that file's format.
+the pose benchmark, and in head-box mode draws a box on each visible head. It has two
+frame sets: the benchmark frames and the head validation frames; see annotate/count.py
+for the file format.
 
 A third tab, Review (/review), plays each clip Claude labeled around the event with the
 victim marked, and records a good / not good verdict; see annotate/review.py.
@@ -166,6 +168,7 @@ def create_app(
     claude_path: Path = review.CLAUDE_PATH,
     review_path: Path = review.REVIEW_PATH,
     zones_path: Path = zones.ZONES_PATH,
+    head_val_path: Path = count.VAL_PATH,
 ) -> Flask:
     """Build the labeler app around one manifest file.
 
@@ -173,7 +176,8 @@ def create_app(
         manifest_path: JSONL manifest to read and write.
         detections_dir: raw tiled detections (for the optional box overlay).
         blocklist: URL blocklist for clip deletion (default: the project blocklist).
-        count_path: swimmer-count label file for the Swimmer count tab.
+        count_path: swimmer-count label file for the Swimmer count tab (benchmark frames).
+        head_val_path: the Swimmer count tab's second frame set (head validation frames).
         claude_path: list of Claude-labeled clips (read only), for the Review tab.
         review_path: review verdicts written by the Review tab.
         zones_path: coverage zones written by the Zones tab.
@@ -184,6 +188,12 @@ def create_app(
     manifest = Manifest(Path(manifest_path))
     blocklist = blocklist or Blocklist()
     lock = threading.Lock()  # manifest rewrites are whole-file; serialize them
+
+    @app.after_request
+    def no_cache(resp):
+        """Pages and scripts change while the labeler is in use; a plain reload must get them."""
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     def get_record(clip_id: str):
         for r in manifest.load():
@@ -325,10 +335,24 @@ def create_app(
 
     # ------------------------------------------------------------ swimmer count tab
 
+    # ?set=bench (default): the benchmark (test) frames; ?set=val: head validation frames
+    count_sets = {
+        "bench": (count_path, "hydroknight benchmark pose frames"),
+        "val": (head_val_path, "hydroknight heads frames"),
+    }
+
+    def count_set() -> tuple[Path, str]:
+        name = request.args.get("set", "bench")
+        if name not in count_sets:
+            abort(400, f"unknown frame set {name!r}")
+        path, cmd = count_sets[name]
+        return Path(path), cmd
+
     def count_frames() -> list[dict]:
-        if not Path(count_path).exists():
-            abort(404, f"no {count_path}: run hydroknight benchmark pose frames first")
-        return count.load(count_path)["frames"]
+        path, cmd = count_set()
+        if not path.exists():
+            abort(404, f"no {path}: run {cmd} first")
+        return count.load(path)["frames"]
 
     @app.get("/count")
     def count_page():
@@ -352,16 +376,25 @@ def create_app(
 
     @app.post("/api/count/<int:i>")
     def count_save(i: int):
+        """Save one frame: the dots, plus head boxes and the reviewed flag when sent."""
+        path, _ = count_set()
         with lock:
-            data = count.load(count_path) if Path(count_path).exists() else None
+            data = count.load(path) if path.exists() else None
             if data is None or not 0 <= i < len(data["frames"]):
                 abort(404)
+            body = request.get_json(force=True)
             try:
-                points = count.clean_points(request.get_json(force=True))
+                update = count.clean_points(body)
+                if "heads" in body:
+                    update["heads"] = count.clean_heads(body["heads"])
+                if "heads_reviewed" in body:
+                    if not isinstance(body["heads_reviewed"], bool):
+                        raise ValueError("heads_reviewed must be true or false")
+                    update["heads_reviewed"] = body["heads_reviewed"]
             except (ValueError, TypeError) as e:
                 return jsonify({"error": str(e)}), 400
-            data["frames"][i].update(points)
-            count.save(data, count_path)
+            data["frames"][i].update(update)
+            count.save(data, path)
         return jsonify({"ok": True})
 
     # ------------------------------------------------------------ review tab

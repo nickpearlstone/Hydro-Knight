@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Hydro-Knight Labeler</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=2">
 </head>
 <body>
   <header class="topbar">
@@ -15,6 +15,16 @@
       <a class="tab" href="/review">Review</a>
       <a class="tab" href="/zones">Zones</a>
     </nav>
+    <label class="filter">Frames
+      <select id="frameSet">
+        <option value="bench">Benchmark (test)</option>
+        <option value="val">Head validation</option>
+      </select>
+    </label>
+    <div class="modes" role="group" aria-label="What to mark">
+      <button id="modeDots" class="btn chip" title="Mark every person with a dot">Dots</button>
+      <button id="modeHeads" class="btn chip" title="Draw a box on every visible head">Head boxes <kbd>H</kbd></button>
+    </div>
     <div class="nav">
       <button id="prev" class="btn ghost" title="Previous frame">‹ Prev <kbd>←</kbd></button>
       <span id="counter" class="counter">–</span>
@@ -39,28 +49,62 @@
           No count frames yet. Run: uv run hydroknight benchmark pose frames
         </div>
       </div>
-      <div class="legend">
+      <div class="legend" data-mode="dots">
         <span><i class="sw water"></i>In the water</span>
         <span><i class="sw deck"></i>Out of the water</span>
+        <span><i class="sw no-head"></i>Head hidden (not scored)</span>
+      </div>
+      <div class="legend" data-mode="heads" hidden>
+        <span><i class="sw box head-water"></i>Head in the water</span>
+        <span><i class="sw box head-deck"></i>Head out of the water</span>
+        <span><i class="sw no-head"></i>Person, no head visible</span>
+        <span>Dashed: a model's suggestion, not yet reviewed</span>
       </div>
     </section>
 
     <aside class="panel">
-      <div class="card">
+      <div class="card" data-mode="dots">
         <h2>Mark every person</h2>
         <ul class="keys">
           <li><b>Click</b> a person in the water</li>
           <li><b>Shift-click</b> a person out of the water (deck, stairs, guard stand)</li>
+          <li><b>Alt-click</b> a person whose head isn't visible: fully under with only a shadow,
+            only an arm or back showing, blocked by a tube, person or splash, or not sure
+            it's a person. Not scored either way.</li>
+          <li>Any part of the head at or above the surface (even just the top of the head at
+            the waterline) is a normal click.</li>
           <li><b>Right-click</b> a dot to remove it</li>
           <li><b>Scroll</b> to zoom, <b>drag</b> to pan</li>
+        </ul>
+      </div>
+      <div class="card" data-mode="heads" hidden>
+        <h2>Box every visible head</h2>
+        <ul class="keys">
+          <li><b>Drag</b> across a head in the water</li>
+          <li><b>Shift-drag</b> a head out of the water</li>
+          <li><b>Alt-click</b> a person whose head isn't visible (don't guess)</li>
+          <li>Skip anything you're not sure is a person</li>
+          <li><b>Right-click</b> a box or mark to remove it</li>
+          <li><b>Scroll</b> to zoom, <b>space-drag</b> to pan</li>
+          <li><b>R</b> marks the frame reviewed once every box is right</li>
         </ul>
       </div>
 
       <div class="card">
         <h2>This frame</h2>
-        <div class="tally">
+        <div class="tally tally3" data-mode="dots">
           <div><span class="muted">In water</span><b id="nWater">0</b></div>
           <div><span class="muted">Out of water</span><b id="nDeck">0</b></div>
+          <div><span class="muted">Head hidden</span><b id="nHidden">0</b></div>
+        </div>
+        <div data-mode="heads" hidden>
+          <div class="tally tally3">
+            <div><span class="muted">Heads in water</span><b id="nHeadWater">0</b></div>
+            <div><span class="muted">Out of water</span><b id="nHeadDeck">0</b></div>
+            <div><span class="muted">No head visible</span><b id="nNoHead">0</b></div>
+          </div>
+          <p id="reviewState" class="muted review-state">Not reviewed</p>
+          <button id="reviewBtn" class="btn">Mark reviewed <kbd>R</kbd></button>
         </div>
       </div>
 
@@ -77,6 +121,6 @@
   </main>
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
-  <script src="/static/count.js"></script>
+  <script src="/static/count.js?v=2"></script>
 </body>
 </html>

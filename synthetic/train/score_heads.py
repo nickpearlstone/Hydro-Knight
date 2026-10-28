@@ -2,8 +2,10 @@
 
 Each model runs on the 10 swimmer-count frames with the same tiling it was trained for: 640 px tiles
 at native resolution with 25% overlap, boxes merged across tiles (IoU-or-IoS, as in extraction).
-Ground truth is Nick's clicks (one per swimmer, 736 in the water; deck clicks are allowed but not
-counted). A click is found when a box covers it with the "fair" head rule from the 10-16 bake-off:
+Ground truth (count.head_truth): on frames whose head boxes Nick reviewed, the centre of each
+in-water head box (out-of-water heads and "no head visible" marks are allowed but not counted);
+elsewhere Nick's clicks (one per swimmer; deck and hidden clicks allowed but not counted). The
+Jupiter Reef frames were removed on 2026-10-26 (too far, wrong angle), leaving 8 frames. A click is found when a box covers it with the "fair" head rule from the 10-16 bake-off:
 padding of half the box height (min 6 px), since a head box can sit just above a click on the body.
 One box per click (greedy, most confident first); boxes covering no click are false boxes.
 
@@ -14,6 +16,9 @@ boxes centred outside the zone, are ignored: neither found nor false.
 
 Models are compared at MATCHED false boxes over all 10 frames (20 / 50 / 100), so a detector that
 fires everywhere cannot win, plus the raw numbers at conf 0.25.
+
+--val scores Nick's 12 head-validation frames (count.VAL_PATH, dots) instead, for picking a seed and
+checkpoint; the test frames are scored only once, on the pick. Results go to head_scores_val.json.
 
     uv run --with transformers python synthetic/train/score_heads.py \\
         rtdetr=synthetic/renders/train/rtdetrv2_head/best yolo=runs/yolo11n_head/weights/best.pt \\
@@ -159,22 +164,21 @@ def in_range_split(frame, img, zone):
 
 def main():
     in_range = "--in-range" in sys.argv
-    sys.argv = [x for x in sys.argv if x != "--in-range"]
-    gt = json.loads(count.COUNT_PATH.read_text())["frames"]
+    val = "--val" in sys.argv
+    sys.argv = [x for x in sys.argv if x not in ("--in-range", "--val")]
+    gt = count.load(count.VAL_PATH if val else count.COUNT_PATH)["frames"]
     frames = [f for f in gt if f["water"]]
-    imgs = {
-        f"{f['clip_id']}_{f['frame']}": cv2.imread(
-            f"raw_local/pose_bench/{f['clip_id']}_{f['frame']}.png"
-        )
-        for f in frames
-    }
+    for f in frames:  # reviewed head boxes replace the dots (count.head_truth)
+        f["water"], f["deck"] = count.head_truth(f)
+        f["hidden"] = []
+    imgs = {f"{f['clip_id']}_{f['frame']}": count.read_frame(f) for f in frames}
     if in_range:  # out-of-range clicks become "allowed" points like deck clicks
         zs = zones.load()
         for f in frames:
             inr, out = in_range_split(
                 f, imgs[f"{f['clip_id']}_{f['frame']}"], zs.get(f["clip_id"])
             )
-            f["water"], f["deck"] = inr, list(f["deck"]) + out
+            f["water"], f["deck"], f["hidden"] = inr, count.ignored(f) + out, []
             f["zone"] = zs.get(f["clip_id"])
     total = sum(len(f["water"]) for f in frames)
     results = {}
@@ -197,7 +201,7 @@ def main():
                     k &= zones.in_zone(
                         fr["zone"], (b[:, 0] + b[:, 2]) / 2, (b[:, 1] + b[:, 3]) / 2
                     )
-                f, p = match(b[k], c[k], fr["water"], fr["deck"])
+                f, p = match(b[k], c[k], fr["water"], count.ignored(fr))
                 f_tot, fp_tot = f_tot + f, fp_tot + p
             rows.append((cut, f_tot / total, fp_tot))
         res = {"total_clicks": total}
@@ -212,7 +216,7 @@ def main():
         print(name, json.dumps(res), flush=True)
     Path("synthetic/renders/train").mkdir(parents=True, exist_ok=True)
     Path(
-        f"synthetic/renders/train/head_scores{'_in_range' if in_range else ''}.json"
+        f"synthetic/renders/train/head_scores{'_in_range' if in_range else ''}{'_val' if val else ''}.json"
     ).write_text(json.dumps(results, indent=1))
 
 
