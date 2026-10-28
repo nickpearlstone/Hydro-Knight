@@ -150,12 +150,14 @@ def _window(fr, sx, sy, lh, conf, h, fps, w):
 def add_features(d: pd.DataFrame, fps: float) -> pd.DataFrame:
     """d (confirmed rows with geometry) + per-sample features, NaN until their window fills.
 
-    churn, size_flick, conf_flick over WINDOW_S; churn_4 over 4 s (slower drift-free struggle).
+    churn, size_flick, conf_flick over WINDOW_S; churn_4 over 4 s (slower drift-free struggle);
+    aspect = median log(width / height) over the last 1 s: the box widens as the face tips back
+    toward the sky or the head sits low in the water (Nick's head-tilt cue; AUC 0.74 alone).
     """
     d = d.sort_values(["track_id", "frame"]).reset_index(drop=True)
     cols = {
         k: np.full(len(d), np.nan)
-        for k in ("churn", "size_flick", "conf_flick", "churn_4")
+        for k in ("churn", "size_flick", "conf_flick", "churn_4", "aspect")
     }
     for _, idx in d.groupby("track_id", sort=False).indices.items():
         t = d.iloc[idx]
@@ -174,6 +176,11 @@ def add_features(d: pd.DataFrame, fps: float) -> pd.DataFrame:
             cf,
         )
         cols["churn_4"][idx] = next(_window(fr, sx, sy, lh, conf, h, fps, 4.0))
+        ar = pd.Series(
+            np.log(np.maximum((t.x1 - t.x0).to_numpy(), 1)) - lh,
+            index=pd.to_datetime(fr / fps, unit="s"),
+        )
+        cols["aspect"][idx] = ar.rolling("1s").median().to_numpy()
     return d.assign(**cols)
 
 
@@ -210,6 +217,7 @@ def clip_rows(record, zone, in_zone) -> tuple[pd.DataFrame, list[int], list[int]
             "size_flick": w.size_flick.to_numpy(),
             "conf_flick": w.conf_flick.to_numpy(),
             "churn_4": w.churn_4.to_numpy(),
+            "aspect": w.aspect.to_numpy(),
             "x": w.cx.to_numpy(),
             "y": w.cy.to_numpy(),
             "hh": w.hh.to_numpy(),
@@ -244,8 +252,23 @@ def raw_score(rows: pd.DataFrame, folds: dict[str, int]) -> np.ndarray:
 
 
 # v3: the within-moment ranker (stack.rank.fit_ranker) on head-track features.
-V3_FEATURES = ["f_churn", "f_churn_4", "f_size", "f_conf", "f_splash", "f_height"]
-V3_SIGNED = ["f_churn", "f_churn_4", "f_size", "f_conf", "f_splash"]  # weight >= 0
+V3_FEATURES = [
+    "f_churn",
+    "f_churn_4",
+    "f_size",
+    "f_conf",
+    "f_splash",
+    "f_aspect",
+    "f_height",
+]
+V3_SIGNED = [
+    "f_churn",
+    "f_churn_4",
+    "f_size",
+    "f_conf",
+    "f_splash",
+    "f_aspect",
+]  # weight >= 0
 
 
 def v3_features(rows: pd.DataFrame) -> pd.DataFrame:
@@ -260,5 +283,8 @@ def v3_features(rows: pd.DataFrame) -> pd.DataFrame:
     out = {
         k: np.log1p(np.maximum(rows[c].to_numpy(np.float64), 0)) for k, c in f.items()
     }
+    out["f_aspect"] = rows["aspect"].to_numpy(
+        np.float64
+    )  # already a log ratio, can be < 0
     out["f_height"] = np.log(np.maximum(rows["hh"].to_numpy(np.float64), 1.0))
     return pd.DataFrame(out, index=rows.index)
