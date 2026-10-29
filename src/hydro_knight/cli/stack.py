@@ -286,17 +286,30 @@ def cmd_heads_fit(args) -> None:
     clips = meta["clips"]
     F = heads.v3_features(rows)
     names = ["ranker", "equal"]
-    if args.appear:
-        from hydro_knight.stack import appearance
+    emb = {}  # f_appear / f_motion -> (embeddings per row, cache seconds)
+    for flag, feat, fname in (
+        (args.appear, "f_appear", "appear.npz"),
+        (args.motion, "f_motion", "appear_motion.npz"),
+    ):
+        if flag:
+            from hydro_knight.stack import appearance
 
-        a = np.load(run / "appear.npz")
-        X = np.full((len(rows), a["emb"].shape[1]), np.nan, np.float32)
-        X[a["idx"]] = a["emb"]
-        every = float(a["every"])
+            a = np.load(run / fname)
+            X = np.full((len(rows), a["emb"].shape[1]), np.nan, np.float32)
+            X[a["idx"]] = a["emb"]
+            emb[feat] = (X, float(a["every"]))
+            print(f"{feat}: {len(a['idx'])} embedded rows, cache every {a['every']} s")
+    combos = {}  # size name -> extra features
+    if "f_appear" in emb:
+        combos["ranker_appear"] = ["f_appear"]
+    if "f_motion" in emb:
+        combos["ranker_motion"] = ["f_motion"]
+    if len(emb) == 2:
+        combos["ranker_appear_motion"] = ["f_appear", "f_motion"]
+    names += list(combos)
+    if emb:
         g = rank.training_groups(rows, clips)
         labelled = rows.index.isin(g.index)
-        names.append("ranker_appear")
-        print(f"appearance: {len(a['idx'])} embedded rows, cache every {every} s")
     reports = {}
     for seed in args.seeds:
         rep = dict(base[str(seed)])
@@ -318,23 +331,32 @@ def cmd_heads_fit(args) -> None:
             )
             scores["ranker"][test] = Z[test][heads.V3_FEATURES].to_numpy() @ w
             scores["equal"][test] = Z[test][heads.V3_SIGNED].sum(1).to_numpy()
-            if args.appear:
-                ap = appearance.stacked_feature(
-                    X, rows.victim.to_numpy(), labelled, fold, f
+            if emb:
+                Fx = F.assign(
+                    **{
+                        k: appearance.carry_forward(
+                            rows,
+                            appearance.stacked_feature(
+                                X, rows.victim.to_numpy(), labelled, fold, f
+                            ),
+                            every,
+                        )
+                        for k, (X, every) in emb.items()
+                    }
                 )
-                Fa = F.assign(f_appear=appearance.carry_forward(rows, ap, every))
-                Za = rank.Scaler.fit(Fa[~test])(Fa)
-                feats = [*heads.V3_FEATURES, "f_appear"]
+                Zx = rank.Scaler.fit(Fx[~test])(Fx)
+            for name, extra in combos.items():
+                feats = [*heads.V3_FEATURES, *extra]
                 wa = rank.fit_ranker(
-                    Za[~test],
+                    Zx[~test],
                     rank.training_groups(rows[~test], clips),
                     feats,
-                    [*heads.V3_SIGNED, "f_appear"],
+                    [*heads.V3_SIGNED, *extra],
                 )
-                weights[f]["with_appear"] = dict(
+                weights[f][name] = dict(
                     zip(feats, np.round(wa, 3).tolist(), strict=True)
                 )
-                scores["ranker_appear"][test] = Za[test][feats].to_numpy() @ wa
+                scores[name][test] = Zx[test][feats].to_numpy() @ wa
         for name, s in scores.items():
             rows[["clip_id", "track_id", "t"]].assign(
                 score=rank.relative(rows, s), fold=fold
@@ -365,22 +387,28 @@ def cmd_heads_embed(args) -> None:
     clips = json.loads((run / "clips.json").read_text())["clips"]
     pick = appearance.cache_rows(rows, args.every)
     print(f"{pick.sum()} of {len(rows)} rows get a crop (cache every {args.every} s)")
+    motion = args.kind == "motion"
+    if motion:
+        from hydro_knight.stack import heads
+
+        heads.HEADS = Path(args.heads_dir)
+        steps = {c: heads.read_meta(c)["step"] for c in clips}
     emb = appearance.embed_rows(
         rows[pick],
         {c: m["fps"] for c, m in clips.items()},
         Path(args.videos),
         appearance.Embedder(),
+        motion_step=steps if motion else None,
     )
+    out = run / ("appear_motion.npz" if motion else "appear.npz")
     np.savez(
-        run / "appear.npz",
+        out,
         idx=np.flatnonzero(pick),
         emb=emb,
         every=args.every,
         model=appearance.MODEL,
     )
-    print(
-        f"wrote {run}/appear.npz; next: hydroknight stack heads-fit --run {run} --appear"
-    )
+    print(f"wrote {out}; next: hydroknight stack heads-fit --run {run} --appear")
 
 
 def cmd_heads_detect(args) -> None:
@@ -447,6 +475,12 @@ def main() -> None:
         action="store_true",
         help="add the appearance feature (run heads-embed first) as size ranker_appear",
     )
+    hf.add_argument(
+        "--motion",
+        action="store_true",
+        help="add the motion feature (heads-embed --kind motion) as ranker_motion "
+        "(+ ranker_appear_motion with --appear)",
+    )
     he = sub.add_parser(
         "heads-embed", help="frozen DINOv2 embeddings of head-and-shoulder crops"
     )
@@ -458,6 +492,17 @@ def main() -> None:
         help="one crop per track per this many seconds, carried forward (0 = every row)",
     )
     he.add_argument("--videos", default="raw_local")
+    he.add_argument(
+        "--kind",
+        choices=["still", "motion"],
+        default="still",
+        help="still crops (appear.npz) or 1.5 s motion images (appear_motion.npz)",
+    )
+    he.add_argument(
+        "--heads-dir",
+        default="data/detections_heads_whole",
+        help="where raw/<clip>.json gives the detection frame step (motion only)",
+    )
     hd = sub.add_parser(
         "heads-detect",
         help="head detector on the whole frame (no tiles), on this machine",

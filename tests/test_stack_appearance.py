@@ -129,3 +129,19 @@ def test_place_needs_a_full_window():
     pool = _boxes([(f, 100.0, 100.0, 20.0) for f in range(10, 21)])
     out = place.place_features(pool, pool[pool.frame == 20], 10.0)
     assert np.isnan(out.iloc[0].churn) and np.isnan(out.iloc[0].size_flick)
+
+
+def test_motion_image_colours_change_by_age():
+    # a bright square moves right one step per frame for the first 6 frames, then stops
+    frames = []
+    for i in range(appearance.MOTION_FRAMES):
+        im = np.zeros((300, 300), np.uint8)
+        x = 100 + 4 * min(i, 5)
+        im[150:170, x : x + 20] = 255
+        frames.append(im)
+    m = appearance.motion_image(frames, 150, 140, 40)
+    assert m.shape == (appearance.CROP_PX, appearance.CROP_PX, 3)
+    newest, middle, oldest = (m[..., k].max() for k in range(3))
+    assert (
+        oldest > 0 and newest == 0 and middle == 0
+    )  # it only moved in the oldest third

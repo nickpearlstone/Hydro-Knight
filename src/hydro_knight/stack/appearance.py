@@ -15,6 +15,14 @@ slowly, so each tracker track is embedded once per `every` seconds and the score
 within that bucket (causal). On the labelled moments, a 2 s cache kept the full gain at ~1/4 of the
 crops; scoring only the motion ranker's top k lost the victims motion misses.
 
+Motion (2026-10-28, after Nick: the victims' splash has a character he recognises but can't name):
+the same frozen model on a motion image (`motion_image`: frame-to-frame change in the crop over
+the last 1.5 s, coloured by age). On labelled moments it separates the victim from the current
+v3's top-3 look-alikes at AUC 0.74-0.78 (best splash statistic 0.64). Full protocol (whole-frame
+place v3 + appearance, 46 clips, 3 seeds): adding motion lifts same-clip AUC 0.91-0.92 -> 0.92-0.93
+(paired +0.009 to +0.013, CI > 0), time in top 3 44% -> 46-47% (+2.2-2.7 pts, CI > 0), and the
+victim reaches the top spot in 100% of clips (96% before).
+
 Feasibility (448 labelled moments, 41 clips, scratch run): appearance alone same-moment AUC 0.90,
 v3 ranker 0.79, ranker + appearance 0.92. The probe mostly separates "head low, body under, no tube"
 from people sitting on tubes.
@@ -23,6 +31,7 @@ from people sitting on tubes.
 from __future__ import annotations
 
 import time
+from collections import deque
 from pathlib import Path
 
 import cv2
@@ -33,6 +42,8 @@ CROP_SIDE = 4.0  # head heights
 CROP_DROP = 0.75  # head heights below the head centre
 CROP_PX = 224
 MODEL = "facebook/dinov2-small"  # Apache-2.0
+MOTION_FRAMES = 16  # detection frames (10 fps): 15 differences = 1.5 s
+MOTION_GAIN = 4.0
 PCA_DIM = 64
 C = 0.1
 
@@ -93,10 +104,45 @@ class Embedder:
         return np.concatenate(out) if out else np.zeros((0, 0), np.float32)
 
 
+def _grey_crop(img: np.ndarray, x: float, y: float, hh: float) -> np.ndarray:
+    s = max(int(round(CROP_SIDE * hh)), 2)
+    x0 = int(round(x - s / 2))
+    y0 = int(round(y + CROP_DROP * hh - s / 2))
+    big = cv2.copyMakeBorder(img, s, s, s, s, cv2.BORDER_REPLICATE)
+    c = big[y0 + s : y0 + 2 * s, x0 + s : x0 + 2 * s]
+    return cv2.resize(c, (CROP_PX, CROP_PX), interpolation=cv2.INTER_AREA).astype(
+        np.float32
+    )
+
+
+def motion_image(frames: list[np.ndarray], x: float, y: float, hh: float) -> np.ndarray:
+    """Motion around the head over MOTION_FRAMES grey frames (oldest first), as a colour image.
+
+    |frame - previous frame| inside the fixed head-and-shoulder crop; the three channels hold the
+    strongest change in each third of the span (newest, middle, oldest), x MOTION_GAIN, no
+    per-crop normalisation (the amount of motion is kept).
+    """
+    c = [_grey_crop(im, x, y, hh) for im in frames]
+    d = [np.abs(c[i] - c[i - 1]) for i in range(1, len(c))]
+    k = len(d) // 3
+    chans = [np.max(d[i : i + k], axis=0) for i in (2 * k, k, 0)]
+    return np.clip(np.stack(chans, -1) * MOTION_GAIN, 0, 255).astype(np.uint8)
+
+
 def embed_rows(
-    rows: pd.DataFrame, fps: dict[str, float], videos: Path, embedder: Embedder
+    rows: pd.DataFrame,
+    fps: dict[str, float],
+    videos: Path,
+    embedder: Embedder,
+    motion_step: dict[str, int] | None = None,
 ) -> np.ndarray:
-    """One embedding per row (rows.t = file frame / fps); decodes each clip once, in order."""
+    """One embedding per row (rows.t = file frame / fps); decodes each clip once, in order.
+
+    motion_step (clip -> detection frame step): embed motion images over the last
+    MOTION_FRAMES detection frames instead of still crops; rows too early for a full
+    history get NaN.
+    """
+    dim = None
     out = np.full(len(rows), None, object)
     t0 = time.time()
     for cid, rc in rows.groupby("clip_id"):
@@ -106,9 +152,19 @@ def embed_rows(
             want.setdefault(int(f), []).append(pos)
         cap = cv2.VideoCapture(str(videos / f"{cid}.mp4"))
         crops, where = [], []
+        step = motion_step[cid] if motion_step else None
+        buf: deque = deque(maxlen=MOTION_FRAMES)
         f, last = 0, max(want)
         while f <= last and cap.grab():
-            if f in want:
+            if step is not None:
+                if f % step == 0:
+                    buf.append(cv2.cvtColor(cap.retrieve()[1], cv2.COLOR_BGR2GRAY))
+                    if f in want and len(buf) == MOTION_FRAMES:
+                        for pos in want[f]:
+                            r = rc.iloc[pos]
+                            crops.append(motion_image(list(buf), r.x, r.y, r.hh))
+                            where.append(pos)
+            elif f in want:
                 _, img = cap.retrieve()
                 for pos in want[f]:
                     r = rc.iloc[pos]
@@ -116,14 +172,19 @@ def embed_rows(
                     where.append(pos)
             f += 1
         cap.release()
-        if len(where) != len(rc):
+        if step is None and len(where) != len(rc):
             raise RuntimeError(f"{cid}: decoded {len(where)} of {len(rc)} rows' frames")
         e = embedder(crops)
+        dim = dim or (e.shape[1] if len(e) else None)
         idx = np.flatnonzero(rows.index.isin(rc.index))  # rc keeps rows' order
         for pos, v in zip(where, e, strict=True):
             out[idx[pos]] = v
-        print(f"{cid}: {len(rc)} crops, {time.time() - t0:.0f} s", flush=True)
-    return np.stack(out).astype(np.float32)
+        print(
+            f"{cid}: {len(where)} of {len(rc)} crops, {time.time() - t0:.0f} s",
+            flush=True,
+        )
+    nan = np.full(dim or 1, np.nan, np.float32)
+    return np.stack([nan if v is None else v for v in out]).astype(np.float32)
 
 
 def _probe(X: np.ndarray, y: np.ndarray):
