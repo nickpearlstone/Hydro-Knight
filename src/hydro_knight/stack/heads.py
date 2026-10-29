@@ -41,6 +41,7 @@ VICTIM_ID = 999_999  # one track id for the victim's rows (the tracker's ids nev
 WINDOW_S = 2.0
 STEP_S = 0.5  # row spacing (the protocol's rank timeline step)
 STITCH = None  # stitch.StitchSettings to join track fragments before features (heads-rows --stitch)
+PLACE = False  # place-anchored features (stack.place) instead of per-track (heads-rows --place)
 
 
 def read_meta(clip_id: str) -> dict:
@@ -233,6 +234,9 @@ def clip_rows(record, zone, in_zone) -> tuple[pd.DataFrame, pd.DataFrame]:
     meta = read_meta(cid)
     fps, step = meta["fps"], meta["step"]
     d = pd.read_parquet(HEADS / "tracks_kept" / f"{cid}.parquet")
+    pool = with_geometry(
+        d
+    )  # every kept box, confirmed or not: what a place can draw on
     d = d[d.track_id >= 0]
     if STITCH is not None:
         from .stitch import stitch
@@ -259,8 +263,14 @@ def clip_rows(record, zone, in_zone) -> tuple[pd.DataFrame, pd.DataFrame]:
         if len(grid)
         else []
     )
-    w = d[d.frame.isin(np.unique(picks))].dropna(subset=["churn", "size_flick"])
+    w = d[d.frame.isin(np.unique(picks))]
     w = w[np.asarray(in_zone(zone, w.cx.to_numpy(), w.cy.to_numpy()))]
+    if PLACE:
+        from .place import place_features
+
+        cols = ["churn", "size_flick", "conf_flick", "churn_4", "aspect"]
+        w = w.assign(**place_features(pool, w, fps, WINDOW_S)[cols])
+    w = w.dropna(subset=["churn", "size_flick"])
     rows = pd.DataFrame(
         {
             "clip_id": cid,

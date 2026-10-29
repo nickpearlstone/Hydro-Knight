@@ -219,6 +219,7 @@ def cmd_heads_rows(args) -> None:
         from hydro_knight.stack.stitch import StitchSettings
 
         heads.STITCH = StitchSettings(*args.stitch)
+    heads.PLACE = args.place
     run = Path(args.run)
     run.mkdir(parents=True, exist_ok=True)
     parts, meta = [], {}
@@ -260,7 +261,15 @@ def cmd_heads_rows(args) -> None:
         )
     pd.concat(parts, ignore_index=True).to_parquet(run / "rows.parquet")
     (run / "clips.json").write_text(
-        json.dumps({"base": args.base, "stitch": args.stitch, "clips": meta}, indent=1)
+        json.dumps(
+            {
+                "base": args.base,
+                "stitch": args.stitch,
+                "place": args.place,
+                "clips": meta,
+            },
+            indent=1,
+        )
     )
     print(f"wrote {run}/rows.parquet ({len(meta)} clips)")
 
@@ -422,6 +431,11 @@ def main() -> None:
         type=float,
         metavar=("GAP_S", "DIST_H"),
         help="join track fragments first (gap-check pick on whole-frame heads: 2 0.5)",
+    )
+    hw.add_argument(
+        "--place",
+        action="store_true",
+        help="place-anchored features: history from nearby boxes, not one track id",
     )
     hf = sub.add_parser(
         "heads-fit", help="v3 within-moment ranker, base run's folds and seeds"

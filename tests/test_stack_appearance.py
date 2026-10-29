@@ -100,3 +100,32 @@ def test_gap_check_counts_a_clean_rejoin():
 
     t = _frag(5, 0, 300, 50)
     assert stitch.gap_check(t, 30.0, stitch.StitchSettings(4.0, 0.5)) == (1, 1, 0)
+
+
+def _boxes(rows):
+    d = pd.DataFrame(rows, columns=["frame", "cx", "cy", "hh"])
+    return d.assign(x0=d.cx - d.hh / 2, x1=d.cx + d.hh / 2, conf=0.9)
+
+
+def test_place_path_crosses_track_breaks_and_ignores_far_boxes():
+    from hydro_knight.stack import place
+
+    fps = 10.0
+    # one head bobbing in place for 3 s, plus a far neighbour; no track ids at all
+    near = [(f, 100 + (f % 2) * 4, 100.0, 20.0) for f in range(0, 31)]
+    far = [(f, 400.0, 100.0, 20.0) for f in range(0, 31)]
+    pool = _boxes(near + far)
+    anchor = pool[(pool.frame == 30) & (pool.cx < 200)]
+    out = place.place_features(pool, anchor, fps)
+    r = out.iloc[0]
+    assert r.path_n == 31  # every frame joined, none from the far box
+    assert r.churn > 1  # 4 px back and forth for 2 s (smoothed), net ~0, 20 px heads
+    assert np.isnan(r.churn_4)  # only 3 s of history
+
+
+def test_place_needs_a_full_window():
+    from hydro_knight.stack import place
+
+    pool = _boxes([(f, 100.0, 100.0, 20.0) for f in range(10, 21)])
+    out = place.place_features(pool, pool[pool.frame == 20], 10.0)
+    assert np.isnan(out.iloc[0].churn) and np.isnan(out.iloc[0].size_flick)
