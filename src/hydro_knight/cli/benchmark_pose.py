@@ -283,7 +283,7 @@ def cmd_run(args) -> None:
                 t0 = time.perf_counter()
                 boxes, confs = detect(backend, img, tiled)
                 times.append(time.perf_counter() - t0)
-                s = score_frame(boxes, confs, f["water"], f["deck"])
+                s = score_frame(boxes, confs, f["water"], count.ignored(f))
                 per_frame.append(
                     {
                         "model": backend.name,
@@ -361,7 +361,7 @@ def cmd_sweep(args) -> None:
             for f, (b, c) in zip(frames, dets, strict=True):
                 keep = c >= t
                 for k, v in score_frame(
-                    b[keep], c[keep], f["water"], f["deck"]
+                    b[keep], c[keep], f["water"], count.ignored(f)
                 ).items():
                     tot[k] = tot.get(k, 0) + v
             rows.append(

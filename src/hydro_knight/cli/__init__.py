@@ -86,6 +86,12 @@ COMMANDS = [
     ),
     Command("sheets", "label_sheets", "contact sheets for labeling one clip", DATA),
     Command(
+        "heads",
+        "head_frames",
+        "head-box labels: `heads frames` picks validation frames from non-benchmark clips",
+        DATA,
+    ),
+    Command(
         "write-label",
         "write_label",
         "write one Claude label to the manifest from a JSON spec",
