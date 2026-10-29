@@ -3,7 +3,7 @@
 Detailed writeups of the experiments summarized in the [README](../README.md), all run
 on real pool footage.
 
-> **Single venue.** Every model and evaluation result here (sections 3 and 5) comes from
+> **Single venue.** Every model and evaluation result here (sections 3, 5 and 6) comes from
 > rescue clips at one wave pool, from one YouTube series, and says nothing yet about other
 > pools. The pose comparisons (sections 1 and 4) also include a few frames from a second,
 > resort pool. Version 1 is scoped as a single-venue proof of concept; see the
@@ -248,3 +248,56 @@ Reproduce: `uv run hydroknight train tcn-v2 --sizes small --seeds 0 1 2 --rates 
 `uv run hydroknight eval protocol runs/v2_kfold_small --onset-alt scratch/z5cc/label_compare.json`.
 Model weights are saved per seed and fold as `model_small_s<seed>_f<fold>.pt`;
 `--load-dir` re-scores a saved run. The older tables used `--holdout`.
+
+## 6. Third model (v3): head-anchored stack
+
+**Bottom line.** On the same 46 clips, folds and seeds as v2, the best v3 version ranks
+the victim among the 3 most suspicious swimmers for 46 to 47% of the distress window
+(random scores: 7%) and puts the victim at the top spot at some point in every clip.
+It still raises no catches at any alarm budget, because there is no normal pool footage
+to set thresholds on, so its false-alarm rate is unknown.
+
+**Setup.** A fine-tuned RT-DETRv2-R18 head detector runs on the whole frame at 640 px,
+and ByteTrack links heads into tracks. Every 0.5 s, each head in the pool zone gets
+causal features from the last 2 s, measured in head heights: churn (path length minus
+net displacement), size flicker (bobbing), confidence flicker and box aspect (head
+tilt). "Place-anchored" features follow a head's history back through whatever box sat
+nearest, on any track, instead of one track id. Appearance and motion scores come from
+frozen DINOv2-small embeddings of a head-and-shoulder crop and of its recent
+frame-to-frame change, each read by a linear probe that never saw the clip. A small
+ranker then orders everyone at each moment, trained from onset to 3 s before guard
+contact. Victim truth is per row: the nearest head to the path between the victim clicks.
+
+| Version | Victim scored | Same-clip AUC | Time in top 3 | Time at top | Reaches top spot |
+|---|---|---|---|---|---|
+| Ranker (per-track features) | 48% | 0.79-0.80 | 26% | - | - |
+| + appearance | 48% | 0.89 | 36-37% | 24% | 87% of clips |
+| Place-anchored ranker | 58% | 0.81 | 28-29% | - | - |
+| Place + appearance | 58% | 0.91-0.92 | 44% | 31% | 96% of clips |
+| **Place + appearance + motion** | **58%** | **0.92-0.93** | **46-47%** | **32%** | **100% of clips** |
+| Random scores | | 0.50 | 7% | 2% | 25% of clips |
+| v2 autoencoder (section 5) | 26% | 0.73 | 7% | - | - |
+
+Ranges are seeds 0 to 2. The v2 row is scored on pose tracks, where its random baseline
+for time in top 3 is 3 to 4%. The head tracks hold the victim for 67% of the window (pose
+tracks: 49%).
+
+**Takeaways**
+
+- Appearance is the largest single gain. Motion adds a small, consistent one: paired per
+  clip, AUC rises 0.009 to 0.013 and time in top 3 rises 2.2 to 2.7 points, with the 95%
+  interval above zero on every seed.
+- Whole frame versus 16 tiles: one 640 px pass takes 88 ms per frame on the M1 GPU
+  against about 1.4 s for tiles, and the ranker scores the same AUC (0.79-0.80) on both.
+  Tiles are dropped for now; the far band may get them back.
+- Stitching track fragments gave no gain (victim scored 48% to 49%). Its settings were
+  picked on cut long tracks, but the victim's breaks look different: 32% overlap in time
+  and the rest reappear a median 1.4 head heights away. Gates wide enough to join them
+  join the wrong people about 1 time in 5. It stays an option, off by default.
+- Time-unseen and ghost-track features lowered the ranking, since victims stay visible
+  until near contact in 48 of 51 clips. Net displacement alone had no signal.
+- False-alarm rates are unknown until normal pool footage is collected.
+
+Details, commands and exploratory checks:
+[2026-10-29 v3 head stack note](research/2026-10-29-v3-head-stack.md).
+Code: [`stack/`](../src/hydro_knight/stack/), commands under `uv run hydroknight stack`.

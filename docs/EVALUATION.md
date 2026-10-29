@@ -76,7 +76,7 @@ lifeguard actually scans.
 
 | Measure | Question it answers |
 |---|---|
-| Victim detected (input tracks) | Share of the distress window in which the track table the model was given holds the victim. Model-free: it measures the detector and tracker (pose tracks today, head tracks later via `--tracks-dir`). |
+| Victim detected (input tracks) | Share of the distress window in which the track table the model was given holds the victim. Model-free: it measures the detector and tracker (pose tracks for v2, head tracks for v3 via `--tracks-dir`). |
 | Victim scored by this model | Share of the distress window in which the model actually produced a score for the victim. Depends on the model too: a window model needs a few seconds of track before its first score, and skips tracks shorter than its minimum. |
 | Victim vs other swimmers, same clip | Chance a victim score beats another swimmer's score in the same clip, averaged over clips. |
 | Share of window victim is top 1 / 3 / 5 (ties split by chance) | If a guard checked the k most suspicious swimmers, how often would the victim be among them? Ties with other swimmers are broken at random, so a detector that gives everyone the same score gets exactly chance (3 of 20 swimmers = 15%). |
@@ -133,3 +133,19 @@ has two parts of similar size:
 So better detection alone is not enough: the scoring model also has to work on short tracks.
 With only click-matched victim tracks (fragments dropped), detected falls to 39% and scored
 to 18% (seed 0), and the same-clip AUC stays at 0.72.
+
+## Scoring v3 head-stack runs
+
+`uv run hydroknight stack heads-fit` saves each version's scores as a size in the run folder:
+`ranker`, `ranker_appear`, `ranker_motion` and `ranker_appear_motion`. Each is
+scored with:
+
+```bash
+uv run hydroknight eval protocol <run> --size <name> --tracks-dir <run>/tracks
+```
+
+The clips, folds and seeds match `v2_kfold_small` (46 clips, 5 folds, seeds 0 to 2), so v2
+and v3 are tested on the same rescues. Compare each against its own random baseline: pose and head
+tracks give different numbers of rivals per moment. The victim is matched per row: at each moment, the nearest
+head within 2 head heights of the path between the victim clicks. Results are in
+[FINDINGS section 6](FINDINGS.md#6-third-model-v3-head-anchored-stack).

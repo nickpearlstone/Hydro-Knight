@@ -3,7 +3,7 @@
 The roadmap and decisions of record. For the project overview see the
 [README](README.md); for experiment writeups see [docs/FINDINGS.md](docs/FINDINGS.md).
 
-*Last updated 2026-10-18.*
+*Last updated 2026-10-29.*
 
 ## Current status
 
@@ -34,7 +34,33 @@ The roadmap and decisions of record. For the project overview see the
 - **Pose benchmark:** `hydroknight benchmark pose` scores pose models against
   hand-counted swimmers (found, missed, duplicates, false positives, speed) and compares
   them at equal false positives.
+- **v3, the head-anchored stack** (`hydroknight stack ...`): a fine-tuned RT-DETRv2-R18
+  head detector run on the whole frame at 640 px wide, head tracks, per-head
+  measurements every 0.5 s (churn, size flicker, confidence flicker, head tilt, splash),
+  place-anchored histories, frozen DINOv2 appearance and motion features with per-fold
+  probes, and a within-moment ranker that orders everyone in the pool.
 - **Tooling:** MLflow tracking (SQLite), CI running pytest, ruff lint, and ruff format.
+
+**Where v3 stands.** v3 is the best version so far. On the same 46 clips, 5 folds and
+seeds 0 to 2 as the v2 benchmark, its best setting (place-anchored features plus
+appearance and motion) ranks the victim first among everyone in the pool for 32% of the
+rescue window and in the top 3 for 46 to 47%, against 2% and 7% for random. Same-clip
+AUC is 0.92 to 0.93 (v2: 0.73, random: 0.50), and the victim reaches the top spot at
+least once in every clip. The victim is scored for 58% of the window and has a head box
+for 67%. False-alarm rates are unknown: there is no normal pool footage to set alarm
+thresholds, so no version catches a rescue at any alarm budget yet. Details in
+[docs/FINDINGS.md section 6](docs/FINDINGS.md#6-third-model-v3-head-anchored-stack) and
+[docs/research/2026-10-29-v3-head-stack.md](docs/research/2026-10-29-v3-head-stack.md).
+
+| Version (46 clips, seeds 0-2) | Same-clip AUC | Time in top 3 | Time at top |
+|---|---|---|---|
+| v2 TCN autoencoder | 0.73 | 7% | |
+| v3 ranker, per-track features | 0.79-0.80 | 26% | |
+| v3 place + appearance + motion | 0.92-0.93 | 46-47% | 32% |
+| Random | 0.50 | 7% | 2% |
+
+v2 is scored on pose tracks, where random scores reach the top 3 for only 3 to 4% of the window, so
+its 7% is above chance there. The v3 rows share one random baseline (7%).
 
 **Dataset:** 74 clips (66 rescue, 4 normal, 4 unlabeled), 57 extracted with the tiled
 pipeline. Each rescue clip has one labeled event window. Many events start more than 25 seconds in, so clips are always
@@ -81,6 +107,21 @@ new ID after a short submersion (see Known issues).
 
 ## Next steps
 
+### v3 next steps (2026-10-29)
+
+1. **Hold-score test.** When a head vanishes, its place keeps competing with its last
+   score at the last-seen spot for 1, 2 or 3 s, with a gentle decay. This covers up to
+   about 24 points of the rescue window where the victim is currently unscored.
+2. **Hard negatives for the head detector:** hair buns, round high-contrast patterns,
+   tube rims, tube handles, and people adjusting their hair (arms up, head lowered),
+   labeled and then retrained.
+3. **Normal pool footage,** so alarm thresholds and false alarms per hour can be
+   measured. Until then false-alarm rates are unknown.
+4. **Merge v3 into main** through a pull request once the docs are written.
+5. **Jetson budget.** The whole-frame 640 detector (about 90 ms per frame on an M1) is the
+   main cost. Two DINOv2 passes per head every 2 s and about 3.5 ms per 0.5 s step of
+   place features are small next to it.
+
 ### Proof-of-concept criteria (do these first, in this order)
 
 Nothing has passed these yet. They define what v1 has to demonstrate.
@@ -103,9 +144,12 @@ Nothing has passed these yet. They define what v1 has to demonstrate.
    only about half of the distress window, and the model scores the victim for about 26%
    of it (its first score comes about 4.5 s into a track, and most victim tracks are
    shorter). Raise both: a better detector for heads in water, and scoring that works on
-   short or re-joined tracks.
+   short or re-joined tracks. *Partly done in v3:* the head detector gives the victim a
+   head box for 67% of the window and place-anchored features score the victim for 58%.
 4. **Further modeling,** only after 1 to 3: a small supervised model on per-track
    features (every other swimmer is a labeled negative) and the Plan A rules.
+   *Done for the supervised model:* the v3 within-moment ranker. Plan A rules are still
+   open.
 
 ### Earlier roadmap (partly done)
 
@@ -126,9 +170,13 @@ Nothing has passed these yet. They define what v1 has to demonstrate.
    from the measured recall, and track heads as the primary object with pose attached
    when the swimmer is close enough. Victims beyond the cutoff are reported as out of
    zone, never dropped. A real deployment would use several cameras, each covering one
-   zone, like lifeguard sections.
+   zone, like lifeguard sections. *Head detection and head tracks done in v3* (fine-tuned
+   RT-DETRv2-R18, whole frame at 640 px). The distance cutoff and attaching pose are
+   still open.
 7. **Small supervised model on per-track features.** Victim labels make every other
    swimmer a negative example. Hold out whole clips, and use only pre-contact footage.
+   *Done:* the v3 ranker, trained on per-head features from onset to 3 s before guard
+   contact, with whole clips held out.
 8. **Scenario generation for Plan A (backlog).** Build distress scenarios as data
    rather than video: scripted track timelines (confidence and position over time) for
    the five signatures, plus scripted events injected into *real* extracted tracks so
@@ -219,6 +267,29 @@ Nothing has passed these yet. They define what v1 has to demonstrate.
 - **Labels are outcome-based.** A lifeguard intervention marks a positive.
 - **Compute split:** Mac for ingest, annotation, and dev. Colab GPU for extraction and
   training. The hand-off is the manifest plus keypoint Parquet files.
+- **v2 stays the benchmark; the head-anchored stack is v3 (2026-10-29).** Every v3
+  result is reported on the same 46 clips, 5 folds and seeds 0 to 2 as v2, with random
+  and shuffled baselines.
+- **Whole-frame head detection at 640 px is the Jetson direction.** Against 16 tiles it
+  gave the same ranker AUC (0.79 to 0.80) at about 16 times less detector compute
+  (88 ms per frame on an M1). Tiles may return for the far band only.
+- **Weak-kept track rule.** Every box on a confirmed head track is kept and flagged weak
+  under confidence 0.4; boxes on no track are kept only at 0.4 or above.
+- **Victim truth is per row.** At each 0.5 s moment the victim is the nearest head within
+  2 head heights of the path interpolated between the victim clicks. A whole track no
+  longer inherits the label, which had followed the wrong person in one clip.
+- **Place-anchored features.** Each head's history walks backward to the nearest box of
+  any track within 1.5 head heights and of similar size, so short track fragments still
+  get a full history. This raised the share of the window where the victim is scored
+  from 48% to 58%.
+- **Frozen DINOv2 appearance and motion.** DINOv2-small (Apache-2.0) is never trained
+  here. Its embeddings of a head-and-shoulder crop and of a 1.5 s motion image go through
+  per-fold probes, stacked so that no row is scored by a probe that saw its clip. Each
+  track is embedded once every 2 s, which keeps the full gain at about a quarter of the
+  crops.
+- **Track stitching stays off by default.** Joining track fragments raised the scored
+  share of the window only from 48% to 49%. The victim's breaks rarely fit the joining
+  rule, and gates wide enough to catch them join the wrong people about 1 time in 5.
 
 ## Later, once features and data are fixed
 

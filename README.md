@@ -19,7 +19,8 @@ normally or disappears.
 
 The first version covers one wave pool, using 66 real rescues from one YouTube series of
 lifeguard rescues. Other pools may come later. This is a learning and portfolio project,
-and nothing has been shown to work yet. The sections below say where it stands and why.
+and nothing has yet been shown to catch a drowning at a usable alarm rate. The sections
+below say where it stands and why.
 
 ## How it works
 
@@ -30,15 +31,17 @@ flowchart LR
     C --> D[Movement<br/>over time]
     D --> E[Score how unusual<br/>TCN autoencoder]
     E --> F[Alarm]
-    A -.-> G[Find heads<br/><i>planned</i>]
-    G -.-> H[Follow under water<br/><i>planned</i>]
-    H -.-> I[Time under, bobbing<br/><i>planned</i>]
-    I -.-> F
+    A -.-> G[Find heads<br/>RT-DETR]
+    G -.-> H[Head tracks and<br/>nearby history]
+    H -.-> I[Bobbing, churn,<br/>appearance, motion]
+    I -.-> J[Rank everyone<br/>every 0.5 s<br/><i>v3</i>]
+    J -.-> F
 ```
 
 Each swimmer is found, given an ID, and followed over time. A model trained only on
 normal swimming scores how unusual each one looks, and a high score raises an alarm. The
-dashed path is the planned redesign, built around heads in the water. Both are tuned to
+dashed path is v3, built around heads in the water: it ranks everyone in the pool at
+each moment by how much they look and move like a drowning swimmer. Both are tuned to
 miss as few drownings as possible, since a missed drowning costs far more than a false
 alarm.
 
@@ -99,10 +102,14 @@ Claude's help and checked by hand). It also has a pipeline that turns video into
 per-swimmer tracks, a first anomaly model, an evaluation that scores the actual victim,
 and a Blender pipeline for synthetic training images.
 
-The next goal is to keep the victim in view for most of a drowning: a head detector
-trained on pool footage, tracking that holds on to a swimmer under water, and simple
-measurements such as time under water and forward progress. Before any result counts, it
-has to beat simple shortcuts, such as flagging whoever is hardest to see.
+A newer design, v3, is built around heads in the water: a head detector trained on pool
+footage, head tracks, simple per-head measurements such as bobbing and churning in place,
+and a ranker that orders everyone in the pool every half second. It ranks the victim first
+for about a third of each drowning and in the top 3 for nearly half, against 2% and 7% by
+chance. False-alarm rates can't be measured yet, because there is no normal pool footage
+to set an alarm threshold on. Before any result counts, it also has to beat simple
+shortcuts, such as flagging whoever is hardest to see. Details are in
+[docs/FINDINGS.md section 6](docs/FINDINGS.md#6-third-model-v3-head-anchored-stack).
 
 ## Getting started
 
