@@ -85,7 +85,7 @@ Same rules for the real frame and the render (`synthetic/tools/evaluate.sh`):
 - **More varied poses made it worse.** The stance library (b11, b12) raised KID from 23–25 to 27–30
   and roughly doubled YOLO's false boxes (45–48 vs 25 real), with recall unchanged. Likely partial-body
   boxes from raised arms and twisted torsos. The config is back on the original pose library;
-  `humans_v3.blend` is kept for later, hand-checked pose work.
+  `humans_v3.blend` is kept for later pose work.
 
 **Best setup now = b10 config + grain 0.45.** Detector level matches the real frame:
 - YOLO11n-pose finds 62–68% vs 65% at conf 0.05, and 21% vs 23% at 0.25.
@@ -197,7 +197,7 @@ Same frame (seed 2, t = 0) rendered three ways:
 
 ## Varied batch (10-19 evening): six reference cameras, ~300 frames
 
-Decision: render ~300 varied frames now; drowning sequences later. The September rule that
+Render ~300 varied frames now; drowning sequences later. The September rule that
 synthetic data is only for tuning rules is dropped: realistic synthetic sequences are fair game for
 training and evaluation later.
 
@@ -207,8 +207,7 @@ training and evaluation later.
   lifeguard deck, fish-eye), 644c (high left stand, fish-eye), 8c83 (left deck, deep blue, fish-eye).
   bffdeb793010 was skipped (same view as 6f5c), and the Jupiter Reef frames (on hold, not wave pools).
 - **New in the pipeline:**
-  - fish-eye lens in post (`camera.lens_k`), with labels and masks moved to match, approved on
-    a preview;
+  - fish-eye lens in post (`camera.lens_k`), with labels and masks moved to match;
   - a head-only mask pass (vertices within 1.3 head radii of the head centre), so head boxes cover
     only the visible part;
   - `export_yolo.py` (person = 0, head = 1, plus a JSON sidecar with id, pose and submersion);

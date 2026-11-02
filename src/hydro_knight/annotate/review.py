@@ -3,7 +3,7 @@ Review of Claude's labels: one verdict per clip, so they can be checked quickly.
 
 Claude labels rescue clips and lists each one in data/annotations/labeled_by_claude.json
 ({clip_id: {"date", "notes"}}). The labeler's Review tab plays each of those clips with
-the victim marked, and records the reviewer's verdict here, in data/annotations/label_reviews.json:
+the victim marked, and records the verdict here, in data/annotations/label_reviews.json:
 {clip_id: {"verdict": "good" | "not_good", "note": str, "date": "YYYY-MM-DD"}}.
 
 A "not_good" clip keeps Claude's label until someone fixes it in the Rescue timeline tab;

@@ -35,7 +35,7 @@ contains the full performance clauses:
 - **False alarms ≤ 5 per day per pool basin**, averaged over 30 days of public opening hours,
   outside special activities (aqua-aerobics, play structures). At 10 to 12 open hours a day
   that is **about 0.4 to 0.5 false alarms per hour**, roughly 20 to 50 times stricter than
-  the 10 to 20 per hour the project owner named for a surface-distress assistant.
+  the 10 to 20 per hour budget set for a surface-distress assistant.
 - **Alarm must carry the position to ±2 m**, reach staff two ways (one wired), and be logged
   with images.
 - **Temporary "non-detection zones"** that staff draw for drills, auto-expiring. This is the
@@ -107,8 +107,7 @@ detections are saved.
 Uses for us:
 1. **Labeling:** click the victim once at onset and let SAM 2 / SAMURAI propagate a mask to
    guard contact. That gives a dense victim path (every frame) instead of our sparse clicks,
-   and a measure of how long the victim is actually visible vs submerged. A person would only
-   correct the frames where it drifts.
+   and a measure of how long the victim is actually visible vs submerged. Only the frames where it drifts need correcting.
 2. **Detection:** a mask tracker keeps hold of a half-submerged head that a detector loses
    frame to frame. Heavy (SAM 2 is a large model), so it fits as an offline teacher or
    for re-checking candidates, not as the live detector on a Jetson.
@@ -142,7 +141,7 @@ and in a [2011 WBUR interview](https://www.wbur.org/hereandnow/2011/06/29/drowni
 - lasts about **20 to 60 s** of surface struggle before submersion, if nobody intervenes
 - often happens with people close by who don't notice
 
-This matches all three of the project owner's "obvious tells" (stops moving forward, head under repeatedly
+This matches all three visible tells of drowning (stops moving forward, head under repeatedly
 and erratically, arms flapping at the sides) and adds two measurable ones: **verticality**
 (an upright body or head-and-shoulders box, against the horizontal shape of swimming)
 and **mouth-level bobbing** (the head's top edge going up and down by a few pixels at the
@@ -202,7 +201,7 @@ the park is county-owned, with up to 3,500 visitors on peak days, 100+ lifeguard
 park says every video is real and unstaged, and new guards train by watching rescue
 footage and raising a hand when they'd respond.
 
-### Unscreened candidate videos (fit: medium, need a lifeguard's eye)
+### Unscreened candidate videos (fit: medium, not yet screened)
 Found by title search; none are in the manifest, the blocklist, or the harvest queue
 (`data/harvest/candidates.jsonl`, 294 screened, 293 rejected). Queue with
 `uv run python scripts/harvest.py add URL`. Titles only; nothing downloaded.
@@ -246,7 +245,7 @@ the tiny size.
 
 Their key lesson: **splashing was less of a problem than expected. The hard cases were
 "descending and ascending" (people bobbing for fun) and "crawling" (swimming strokes)
-vs drowning.** That matches the project owner's tells ("head under repeatedly, more erratic") and says
+vs drowning.** That matches the visible tells (head under repeatedly, more erratic) and says
 bobbing *regularity* is the feature to get right.
 
 What's useful:
@@ -574,8 +573,7 @@ Caveats: these are public broadcasts by the park, similar in kind to the AMI res
 already in the manifest (on hold). They still show identifiable people, so the same rules
 apply (local only, never committed, no figures without pixelation). 720p at that distance
 means small heads, so the zone and size cutoff will discard much of the far water. That's
-fine for false alarms inside the range, which is the number that matters. Needs a
-call on scope (a different park and camera than the rescues).
+fine for false alarms inside the range, which is the number that matters. Scope open: a different park and camera than the rescues.
 
 Other leads, not checked: "Splashzone WaterPark Webcam" (The Surfers View, YrnuniZOjp8),
 "Avalanche Bay Indoor Waterpark" live cam (qfHSDPMyWt4), "Live Pool Cam" (lw0UHzKdHqo, 2 min),
@@ -1035,15 +1033,14 @@ Fielding-style "found on the bottom" cases to be tested at all.
 
 ### Practitioner advice: r/computervision "Drowning recognition on video" (fit: medium)
 [Thread, about 3 years old](https://www.reddit.com/r/computervision/comments/17p1mjc/drowning_recognition_on_video/)
-(read from a pasted copy of the thread). The poster used YOLOv5 plus a
+The poster used YOLOv5 plus a
 CNN-LSTM on short, low-quality clips, mostly *staged* instructional drownings, aiming for
 a Jetson Orin. Useful points from the replies, paraphrased:
 - **"When does drowning start?" is the annotation problem.** Exactly our onset label, and why
   our labels carry onset *and* guard contact, set by a lifeguard.
 - **Zone "danger coefficient" by crowding:** the poster weighted beach zones as more dangerous
   the *fewer* people were nearby (nobody close to help). An **isolation feature** (distance
-  to the nearest other head) is cheap to compute from head tracks. It is still open
-  whether isolation raises risk in a guarded wave pool, where crowds also hide victims.
+  to the nearest other head) is cheap to compute from head tracks. Open: whether isolation raises risk in a guarded wave pool, where crowds also hide victims.
 - **A former lifeguard in ML security:** many real drownings "just sink" with no drama, so
   data sparsity bites and a detector for the general case ("person in the water, then
   gone") is the product-safe default. That's the passive-victim / disappearance signature.
@@ -1240,8 +1237,8 @@ assignee **Lynxight Ltd.** Each swimmer gets a *descriptor*:
   raises everyone else's risk)
 Risk is re-estimated every 5 to 10 minutes and **changes two things**:
 1. **Compute:** higher-risk swimmers get more features, higher resolution and frame rate,
-   smaller patches, more frequent inspection. That is the "scan harder where it matters"
-   idea from lifeguarding practice, and what the RL tile-scheduler would learn.
+   smaller patches, more frequent inspection. That is "scan harder where it matters",
+   and what the RL tile-scheduler would learn.
 2. **Thresholds:** lower alert thresholds for higher-risk swimmers (a detection between two
    confidence levels alerts for a high-risk swimmer only), or routing to a slower,
    lower-miss algorithm.
@@ -1315,7 +1312,7 @@ YMCA) publish similar recognition videos.
   (news reports: [Oneindia](https://www.oneindia.com/2012/02/28/bangalore-12-yr-old-girl-dies-in-wonderla-wave-pool.html),
   [Las Vegas Sun](https://m.lasvegassun.com/news/1997/aug/19/near-drowning-victim-in-very-critical-condition/),
   [Fox News](https://www.foxnews.com/story/4-year-old-boy-drowns-in-wave-pool-at-california-water-park.amp)).
-Idea for the Zones tab: alongside the coverage polygon, let the labeller mark a **depth-transition
+Idea for the Zones tab: alongside the coverage polygon, mark a **depth-transition
 line** (where the wave pool goes from standing depth to over-head). "Drifted past the
 transition and stopped making progress" is a strong, explainable feature, and it's the
 "followed bigger kids past the lifeline" story in Fielding's reports.
@@ -1552,8 +1549,7 @@ what it doesn't flag.
 
 ## 5. Convolution padding, edges and missing frames
 
-A specific question was how to handle the edges of convolutional padding. The short answer
-from the literature: **don't pad with made-up values when real data exists; pad only where
+How to handle the edges of convolutional padding, from the literature: **don't pad with made-up values when real data exists; pad only where
 it doesn't, and tell the model which values are real.**
 
 1. **Use real context instead of padding (what v2 already does).** v2's encoder uses
@@ -1660,7 +1656,7 @@ License** (custom, read before vendoring).
 
 Why it matters here:
 1. **Auto-labeling the head fine-tune:** prompt "head" (or "swimmer's head") on sampled pool
-   frames, keep SAM 3's masks as pre-labels, and a person only corrects. That could replace
+   frames, keep SAM 3's masks as pre-labels, and correct them by hand. That could replace
    most of the 2 to 3 hour pilot labeling estimate with review time.
 2. **A tracking teacher:** SAM 3's IDs survive brief occlusions through its memory, so on the
    labeled rescues it can show what a strong tracker *could* keep for the victim (an upper
@@ -1794,7 +1790,7 @@ re-running needs only the public label XMLs, no video.)
 
 **Data (biggest gaps first)**
 1. **Normal footage for false alarms per hour:** Divertiland's ~12 h wave-pool livestream
-   archives (varQEogbBLU and siblings). Needs a scope call.
+   archives (varQEogbBLU and siblings). Scope open.
 2. **Request SwimID** (CCTV, tracks, incident labels) as an independent test set.
 3. **Hard negatives** (water polo, dunking games) from Z5cc's list, for the test set.
 4. Queue the unscreened candidates in section 6 through `harvest.py add`; add
