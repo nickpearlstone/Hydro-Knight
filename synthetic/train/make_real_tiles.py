@@ -1,7 +1,7 @@
 """Cut real pool stills into 640 px training tiles, with SAM 3's head boxes as the labels.
 
 SAM 3 (text prompt "head") is the teacher: its boxes at or above --cut become the labels the student
-detector (RT-DETR) learns from. The cut is chosen on Nick's 12 validation frames, never on the test
+detector (RT-DETR) learns from. The cut is chosen on the 12 hand-labelled validation frames, never on the test
 frames (0.40 = best F1 there: 93% of his heads found, 87% of boxes on a head). Tiles use make_tiles.py's
 grid and 60%-inside rule, so real and synthetic tiles look the same to the trainer and can share a folder.
 Whole clips are held out for the trainer's validation loss (never frames of one clip on both sides).

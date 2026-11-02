@@ -4,7 +4,7 @@
 #   make harvest          # up to 5 clips
 #   make harvest N=3
 #
-# Steps: fresh branch from main -> Claude (headless, docs/HARVEST.md, limited tools) judges
+# Steps: fresh branch from main -> Claude (headless, .claude/HARVEST.md, limited tools) judges
 # and labels -> pose extraction + tracking on the Mac GPU -> commit the manifest,
 # candidate queue and label log -> push -> PR. Claude's labels stay out of training
 # until reviewed in the labeler's Review tab. Logs: runs/logs/harvest_<stamp>.log
@@ -26,7 +26,7 @@ git checkout -q -b "$BRANCH"
 
 echo "== harvest $STAMP: up to $N clips, log $LOG"
 caffeinate -dims claude -p \
-  "Read docs/HARVEST.md and follow it exactly. Accept and label up to ${N} new clips (rescue or normal), then stop and report." \
+  "Read .claude/HARVEST.md and follow it exactly. Accept and label up to ${N} new clips (rescue or normal), then stop and report." \
   --allowedTools \
     "Bash(uv run hydroknight harvest *)" \
     "Bash(uv run hydroknight sheets *)" \

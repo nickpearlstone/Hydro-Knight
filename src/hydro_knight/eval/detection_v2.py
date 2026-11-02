@@ -9,7 +9,7 @@ scored steps plus the context after them. So each window becomes one instant ala
 first scored step + (window + context) steps (about 4.5 s after the window starts).
 Measuring from the window's start would claim catches a live system could not make.
 
-Scope (agreed with Nick 2026-10-13). There is little purely normal footage, so false
+Scope (agreed 2026-10-13). There is little purely normal footage, so false
 alarms are counted on the held-out rescue clips, from the trim start to guard contact:
 alarms after contact (the rescue and its commotion) are dropped, and footage hours run
 from trim start to contact. Recall counts every held-out labeled event, including

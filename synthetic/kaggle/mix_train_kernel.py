@@ -49,7 +49,7 @@ def run(cmd, gpu, log):
 # earlier layers), so every RT-DETR before v7 was crippled. YOLO is unaffected and not rerun.
 # v6 (10-26): real + synthetic. Per GPU: two RT-DETR seeds (20-epoch schedule from COCO, weights every
 # 2 epochs; ~7.5 min/epoch on 8.8k tiles), then one YOLO11n seed (30 epochs, weights every 5).
-# Seed and checkpoint are picked on Nick's 12 validation frames on the Mac, never on the test frames.
+# Seed and checkpoint are picked on the 12 hand-labelled validation frames on the Mac, never on the test frames.
 START_BY, HARD_STOP = 9 * 3600, 11.5 * 3600
 RTDETR = (
     "python {code}/train_rtdetr.py {tiles} --epochs 20 --save-every 2 --batch 8 "

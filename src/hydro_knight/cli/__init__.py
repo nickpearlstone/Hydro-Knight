@@ -75,7 +75,7 @@ COMMANDS = [
     Command(
         "harvest",
         "harvest",
-        "find, fetch, accept or reject, and extract new clips (see docs/HARVEST.md)",
+        "find, fetch, accept or reject, and extract new clips (Claude instructions: .claude/HARVEST.md, local only)",
         DATA,
     ),
     Command("sheets", "label_sheets", "contact sheets for labeling one clip", DATA),
