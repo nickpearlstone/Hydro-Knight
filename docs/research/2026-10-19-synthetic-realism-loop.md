@@ -76,7 +76,7 @@ Same rules for the real frame and the render (`synthetic/tools/evaluate.sh`):
   image row were twice as tall in pixels: the real beach is ~22 m from the camera, ours was ~40 m.
   Shortening the pool to 30 m and pitching the camera to 25° brought YOLO11n-pose to the real
   numbers (64-68% vs 65% at 0.05, 21% vs 23% at 0.25).
-- **Grain (Nick's suggestion, 10-19).** Our flat-water grain measured 0.12-0.34 vs 0.42 real, so the
+- **Grain (10-19).** Our flat-water grain measured 0.12-0.34 vs 0.42 real, so the
   renders were too clean. Grain added after the codec fixes that statistic at strength ~0.45; it did
   not move KID or the classifier (coarse grain made them slightly worse), so it is on at 0.45.
 - **Moving water through the encoder** did not raise blockiness (0.98-1.07 vs 1.16 real); the real
@@ -85,7 +85,7 @@ Same rules for the real frame and the render (`synthetic/tools/evaluate.sh`):
 - **More varied poses made it worse.** The stance library (b11, b12) raised KID from 23–25 to 27–30
   and roughly doubled YOLO's false boxes (45–48 vs 25 real), with recall unchanged. Likely partial-body
   boxes from raised arms and twisted torsos. The config is back on the original pose library;
-  `humans_v3.blend` is kept for later, hand-checked pose work with Nick.
+  `humans_v3.blend` is kept for later pose work.
 
 **Best setup now = b10 config + grain 0.45.** Detector level matches the real frame:
 - YOLO11n-pose finds 62–68% vs 65% at conf 0.05, and 21% vs 23% at 0.25.
@@ -197,7 +197,7 @@ Same frame (seed 2, t = 0) rendered three ways:
 
 ## Varied batch (10-19 evening): six reference cameras, ~300 frames
 
-Nick's call: render ~300 varied frames now; drowning sequences later. The September rule that
+Render ~300 varied frames now; drowning sequences later. The September rule that
 synthetic data is only for tuning rules is dropped: realistic synthetic sequences are fair game for
 training and evaluation later.
 
@@ -207,8 +207,7 @@ training and evaluation later.
   lifeguard deck, fish-eye), 644c (high left stand, fish-eye), 8c83 (left deck, deep blue, fish-eye).
   bffdeb793010 was skipped (same view as 6f5c), and the Jupiter Reef frames (on hold, not wave pools).
 - **New in the pipeline:**
-  - fish-eye lens in post (`camera.lens_k`), with labels and masks moved to match, approved by
-    Nick on a preview;
+  - fish-eye lens in post (`camera.lens_k`), with labels and masks moved to match;
   - a head-only mask pass (vertices within 1.3 head radii of the head centre), so head boxes cover
     only the visible part;
   - `export_yolo.py` (person = 0, head = 1, plus a JSON sidecar with id, pose and submersion);
@@ -273,8 +272,7 @@ training and evaluation later.
 
 - **In range** (`score_heads.py --in-range`, the 10-16 rule): only swimmers inside the clip's
   hand-drawn zone whose expected body height there is at least 60 px count (151 of 736).
-  Boxes centred outside the zone are ignored. Far swimmers are out of scope, as Nick
-  pointed out.
+  Boxes centred outside the zone are ignored. Far swimmers are out of scope.
 - **RT-DETR recipe v2:** scale and crop jitter (0.5–1.5×), 2-epoch learning-rate warm-up, EMA of
   the weights (0.999), 100 epochs; backbone frozen vs 0.1× (about 1.2 GPU h on 2× T4).
 
@@ -388,7 +386,7 @@ Mean ± standard deviation over 8 seeds (range at 100 false boxes):
     RT-DETR's 15. No YOLO seed failed.
   - Recall is reached by epoch 10 and stays flat to epoch 60, so checkpoint choice barely
     matters for YOLO here.
-  - This is a data point only, not a model choice (Nick, 10-24). Both detectors will be
+  - This is a data point only, not a model choice (10-24). Both detectors will be
     compared trained on a mix of real and synthetic data, which is the setting that counts.
     RT-DETR (Apache) stays the commercial path; YOLO is AGPL.
 

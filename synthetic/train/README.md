@@ -1,7 +1,7 @@
 # synthetic/train: head detector from synthetic frames
 
 Goal: a detector that finds swimmers' heads, including small, far and half-submerged ones. It is
-trained on rendered frames whose labels are exact, then checked on real frames that Nick
+trained on rendered frames whose labels are exact, then checked on real frames that were
 hand-counted. Real fine-tuning comes later, once real head boxes exist.
 
 ## The pipeline, file by file
@@ -26,7 +26,7 @@ train (Kaggle T4 x2)                synthetic/kaggle/train_kernel.py
    │  GPU 1: synthetic/train/train_yolo.py     (YOLO11n, baseline)
    ▼
 score (Mac, real frames never leave it)  synthetic/train/score_heads.py
-      recall of Nick's 736 swimmer clicks at matched false boxes, vs the off-the-shelf 11n-head
+      recall of the 736 hand-placed swimmer clicks at matched false boxes, vs the off-the-shelf 11n-head
 ```
 
 ### 1. `make_tiles.py`: why tiles

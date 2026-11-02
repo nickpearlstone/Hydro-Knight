@@ -112,7 +112,7 @@ def evaluate_seed(
     folds = {c: rep["folds"][c] for c in test} if rep.get("folds") else None
     t1 = P.tier1(table, truths, cfg, tracks, folds)
     t2 = P.tier2(table, truths, normal, cfg)
-    # Second victim definition (Nick, 2026-10-18): click-matched tracks only; the path
+    # Second victim definition (2026-10-18): click-matched tracks only; the path
     # fragments' rows are dropped from scoring, so they are neither catches nor rivals.
     frags = rep.get("path_fragments", {})
     click_only = {

@@ -2,7 +2,7 @@
 Harvest new clips: find candidates, fetch, accept or reject, extract.
 
 The mechanical half of the unattended sourcing pipeline (`make harvest`). Judging and
-labeling are done by Claude following docs/HARVEST.md; this script
+labeling are done by Claude following .claude/HARVEST.md (local, not in git); this script
 only does what needs no judgment. Candidates live in data/harvest/candidates.jsonl
 (metadata only, safe to commit), separate from the manifest: a clip enters the
 manifest only once accepted.

@@ -1,6 +1,6 @@
 # Rendered training data: who has done it, and which engine
 
-Short research session, 2026-10-17, after Nick asked to look into game-engine data (see the
+Short research session, 2026-10-17, prompted by the question of game-engine data (see the
 synthetic-data part of section 6 in `2026-10-17-research-sweep.md`). It reopens the
 2026-09-20 decision to set synthetic *video* aside, because the bottleneck has since moved to
 **detection**: the submerged victim scored 0.02 box confidence, and YOLO11n tiled misses 37%

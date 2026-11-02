@@ -178,7 +178,7 @@ each of our victim clicks that falls inside one of his labeled frames (388 click
    reasonable *second-stage* idea: run it on a 224 crop around each in-range head that the
    rules flag, which is close to the setting his model was trained for.
 
-## 7. Open questions for Nick
+## 7. Open questions
 
 - Re-check the six disputed clips (an hour or less in the labeler)?
 - Message him? Not needed for a citation, but he offers the videos and may have the trained

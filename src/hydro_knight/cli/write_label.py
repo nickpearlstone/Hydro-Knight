@@ -12,7 +12,7 @@ Normal-footage spec:
 
 Refuses to overwrite a clip that is already labeled or already in the Claude log. Every
 label is recorded in data/annotations/labeled_by_claude.json, so it stays separate from
-Nick's and is held out of training until a review marks it good. fps comes from the
+the hand labels and is held out of training until a review marks it good. fps comes from the
 keypoint file if the clip is extracted, otherwise from the video (the same value).
 If keypoints exist, the victim clicks are matched to tracks as a check.
 """

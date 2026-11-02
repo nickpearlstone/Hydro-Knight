@@ -2,9 +2,9 @@
 
 Each model runs on the 10 swimmer-count frames with the same tiling it was trained for: 640 px tiles
 at native resolution with 25% overlap, boxes merged across tiles (IoU-or-IoS, as in extraction).
-Ground truth (count.head_truth): on frames whose head boxes Nick reviewed, the centre of each
+Ground truth (count.head_truth): on frames whose head boxes were hand-reviewed, the centre of each
 in-water head box (out-of-water heads and "no head visible" marks are allowed but not counted);
-elsewhere Nick's clicks (one per swimmer; deck and hidden clicks allowed but not counted). The
+elsewhere the hand clicks (one per swimmer; deck and hidden clicks allowed but not counted). The
 Jupiter Reef frames were removed on 2026-10-26 (too far, wrong angle), leaving 8 frames. A click is found when a box covers it with the "fair" head rule from the 10-16 bake-off:
 padding of half the box height (min 6 px), since a head box can sit just above a click on the body.
 One box per click (greedy, most confident first); boxes covering no click are false boxes.
@@ -17,7 +17,7 @@ boxes centred outside the zone, are ignored: neither found nor false.
 Models are compared at MATCHED false boxes over all 10 frames (20 / 50 / 100), so a detector that
 fires everywhere cannot win, plus the raw numbers at conf 0.25.
 
---val scores Nick's 12 head-validation frames (count.VAL_PATH, dots) instead, for picking a seed and
+--val scores the 12 hand-labelled head-validation frames (count.VAL_PATH, dots) instead, for picking a seed and
 checkpoint; the test frames are scored only once, on the pick. Results go to head_scores_val.json.
 
     uv run --with transformers python synthetic/train/score_heads.py \\

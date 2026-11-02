@@ -1,14 +1,14 @@
 # Head detector trained on real footage (2026-10-27)
 
 **Result:** RT-DETRv2-R18 and YOLO11n trained on real pool stills labelled by SAM 3, plus the synthetic
-tiles, both match SAM 3 on Nick's 8 hand-boxed test frames. Every RT-DETR number before this one was
+tiles, both match SAM 3 on the 8 hand-boxed test frames. Every RT-DETR number before this one was
 produced by a broken training setup (see "The transformers bug").
 
 ## Data
 
 - **Teacher labels.** SAM 3 (`sam3_pcs`, text prompt "head") ran on 1,461 training stills from 46 clips.
   None of those clips are in the test frames (8) or the validation frames (12). Boxes at confidence
-  0.40 or higher became labels. 0.40 is the best-F1 cut on Nick's validation dots: SAM 3 finds 93% of
+  0.40 or higher became labels. 0.40 is the best-F1 cut on the hand-placed validation dots: SAM 3 finds 93% of
   his heads there, and 87% of its boxes land on a head.
 - **Tiles.** `synthetic/train/make_real_tiles.py` cuts the stills into 640 px tiles (same grid and
   60%-inside rule as `make_tiles.py`), with 4 whole clips held out for the trainer's validation loss:
