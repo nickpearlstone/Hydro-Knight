@@ -18,3 +18,11 @@ keywords:
   - pose estimation
   - drowning detection
   - anomaly detection
+references:
+  - type: software
+    title: "Drowning Detection via Real-Time Spatio-Temporal Action Localization"
+    authors:
+      - family-names: Nicklaser
+        given-names: David
+    year: 2024
+    url: "https://github.com/Z5cc/drowning-detection"

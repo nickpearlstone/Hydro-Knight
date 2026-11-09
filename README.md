@@ -137,6 +137,9 @@ Built with [Ultralytics YOLO](https://github.com/ultralytics/ultralytics),
 with [MPFB](https://github.com/makehumancommunity/mpfb2) assets. Thanks to the people who
 share lifeguard rescue footage publicly.
 
+Onset ranges in the evaluation also use independent onset labels from
+[Nicklaser (2024), *Drowning Detection via Real-Time Spatio-Temporal Action Localization*](https://github.com/Z5cc/drowning-detection).
+
 ## License
 
 [AGPL-3.0](LICENSE), inherited from [Ultralytics YOLO](https://github.com/ultralytics/ultralytics).
