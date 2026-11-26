@@ -29,7 +29,7 @@ subprocess.run(
     shell=True,
     check=False,
 )
-# transformers must be 5.21.0, never 5.16.1
+# CAUTION[mixtrain-transformers-pin]: transformers must be 5.21.0, never 5.16.1
 subprocess.run(
     "python -c 'import transformers; assert transformers.__version__ == \"5.21.0\", transformers.__version__'",
     shell=True,
@@ -42,7 +42,7 @@ def run(cmd, gpu, log):
     return subprocess.Popen(f"{cmd} > {W}/{log} 2>&1", shell=True, env=env)
 
 
-# pick seed and checkpoint on the validation frames, never the test frames
+# CAUTION[mixtrain-select-on-validation]: pick seed and checkpoint on the validation frames, never the test frames
 START_BY, HARD_STOP = 9 * 3600, 11.5 * 3600
 RTDETR = (
     "python {code}/train_rtdetr.py {tiles} --epochs 20 --save-every 2 --batch 8 "

@@ -152,12 +152,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if argv else 2
 
     by_name = {c.name: c for c in COMMANDS}
-    for n_words in (2, 1):  # two-word names first
+    # CAUTION[cli-two-word-first]: two-word names first
+    for n_words in (2, 1):
         name = " ".join(argv[:n_words])
         if len(argv) >= n_words and name in by_name:
             cmd = by_name[name]
             module = importlib.import_module(f"{__name__}.{cmd.module}")
-            # sys.argv must be set before module.main()
+            # CAUTION[cli-argv-before-main]: sys.argv must be set before module.main()
             sys.argv = [f"hydroknight {cmd.name}", *argv[n_words:]]
             module.main()
             return 0

@@ -14,11 +14,12 @@ from pathlib import Path
 
 import numpy as np
 
-PLAN = "a"
+PLAN = "a"  # CAUTION[batch-plan-letter]: must equal the folder letter; regenerate with make_batch.py
 ALL = ["ref_6f5c", "ref_dc93", "ref_9992", "ref_1d50", "ref_644c", "ref_8c83"]
 CONFIGS = {"a": ALL[:3], "b": ALL[3:], "c": ALL, "d": ALL}[PLAN]
 FRAMES = {"a": 50, "b": 50, "c": 25, "d": 25}[PLAN]
-MAX_HOURS = 9.5  # MAX_HOURS must leave ~1 h for post + export (Kaggle limit 12 h)
+# CAUTION[batch-max-hours]: MAX_HOURS must leave ~1 h for post + export (Kaggle limit 12 h)
+MAX_HOURS = 9.5
 W = "/kaggle/working"
 BL_URL = (
     "https://download.blender.org/release/Blender4.2/blender-4.2.1-linux-x64.tar.xz"
@@ -52,7 +53,7 @@ sh(f"cd /tmp && wget -q {BL_URL} && tar xf blender-4.2.1-linux-x64.tar.xz")
 sh("pip -q install opencv-python-headless scipy > /dev/null 2>&1 || true")
 B = "/tmp/blender-4.2.1-linux-x64/blender"
 
-# one Blender run per frame
+# CAUTION[batch-one-blender-run-per-frame]: one Blender run per frame
 procs = []
 for gpu in (0, 1):
     lines = ["set -u"]

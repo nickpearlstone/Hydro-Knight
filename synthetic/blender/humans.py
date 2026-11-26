@@ -85,7 +85,8 @@ def skin_mat(name, color):
     return m
 
 
-BASE = {  # standing adult, metres; x = side, y = forward, z = up
+# CAUTION[humans-base-axes]: standing adult in metres; x = side, y = forward, z = up
+BASE = {
     "pelvis": (0, 0, 0.95),
     "spine": (0, 0, 1.13),
     "chest": (0, 0, 1.31),
@@ -426,7 +427,8 @@ def build_person(rng, pid, pose, role="swimmer"):
     return ob, r * s
 
 
-TUBE_MATS = {}  # shared by all tubes in a scene; cleared per scene
+# CAUTION[humans-tube-mats-cleared]: shared by all tubes in a scene; cleared per scene
+TUBE_MATS = {}
 
 
 def build_tube(rng, loc, mats_cache=None, yaw=None):
@@ -504,7 +506,7 @@ def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None, half_w=None
     white = mat("white_paint", (0.92, 0.92, 0.9), rough=0.5)
     steel = mat("steel", (0.8, 0.8, 0.82), rough=0.25, metal=1.0)
     people = []
-    # place deck items relative to hw(y), never a fixed pool width
+    # CAUTION[humans-deck-relative-hw]: place deck items relative to hw(y), never a fixed pool width
     hw = half_w or (lambda y: pool_w / 2)
     yr = rng.uniform(6, 14) if rope_y is None else rope_y
     rope = mat("rope", (0.9, 0.85, 0.3), rough=0.7)

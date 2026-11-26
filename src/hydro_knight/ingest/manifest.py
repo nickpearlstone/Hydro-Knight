@@ -55,12 +55,14 @@ class Label(StrEnum):
 class ClipRecord:
     """One row in the manifest — represents a single video clip."""
 
-    clip_id: str  # deterministic; see make_clip_id
+    # CAUTION[manifest-clip-id]: clip_id must equal make_clip_id(source_url, start_sec, end_sec).
+    clip_id: str
     source_url: str
     platform: str
-    # Download window, source-video seconds; start_sec > 0 = file frame 0 is source time start_sec.
+    # CAUTION[manifest-download-window]: start_sec/end_sec are source seconds; start_sec > 0 means file frame 0 is source time start_sec.
     start_sec: float
-    end_sec: float  # -1.0 means "to the end"
+    # CAUTION[manifest-end-sec-sentinel]: end_sec -1.0 means "to the end"; never treat as a time.
+    end_sec: float
     camera_view: CameraView
     setting: Setting
     time_of_day: TimeOfDay
@@ -68,13 +70,13 @@ class ClipRecord:
     label: Label
     notes: str = ""
 
-    # source fps; 0.0 = unknown
+    # CAUTION[manifest-fps-unknown]: fps 0.0 = unknown; callers must fall back, never assume.
     fps: float = 0.0
 
-    # Event windows in source-video seconds: {"start", "end", "label"}, plus optional "contact", "victim", "saved_off_camera"; start/end may be None.
+    # CAUTION[manifest-events-source-time]: events are source-video seconds, not file time; start/end may be None.
     events: list[dict] = field(default_factory=list)
 
-    # Trim, source-video seconds; None = no trim; independent of the download window.
+    # CAUTION[manifest-trim-source-time]: trim is source seconds; None = no trim; independent of start_sec/end_sec.
     trim_start: float | None = None
     trim_end: float | None = None
 

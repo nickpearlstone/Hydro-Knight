@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-# Keep in sync with normalize.py's reference joints (COCO indices).
+# CAUTION[data-health-ref-joints]: keep in sync with normalize.py's reference joints (COCO indices).
 REF_CONF_COLS = ["c5", "c6", "c11", "c12"]
 
 

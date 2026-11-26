@@ -125,7 +125,8 @@ def create_app(
     app = Flask(__name__, static_folder=str(STATIC), static_url_path="/static")
     manifest = Manifest(Path(manifest_path))
     blocklist = blocklist or Blocklist()
-    lock = threading.Lock()  # hold for every manifest write
+    # CAUTION[server-manifest-lock]: hold for every manifest write
+    lock = threading.Lock()
 
     @app.after_request
     def no_cache(resp):
@@ -219,7 +220,7 @@ def create_app(
         body = request.get_json(force=True)
 
         def apply(r):
-            # must build from the latest saved record
+            # CAUTION[server-save-latest-record]: must build from the latest saved record
             return dataclasses.replace(
                 r,
                 label=Label(body.get("label", r.label.value)),
@@ -253,7 +254,7 @@ def create_app(
         path = local_path(get_record(clip_id))
         if not path.exists():
             abort(404)
-        # conditional=True required for Range requests
+        # CAUTION[server-range-requests]: conditional=True required
         return send_file(path.resolve(), mimetype="video/mp4", conditional=True)
 
     @app.get("/api/boxes/<clip_id>")

@@ -1,4 +1,4 @@
-// UI times are LOCAL FILE seconds; the server stores SOURCE seconds (file + offset).
+// CAUTION[review-source-time]: UI times are LOCAL FILE seconds; the server stores SOURCE seconds (file + offset).
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -30,9 +30,11 @@ const R = {
   prevT: 0,
   box: { x: 0, y: 0, w: 1, h: 1 },
   flash: null,
-  load: 0,         // bumps on every openClip; drop stale responses
+  // CAUTION[review-stale-load]: bump on every openClip; drop stale responses
+  load: 0,
   loading: false,
-  saves: Promise.resolve(), // verdict saves run one at a time, in order
+  // CAUTION[review-save-order]: verdict saves run one at a time, in order
+  saves: Promise.resolve(),
   scrub: null,
 };
 
@@ -113,7 +115,7 @@ async function openClip(i) {
   const row = R.rows[i];
   const c = await (await fetch(`/api/clip/${row.clip_id}`)).json();
   if (tok !== R.load) return;
-  // Set R.idx only after the clip loads.
+  // CAUTION[review-idx-after-load]: Set R.idx only after the clip loads.
   R.idx = i;
   R.loading = false;
   localStorage.setItem("hk.review.clip", row.clip_id);
@@ -133,7 +135,7 @@ async function openClip(i) {
     end: f(e.end),
     offCamera: !!e.saved_off_camera,
   };
-  // Loop window stays inside the trims.
+  // CAUTION[review-loop-in-trims]: Loop window stays inside the trims.
   const trimA = f(c.trim_start) ?? 0;
   const trimB = f(c.trim_end) ?? (R.dur || Infinity);
   const first = R.ev.start ?? (R.clicks[0] || {}).t ?? 0;

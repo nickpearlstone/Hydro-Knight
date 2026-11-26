@@ -59,7 +59,8 @@ def resample_track(
     t_start = g.index[0] / fps_src
     n = int(np.floor((g.index[-1] - g.index[0]) / fps_src * TARGET_FPS + 1e-9)) + 1
     times = t_start + np.arange(n) / TARGET_FPS
-    # Use the nearest processed frame only; unprocessed frames read as missing.
+    # CAUTION[track-series-processed-frames]: use the nearest processed frame only;
+    # unprocessed frames read as missing.
     src = (np.rint(times * fps_src / frame_step) * frame_step).astype(np.int64)
     r = g.reindex(src)
     det = r["box_conf"].notna().to_numpy()
@@ -80,7 +81,7 @@ def resample_track(
     di = np.flatnonzero(det)
     if len(di) > 1:
         a, b = di[:-1], di[1:]
-        # dt is between sampled source frames, not 30 fps steps.
+        # CAUTION[track-series-dt-source]: dt is between sampled source frames, not 30 fps steps.
         dt = (src[b] - src[a]) / fps_src
         same = dt == 0
         dt = np.where(same, 1.0, dt)

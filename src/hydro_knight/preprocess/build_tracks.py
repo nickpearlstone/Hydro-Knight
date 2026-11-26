@@ -45,7 +45,7 @@ LEGACY = TrackSettings(
 def make_tracker(fps: float, settings: TrackSettings) -> ByteTrackTracker:
     """ByteTrack with the lost-track buffer converted to frames at `fps`."""
     if settings.lost_track_seconds is None:
-        # rate must stay 30.0 so the buffer is exactly 30 frames
+        # CAUTION[build-tracks-rate-30]: rate must stay 30.0 so the buffer is exactly 30 frames.
         buffer_frames, rate = (
             30,
             30.0,
@@ -60,7 +60,8 @@ def make_tracker(fps: float, settings: TrackSettings) -> ByteTrackTracker:
         minimum_iou_threshold=settings.min_iou,
         high_conf_det_threshold=settings.high_conf_threshold,
     )
-    tracker.reset()  # reset required: id counter is class-level
+    # CAUTION[build-tracks-tracker-reset]: reset required; id counter is class-level.
+    tracker.reset()
     return tracker
 
 
@@ -95,7 +96,7 @@ def track_detections(
                 confidence=conf_all[idx].astype(float),
                 class_id=np.zeros(len(idx), dtype=int),
             )
-            # "row" column required: tracker reorders output
+            # CAUTION[build-tracks-row-column]: "row" column required; tracker reorders output.
             detections.data["row"] = idx
         else:
             detections = sv.Detections.empty()

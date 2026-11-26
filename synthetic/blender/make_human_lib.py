@@ -24,7 +24,7 @@ ap.add_argument("--sheet", default="", help="optional PNG contact sheet of the l
 args = ap.parse_args(sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else [])
 
 addon_utils.enable("bl_ext.user_default.mpfb", default_set=True)
-# import MPFB only after enable()
+# CAUTION[makehuman-import-after-enable]: import MPFB only after enable()
 _svc = "bl_ext.user_default.mpfb.services"
 HumanService = importlib.import_module(f"{_svc}.humanservice").HumanService
 LocationService = importlib.import_module(f"{_svc}.locationservice").LocationService
@@ -87,7 +87,7 @@ def j(rng, a=12):
 
 def pose_tread(rig, rng):
     for s, sgn in (("l", 1), ("r", -1)):
-        # rest pose is a T-pose: +Y*sgn lowers the arm
+        # CAUTION[makehuman-tpose-arm-sign]: rest pose is a T-pose; +Y*sgn lowers the arm
         rot(rig, f"upperarm_{s}", Y * sgn, 30 + j(rng, 10))
         rot(rig, f"upperarm_{s}", -X, 35 + j(rng))
         rot(rig, f"lowerarm_{s}", -X, 10 + j(rng, 10))

@@ -126,7 +126,7 @@ def fit_scaler(ws: WindowSet, n: int = 2000, seed: int = 0):
     x, _ = ws.gather(rows)
     flat = x[:, ws.context : ws.context + ws.window].reshape(-1, x.shape[-1])
     std = flat.std(axis=0)
-    # A near-constant feature gets scale 1; no tiny floor.
+    # CAUTION[tcn-ae-v2-scaler-no-floor]: a near-constant feature gets scale 1; no tiny floor.
     return flat.mean(axis=0), np.where(std < 1e-3, 1.0, std).astype(np.float32)
 
 

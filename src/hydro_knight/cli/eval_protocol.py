@@ -89,7 +89,7 @@ def evaluate_seed(
     folds = {c: rep["folds"][c] for c in test} if rep.get("folds") else None
     t1 = P.tier1(table, truths, cfg, tracks, folds)
     t2 = P.tier2(table, truths, normal, cfg)
-    # click-matched tracks only; path fragments excluded from scoring
+    # CAUTION[evalproto-click-only]: click-matched tracks only; path fragments excluded from scoring
     frags = rep.get("path_fragments", {})
     click_only = {
         c: sorted(set(v) - set(frags.get(c, [])))

@@ -43,7 +43,8 @@ jobs:
       - name: Check out the repo with its full history
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0  # full history required
+          # CAUTION[ci-secrets-full-history]: full history required.
+          fetch-depth: 0
 
       - name: Install gitleaks (pinned version, checksum verified)
         env:

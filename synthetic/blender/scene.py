@@ -73,7 +73,7 @@ POOL_W, POOL_L, DEPTH = (
     CFG["pool"]["length"],
     CFG["pool"].get("depth", 1.4),
 )
-# y = 0 is the wave-machine/camera end; width grows to POOL_L at the beach
+# CAUTION[scene-pool-y-axis]: y = 0 is the wave-machine/camera end; width grows to POOL_L at the beach
 POOL_W0 = CFG["pool"].get("width_near", POOL_W)
 
 
@@ -177,7 +177,7 @@ def build_water(rng, waves, c):
     link(nt, n2.outputs["Fac"], b2.inputs["Height"])
     link(nt, b1.outputs["Normal"], b2.inputs["Normal"])
     link(nt, b2.outputs["Normal"], p.inputs["Normal"])
-    # shadow rays pass through the water surface
+    # CAUTION[scene-water-shadow-rays]: shadow rays pass through the water surface
     lp = nodes.new("ShaderNodeLightPath")
     tr = nodes.new("ShaderNodeBsdfTransparent")
     mix = nodes.new("ShaderNodeMixShader")
@@ -475,7 +475,8 @@ def place_lounger(rng, pid, x, y, wz, lib=None):
     s = ob.scale[0]
     r = r_world / s
     pelvis_local = Vector((0, -0.03, 0.95 - (1.52 + r * 1.05)))
-    pitch = rng.uniform(0.45, 0.75)  # +x rotation tips the head toward -y
+    # CAUTION[scene-tube-pitch-sign]: +x rotation tips the head toward -y
+    pitch = rng.uniform(0.45, 0.75)
     rot = Euler((pitch, 0, yaw), "XYZ")
     ob.rotation_euler = rot
     target = Vector((x, y, wz - 0.12))
@@ -567,7 +568,8 @@ def build_scene(rng):
             "beach_stand_prob", 0.0
         ):
             u = cc["pose_mix"][2] + 1e-6
-        mix = cc["pose_mix"]  # cumulative: vertical, arms_up, swim, shallow, low
+        # CAUTION[scene-pose-mix-cumulative]: pose_mix is cumulative: vertical, arms_up, swim, shallow, low
+        mix = cc["pose_mix"]
         if u < mix[0]:
             pose, dz, pitch = (
                 "vertical",
@@ -593,11 +595,12 @@ def build_scene(rng):
         yaw = rng.uniform(0, 2 * math.pi)
         if lib:
             ob, r = lib_person(rng, lib, pose, pid)
+            # CAUTION[scene-library-poses-preoriented]: library poses are pre-oriented; prone is baked horizontal
             ob.rotation_euler = (
                 0,
                 0,
                 yaw,
-            )  # library poses are pre-oriented; prone is baked horizontal
+            )
             if pose == "swim":
                 dz = rng.uniform(-0.04, 0.04)
         else:
@@ -684,7 +687,7 @@ def setup_render():
     sc = bpy.context.scene
     sc.render.engine = "CYCLES"
     prefs = bpy.context.preferences.addons["cycles"].preferences
-    # CUDA before OptiX
+    # CAUTION[scene-cuda-before-optix]: CUDA before OptiX
     order = [args.backend] if args.backend else ["CUDA", "OPTIX", "METAL"]
     for dev_type in order:
         try:
@@ -695,7 +698,8 @@ def setup_render():
         except TypeError:
             continue
     for d in prefs.devices:
-        d.use = d.type != "CPU"  # GPUs only; no CPU in a hybrid render
+        # CAUTION[scene-gpus-only]: GPUs only; no CPU in a hybrid render
+        d.use = d.type != "CPU"
     print(
         "DEVICES",
         prefs.compute_device_type,
@@ -844,7 +848,8 @@ def main():
         nm = f"{n + s:04d}"
         rgb_mode()
         keep = args.clip // 2 if args.keep is None else args.keep
-        for f in range(args.clip):  # neighbours first, labelled frame (t = 0) last
+        # CAUTION[scene-labelled-frame-last]: neighbours first, labelled frame (t = 0) last
+        for f in range(args.clip):
             if f == keep:
                 continue
             set_time((f - keep) / 60.0)

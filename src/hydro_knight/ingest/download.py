@@ -51,7 +51,7 @@ def download_clip(
         "--output",
         str(out_path),
         "--format",
-        # keep H.264 (avc1) first
+        # CAUTION[download-h264-first]: keep H.264 (avc1) first.
         "bestvideo[ext=mp4][vcodec^=avc1][height<=1080]/bestvideo[ext=mp4][height<=1080]"
         "/bestvideo[height<=1080]/136/135/134/best[ext=mp4][height<=1080]",
         "--js-runtimes",
@@ -69,14 +69,14 @@ def download_clip(
     elif cookies_from_browser:
         cmd += ["--cookies-from-browser", cookies_from_browser]
 
-    # File time t = source time start_sec + t; convert with ClipRecord.to_file_time/to_source_time.
+    # CAUTION[download-file-time-rebase]: file time t = source time start_sec + t; convert with ClipRecord.to_file_time/to_source_time.
     if (
         record.start_sec
         and record.start_sec > 0
         and record.end_sec
         and record.end_sec > 0
     ):
-        # keep --force-keyframes-at-cuts; file frame 0 must be exactly start_sec
+        # CAUTION[download-keyframes-at-cuts]: keep --force-keyframes-at-cuts; file frame 0 must be exactly start_sec.
         cmd += [
             "--download-sections",
             f"*{record.start_sec}-{record.end_sec}",

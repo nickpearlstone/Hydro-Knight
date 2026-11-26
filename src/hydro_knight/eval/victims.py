@@ -60,7 +60,7 @@ def match_victim_tracks(
     for ev in record.events:
         for click in ev.get("victim", []):
             frame = round(record.to_file_time(click["t"]) * fps)
-            # reset_index first: idxmin needs a unique index
+            # CAUTION[victims-unique-index]: reset_index first: idxmin needs a unique index
             near = det[(det["frame"] - frame).abs() <= frame_tol].reset_index(drop=True)
             ref = local_height(det, frame, click["y"], fps)
             if ref is not None:
@@ -83,7 +83,8 @@ def match_victim_tracks(
                 & (near["by1"] <= click["y"])
                 & (click["y"] <= near["by2"])
             )
-            best = int((dist - 1e6 * inside).idxmin())  # a containing box always wins
+            # CAUTION[victims-containing-box-wins]: a containing box always wins
+            best = int((dist - 1e6 * inside).idxmin())
             if inside[best] or dist[best] <= radius:
                 out.tracks.add(int(near.at[best, "track_id"]))
             else:

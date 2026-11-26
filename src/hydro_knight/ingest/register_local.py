@@ -54,7 +54,7 @@ def register_local(
     start_sec = 0.0
     end_sec = duration if duration > 0 else -1.0
 
-    # clip_id must stay stable per recording; file is named <clip_id>.mp4.
+    # CAUTION[register-local-clip-id]: clip_id must stay stable per recording; file is named <clip_id>.mp4.
     clip_id = make_clip_id(source_url, start_sec, end_sec)
 
     record = ClipRecord(

@@ -27,7 +27,8 @@ class EventTruth:
     victim_tracks: frozenset[int]
     onset_alt: float | None = None
     silent: bool = False
-    # rows dropped before scoring: no catch, no false alarm, not in AUC or rank
+    # CAUTION[protocol-ignore-tracks]: rows dropped before scoring: no catch, no false alarm,
+    # not in AUC or rank
     ignore_tracks: frozenset[int] = frozenset()
 
     @property
@@ -54,7 +55,7 @@ class ProtocolConfig:
     merge_gap_s: float = 2.0
     open_hours_per_day: float = 10.0
     top_k: tuple[int, ...] = (1, 3, 5)
-    # a track's score at time t = its max over (t - window, t]
+    # CAUTION[protocol-rank-window-max]: a track's score at time t = its max over (t - window, t]
     rank_window_s: float = 2.0
     step_s: float = 0.5
     budgets_per_hour: tuple[float, ...] = (0.1, 0.3, 1.0, 3.0, 10.0, 20.0)
@@ -365,8 +366,8 @@ def _tier1_per_clip(
             "within_clip_auc": within_clip_auc(g, truth, cfg.onset_tol_s),
         }
         for k in cfg.top_k:
-            # outright: ties count against the victim; p_top ties split by chance,
-            # moments without a victim score count as 0
+            # CAUTION[protocol-top-k-ties]: outright: ties count against the victim; p_top ties
+            # split by chance, moments without a victim score count as 0
             top = (tl["rank"] <= k).to_numpy()
             rec[f"time_in_top{k}"] = float(tl[f"p_top{k}"].mean()) if len(tl) else 0.0
             rec[f"first_top{k}_s"] = (
@@ -734,7 +735,7 @@ def tier2(
             {
                 "threshold": r["threshold"],
                 "fa_per_hour": r["false_alarms"] / hours if hours > 0 else math.nan,
-                # misses count as the whole window
+                # CAUTION[protocol-miss-delay]: misses count as the whole window
                 "mean_delay_s": float(
                     np.mean(
                         [

@@ -43,7 +43,7 @@ def draw_mp(img, poses, conns):
 def main():
     """Render the two README figures (resolution and YOLO-vs-MediaPipe) to docs/images/."""
     argparse.ArgumentParser(description=__doc__.split("\n\n")[0].strip()).parse_args()
-    # keep this import inside main()
+    # CAUTION[posefig-lazy-mediapipe]: keep this import inside main()
     import mediapipe as mp
     from mediapipe.tasks import python as mp_python
     from mediapipe.tasks.python import vision

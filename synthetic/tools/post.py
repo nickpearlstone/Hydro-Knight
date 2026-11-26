@@ -17,9 +17,10 @@ import numpy as np
 
 DEFAULTS = {
     "gain": None,
-    # gain None = per-backend default
+    # CAUTION[post-gain-backend-default]: gain None = per-backend default
     "gain_by_backend": {"METAL": 0.9, "CPU": 0.96, "OPTIX": 0.96, "CUDA": 0.96},
-    "wb": [0.95, 1.05, 1.0],  # B, G, R gains
+    # CAUTION[post-wb-bgr-order]: wb gains are B, G, R
+    "wb": [0.95, 1.05, 1.0],
     "clahe": 1.2,
     "sat": 1.4,
     "black": 0.08,
@@ -173,7 +174,7 @@ def degrade(img, p, rng, clip=None, clip_keep=0):
     clip = clip or [img]
     bases = [tone(c, p) for c in clip]
     n, keep = p["n_frames"], p["keep"]
-    # shake random walk keeps zero offset on the kept frame
+    # CAUTION[post-shake-zero-offset]: shake random walk keeps zero offset on the kept frame
     steps = rng.normal(0, p["shake_px"] / 2, (n, 2))
     walk = np.cumsum(steps, axis=0)
     walk -= walk[keep]
@@ -295,7 +296,8 @@ def main():
                 for k in range(m["n"])
             ]
         k = lab.get("config", {}).get("camera", {}).get("lens_k", 0.0)
-        if k > 0:  # same curve on the image, every clip frame, labels and masks
+        # CAUTION[post-lens-same-curve]: same curve on the image, every clip frame, labels and masks
+        if k > 0:
             mx, my = fisheye_maps(img.shape[1], img.shape[0], k)
             img = cv2.remap(
                 img, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT

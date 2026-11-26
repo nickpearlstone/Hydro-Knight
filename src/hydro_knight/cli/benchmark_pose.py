@@ -37,7 +37,7 @@ GT_PATH = count.COUNT_PATH
 OUT_DIR = Path("runs/pose_bench")
 MP_MODEL = "raw_local/pose_landmarker.task"
 
-# keep in sync with extract_pose.extract_raw defaults
+# CAUTION[benchpose-extract-defaults]: keep in sync with extract_pose.extract_raw defaults
 TILE, OVERLAP, IMGSZ, CONF = 480, 0.25, 1280, 0.25
 BOX_PAD = 0.10
 

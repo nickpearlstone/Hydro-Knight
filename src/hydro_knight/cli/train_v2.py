@@ -149,13 +149,13 @@ def main() -> None:
         print("SMOKE TEST: unlabeled clips, victims NOT removed. Not a result.")
         args.steps = 30
         args.folds = min(args.folds, 3)
-    # A smoke run must never overwrite a real result.
+    # CAUTION[trainv2-smoke-out]: A smoke run must never overwrite a real result.
     args.out = args.out or ("runs/v2_smoke" if args.smoke else "runs/v2_sizes")
 
     records = Manifest(Path(args.manifest)).load()
     verdicts = review.load(Path(args.reviews))
     rejected = {cid for cid, v in verdicts.items() if v.get("verdict") == "not_good"}
-    # Machine labels count only once a review marks them good.
+    # CAUTION[trainv2-machine-labels]: Machine labels count only once a review marks them good.
     unreviewed = {
         cid
         for cid in review.load(review.CLAUDE_PATH)

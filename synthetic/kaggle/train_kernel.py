@@ -29,7 +29,7 @@ subprocess.run(
     shell=True,
     check=False,
 )
-# fetch COCO weights once before the parallel YOLO workers start
+# CAUTION[train-coco-prefetch]: fetch COCO weights once before the parallel YOLO workers start
 subprocess.run(
     f"cd {W} && python -c \"from ultralytics import YOLO; YOLO('yolo11n.pt')\"",
     shell=True,
@@ -42,7 +42,7 @@ def run(cmd, gpu, log):
     return subprocess.Popen(f"{cmd} > {W}/{log} 2>&1", shell=True, env=env)
 
 
-# a seed starts only before START_BY; timeout ends it at HARD_STOP (Kaggle limit 12 h)
+# CAUTION[train-start-by-hard-stop]: a seed starts only before START_BY; timeout ends it at HARD_STOP (Kaggle limit 12 h)
 START_BY, HARD_STOP = 9 * 3600, 11 * 3600
 JOB, LOG = (
     "python {code}/train_rtdetr.py {tiles} --epochs 100 --stop-after 30 --save-every 5 --batch 8 "

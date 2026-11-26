@@ -37,7 +37,7 @@ KEYPOINT_NAMES = [
 ]
 
 KP_COLUMNS = [f"{axis}{i}" for i in range(17) for axis in ("x", "y", "c")]
-# keep bx/by names; x1..y2 clash with keypoint columns
+# CAUTION[extract-pose-box-columns]: keep bx/by names; x1..y2 clash with keypoint columns.
 BOX_COLUMNS = ["bx1", "by1", "bx2", "by2"]
 DET_COLUMNS = ["frame", "crop"] + BOX_COLUMNS + ["conf"] + KP_COLUMNS
 FRAME_COLUMNS = ["frame", "n_dets", "scene_diff"]
@@ -237,7 +237,8 @@ def extract_raw(
         _write_json_atomic(meta_path, meta)
 
     chunk_frames = meta["chunk_frames"]
-    start = meta["frames_processed"]  # written atomically with chunks_done
+    # CAUTION[extract-pose-resume-progress]: frames_processed must be written atomically with chunks_done.
+    start = meta["frames_processed"]
 
     prev_hist = None
     for i in range(start):

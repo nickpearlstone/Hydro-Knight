@@ -4,11 +4,12 @@ version = "0.1.0"
 description = "Pose-based anomaly detection for swimming-pool drowning safety."
 readme = "README.md"
 requires-python = ">=3.11"
-# must stay AGPL-3.0
+# CAUTION[pyproject-agpl]: must stay AGPL-3.0.
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 dependencies = [
-    "yt-dlp[curl-cffi]>=2026.8.19",  # keep curl-cffi
+    # CAUTION[pyproject-curl-cffi]: keep the curl-cffi extra.
+    "yt-dlp[curl-cffi]>=2026.8.19",
     "certifi>=2024.0.0",
     "opencv-python>=4.9.0",
     "flask>=3.0",

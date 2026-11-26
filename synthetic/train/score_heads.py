@@ -155,7 +155,8 @@ def main():
         f["water"], f["deck"] = count.head_truth(f)
         f["hidden"] = []
     imgs = {f"{f['clip_id']}_{f['frame']}": count.read_frame(f) for f in frames}
-    if in_range:  # out-of-range clicks become "allowed" points
+    # CAUTION[scoreheads-out-of-range-allowed]: out-of-range clicks become "allowed" points
+    if in_range:
         zs = zones.load()
         for f in frames:
             inr, out = in_range_split(
@@ -177,9 +178,8 @@ def main():
             for fr in frames:
                 b, c = dets[f"{fr['clip_id']}_{fr['frame']}"]
                 k = c >= cut
-                if in_range and fr.get(
-                    "zone"
-                ):  # boxes centred outside the zone are ignored
+                # CAUTION[scoreheads-outside-zone-ignored]: boxes centred outside the zone are ignored
+                if in_range and fr.get("zone"):
                     k &= zones.in_zone(
                         fr["zone"], (b[:, 0] + b[:, 2]) / 2, (b[:, 1] + b[:, 3]) / 2
                     )

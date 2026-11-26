@@ -30,7 +30,7 @@ MANIFEST = Path("data/manifests/pool_footage.jsonl")
 CANDIDATES = Path("data/harvest/candidates.jsonl")
 MAX_FETCH_S = 10 * 60
 MAX_NORMAL_S = 3 * 60
-# Only these sites may be searched or downloaded from; anything else is refused.
+# CAUTION[harvest-trusted-sites]: Only these sites may be searched or downloaded from; anything else is refused.
 TRUSTED_SITES = {
     "youtube.com": "youtube",
     "youtu.be": "youtube",

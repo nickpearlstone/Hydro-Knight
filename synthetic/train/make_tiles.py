@@ -58,7 +58,8 @@ def main():
         H, W = img.shape[:2]
         heads = []
         for line in txt.read_text().split("\n"):
-            if line.startswith("1 "):  # class 1 = head in the export
+            # CAUTION[maketiles-head-class]: class 1 = head in the export
+            if line.startswith("1 "):
                 _, cx, cy, w, h = map(float, line.split())
                 heads.append(
                     (

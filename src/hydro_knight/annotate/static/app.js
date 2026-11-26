@@ -1,4 +1,4 @@
-// UI times are LOCAL FILE seconds; the server stores SOURCE seconds (file + offset).
+// CAUTION[app-source-time]: UI times are LOCAL FILE seconds; the server stores SOURCE seconds (file + offset).
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -143,7 +143,7 @@ async function openClip(i) {
 }
 
 const frameNow = () => Math.floor(video.currentTime * S.fps + 1e-4);
-// Stored times are mid-frame: (frame + 0.5) / fps.
+// CAUTION[app-mid-frame-time]: Stored times are mid-frame: (frame + 0.5) / fps.
 const frameTime = () => Math.round(((frameNow() + 0.5) / S.fps) * 1e6) / 1e6;
 
 function seek(t) {
@@ -226,7 +226,7 @@ function scheduleSave() {
   S.saveTimer = setTimeout(() => { S.saveTimer = null; save(); }, 400);
 }
 
-// Never send start_sec/end_sec; trims go in source time.
+// CAUTION[app-no-download-window]: Never send start_sec/end_sec; trims go in source time.
 function savePayload() {
   const toSource = (t) => (t == null ? null : t + S.offset);
   return {

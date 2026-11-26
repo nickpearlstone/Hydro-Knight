@@ -91,7 +91,7 @@ def fetch_metadata(
 
     result = subprocess.run(cmd, capture_output=True, text=True, env=_ENV)
 
-    # Parse stdout regardless of return code.
+    # CAUTION[collect-parse-stdout-always]: parse stdout regardless of return code.
     all_results = _parse_json_lines(result.stdout)
 
     if not all_results and result.returncode != 0:
@@ -105,7 +105,7 @@ def fetch_metadata(
     filtered = []
     for meta in all_results:
         duration = float(meta.get("duration") or 0.0)
-        # Keep entries with missing duration (0.0).
+        # CAUTION[collect-keep-zero-duration]: keep entries with missing duration (0.0).
         if duration == 0.0 or min_duration <= duration <= max_duration:
             filtered.append(meta)
         if len(filtered) >= max_results:

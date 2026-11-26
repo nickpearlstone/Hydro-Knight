@@ -12,7 +12,8 @@ from pathlib import Path
 import numpy as np
 from scipy import ndimage
 
-MIN_PX = {0: 20, 1: 6}  # minimum visible pixels per class (0 person, 1 head)
+# CAUTION[export-yolo-min-px]: minimum visible pixels per class (0 person, 1 head)
+MIN_PX = {0: 20, 1: 6}
 
 
 def boxes(mask, min_px):

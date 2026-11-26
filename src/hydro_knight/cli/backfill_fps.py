@@ -141,7 +141,7 @@ def main() -> None:
         return
 
     for r, fps, _dur, _how in resolved:
-        # use modify(), not a full rewrite
+        # CAUTION[backfill-modify-only]: use modify(), not a full rewrite
         manifest.modify(
             r.clip_id, lambda rec, fps=fps: dataclasses.replace(rec, fps=fps)
         )

@@ -1,4 +1,4 @@
-// Points and boxes are pixels in the original frame.
+// CAUTION[count-pixel-units]: Points and boxes are pixels in the original frame.
 
 const $ = (s) => document.querySelector(s);
 

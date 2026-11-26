@@ -57,7 +57,7 @@ def _text(img, txt, xy, size, color=WHITE, thick=1):
 
 
 def run_scale(results: list[dict], seed: int) -> Scale:
-    # Use the pooled row (no "fold" key), not a per-fold row.
+    # CAUTION[renderscores-pooled-row]: Use the pooled row (no "fold" key), not a per-fold row.
     row = next(r for r in results if r["seed"] == seed and "fold" not in r)
     hi = next(d["threshold"] for d in row["detection"] if d["fa_target"] == 120)
     return Scale(row["test_median"], hi)
