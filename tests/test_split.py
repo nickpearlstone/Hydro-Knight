@@ -1,5 +1,3 @@
-"""Whole-clip holdout: disjoint, complete, deterministic."""
-
 from __future__ import annotations
 
 import pytest
@@ -12,9 +10,7 @@ IDS = [f"clip{i:02d}" for i in range(57)]
 def test_split_is_disjoint_complete_and_sized():
     train, test = split_clips(IDS, test_frac=0.2, seed=0)
     assert set(train).isdisjoint(test) and set(train) | set(test) == set(IDS)
-    assert (
-        0.1 * 57 <= len(test) <= 0.3 * 57
-    )  # about 20%: each clip decides by its own hash
+    assert 0.1 * 57 <= len(test) <= 0.3 * 57
 
 
 def test_split_is_deterministic_and_order_free():
@@ -29,8 +25,7 @@ def test_tiny_sets_keep_at_least_one_training_clip(ids):
 
 
 def test_labeling_more_clips_never_moves_existing_ones():
-    # Labels arrive a few clips at a time; earlier clips must keep their side,
-    # or results from different labeling stages aren't comparable.
+    # earlier clips keep their side as labels arrive
     train_a, test_a = split_clips(IDS[:20], seed=0)
     train_b, test_b = split_clips(IDS, seed=0)
     assert set(test_a) <= set(test_b) and set(train_a) <= set(train_b)
@@ -56,12 +51,12 @@ def test_fold_zero_is_the_old_twenty_percent_holdout():
 
 def test_labeling_more_clips_never_moves_a_clip_between_folds():
     small, full = assign_folds(IDS[:30], seed=0), assign_folds(IDS, seed=0)
-    assert set(small.values()) == set(range(5))  # no fallback move in the smaller set
+    assert set(small.values()) == set(range(5))
     assert all(full[c] == f for c, f in small.items())
 
 
 def test_an_empty_fold_is_filled_from_a_bigger_one():
-    # 5 clips in 5 folds: the hash alone leaves some folds empty for most seeds.
+    # 5 clips in 5 folds: no fold may be empty
     ids = IDS[:5]
     for seed in range(20):
         folds = assign_folds(ids, k=5, seed=seed)

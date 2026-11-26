@@ -1,17 +1,4 @@
-"""
-Grouped K-fold: pool every fold model's held-out scores into one table, on one scale.
-
-Each clip gets one fold (split.assign_folds). Fold f's model trains on the other folds and
-scores only fold f, so stacking the K held-out tables tests every clip exactly once, each
-by a model that never trained on it.
-
-Within one clip every swimmer is scored by the same model, so within-clip measures (same-
-clip AUC, time in top k) need nothing more. Measures that apply one alarm threshold across
-clips do: the K models' reconstruction errors sit at different levels. So each model's
-scores are divided by the median score of its own training windows. That reference comes
-from training folds only, and dividing by a positive number never reorders scores within a
-clip. The raw error is kept next to it.
-"""
+"""Grouped K-fold: pool every fold model's held-out scores into one table, on one scale."""
 
 from __future__ import annotations
 
@@ -31,11 +18,7 @@ def training_sample(ws: WindowSet, n: int = 20000) -> WindowSet:
 
 
 def scale_reference(train_scores: np.ndarray) -> float:
-    """Median score of a fold model's own training windows: its common-scale unit.
-
-    Raises:
-        ValueError: no positive training scores to scale by.
-    """
+    """Median score of a fold model's own training windows: its common-scale unit."""
     s = np.asarray(train_scores, float)
     s = s[np.isfinite(s)]
     ref = float(np.median(s)) if len(s) else float("nan")
@@ -45,11 +28,7 @@ def scale_reference(train_scores: np.ndarray) -> float:
 
 
 def pool(tables: dict[int, pd.DataFrame]) -> pd.DataFrame:
-    """Stack per-fold held-out tables (each with a clip_id column) into one, adding a fold column.
-
-    Raises:
-        ValueError: a clip appears in more than one fold's table.
-    """
+    """Stack per-fold held-out tables (each with a clip_id column) into one, adding a fold column."""
     seen: dict[str, int] = {}
     for f, t in tables.items():
         for c in pd.unique(t["clip_id"]):
@@ -62,8 +41,5 @@ def pool(tables: dict[int, pd.DataFrame]) -> pd.DataFrame:
 
 
 def pooled_report(base: DatasetReport, folds: dict[str, int]) -> DatasetReport:
-    """The loaded report with every clip in `folds` as tested (in its key order) and the fold map.
-
-    used_train stays empty: each clip trained K-1 of the K models.
-    """
+    """The loaded report with every clip in `folds` as tested (in its key order) and the fold map."""
     return replace(base, used_train=[], used_test=list(folds), folds=dict(folds))

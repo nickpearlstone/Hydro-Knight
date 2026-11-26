@@ -1,24 +1,5 @@
 """
 Score a saved run with the two-tier evaluation protocol (src/hydro_knight/eval/protocol.py).
-
-Reads the per-window alarm tables and dataset reports that `hydroknight train tcn-v2 --detection`
-saves, so nothing is retrained. Writes, per seed, a markdown report, the tier-1 per-clip
-table and a JSON summary into --out. For a K-fold run each seed's table already pools every
-fold's held-out clips (each clip scored once, by a model that never saw it), so it is scored
-once per seed; the report adds the proxy curve with thresholds picked on the other folds and
-the per-fold spread. Old hold-out runs score as before.
-
-    uv run hydroknight eval protocol runs/v2_ckpt_after
-    uv run hydroknight eval protocol runs/v2_ckpt_after --pseudo-normal      # tier 2 on pre-onset footage
-    uv run hydroknight eval protocol runs/v2_ckpt_after --onset-alt scratch/z5cc/label_compare.json
-    uv run hydroknight eval protocol runs/RUN_B --compare runs/RUN_A          # is B better than A?
-    uv run --extra tracking hydroknight eval protocol runs/RUN --mlflow       # also log to MLflow
-
---onset-alt takes either {clip_id: onset in source seconds} or the Z5cc label comparison
-rows (clip_id, his_onset, our_onset); only onsets within 30 s of ours are used.
---normal takes a JSON list of {clip_id, start, end} incident-free spans (file seconds)
-whose scores are in the run's alarm tables; until such footage exists, tier 2 reports
-that no budget can be verified, and --pseudo-normal gives a clearly labelled stopgap.
 """
 
 from __future__ import annotations
@@ -62,11 +43,7 @@ def load_normal(path: Path | None) -> list[P.NormalSpan]:
 
 
 def load_tracks(clip_ids, tracks_dir: Path) -> dict[str, pd.DataFrame]:
-    """The track table each clip's model was fed, as (t in file seconds, track_id), confirmed tracks only.
-
-    Any track file with columns frame and track_id and a video fps in its provenance works,
-    so head tracks can replace the default pose keypoint tracks later.
-    """
+    """Per-clip (t in file seconds, track_id) tables of confirmed tracks from track parquets."""
     out = {}
     for cid in clip_ids:
         pq = tracks_dir / f"{cid}.parquet"
@@ -112,8 +89,7 @@ def evaluate_seed(
     folds = {c: rep["folds"][c] for c in test} if rep.get("folds") else None
     t1 = P.tier1(table, truths, cfg, tracks, folds)
     t2 = P.tier2(table, truths, normal, cfg)
-    # Second victim definition (2026-10-18): click-matched tracks only; the path
-    # fragments' rows are dropped from scoring, so they are neither catches nor rivals.
+    # click-matched tracks only; path fragments excluded from scoring
     frags = rep.get("path_fragments", {})
     click_only = {
         c: sorted(set(v) - set(frags.get(c, [])))
@@ -138,12 +114,11 @@ def evaluate_seed(
 
 
 def _clip_mean(pc: pd.DataFrame, col: str):
-    """Clip-mean of one per-clip column, as a statistic over a (resampled) list of clip ids."""
     return lambda ids: float(np.nanmean(pc.loc[ids, col].to_numpy(float)))
 
 
 def compare(run_a: Path, run_b: Path, size: str, records, args, cfg) -> str:
-    """Paired, clip-resampled difference B - A on tier-1 headline measures, per shared seed."""
+    """Paired, clip-resampled B - A difference on tier-1 headline measures, per shared seed."""
     lines = [
         f"# {run_b.name} vs {run_a.name}",
         "",
@@ -190,7 +165,7 @@ def jsonable(t1: dict, t2: dict) -> dict:
 
 
 def headline_metrics(r: dict) -> dict[str, float]:
-    """Flat metric dict for MLflow: tier-1 values with intervals, both baselines, both victim rows."""
+    """Flat metric dict for MLflow."""
     out: dict[str, float] = {}
     for prefix, t1 in (("headline", r["t1"]), ("click_only", r["t1_click"])):
         for k, v in t1["summary"].items():
@@ -220,10 +195,7 @@ def headline_metrics(r: dict) -> dict[str, float]:
 
 
 def training_run_id(tracking, ckpt: Path, experiment: str) -> str:
-    """Id of the train_v2 run that wrote this checkpoint (matched by file hash), or "none found".
-
-    Re-scoring runs (--load-dir) carry the same hash; the earliest run is the one that trained it.
-    """
+    """Id of the train_v2 run that wrote this checkpoint (by file hash), or "none found"."""
     from hydro_knight.eval import run_meta
 
     sha = run_meta.file_sha256(ckpt)
@@ -236,12 +208,12 @@ def training_run_id(tracking, ckpt: Path, experiment: str) -> str:
 def log_seed(
     tracking, args, seed: int, cfg: P.ProtocolConfig, r: dict, files: list[Path]
 ) -> dict[str, float]:
-    """One nested MLflow child run per seed: params, the 94 headline metrics, three figures, the report files."""
+    """Log one nested MLflow child run for a seed."""
     from hydro_knight.eval import figures as F
     from hydro_knight.eval import run_meta
 
     ckpt = args.run / f"model_{args.size}_s{seed}.pt"
-    if not ckpt.exists():  # K-fold: the training run is found by its fold-0 checkpoint
+    if not ckpt.exists():  # K-fold: fold-0 checkpoint
         ckpt = args.run / f"model_{args.size}_s{seed}_f0.pt"
     params = {
         "run_folder": str(args.run),
@@ -287,7 +259,7 @@ def log_seed(
 
 
 def log_parent_summary(tracking, args, seed_metrics: list[dict]) -> None:
-    """Parent run: mean and SD over seeds, plus a comparison against every evaluated run so far."""
+    """Log mean and SD over seeds plus a cross-run comparison."""
     from hydro_knight.eval import figures as F
     from hydro_knight.eval import run_meta
 
@@ -340,7 +312,7 @@ def main() -> None:
     with contextlib.ExitStack() as stack:
         tracking = None
         if args.mlflow:
-            from hydro_knight.eval import run_meta, tracking  # imports mlflow
+            from hydro_knight.eval import run_meta, tracking
 
             stack.enter_context(
                 tracking.run(
@@ -369,7 +341,7 @@ def main() -> None:
 
 
 def run_seeds(args, records, cfg, out: Path, tracking) -> list[dict]:
-    """Evaluate, write and (optionally) log every seed in the run folder; returns each seed's metrics."""
+    """Evaluate, write and optionally log every seed; returns each seed's metrics."""
     seed_metrics = []
     for seed in seeds_in(args.run, args.size):
         r = evaluate_seed(args.run, args.size, seed, records, args, cfg)

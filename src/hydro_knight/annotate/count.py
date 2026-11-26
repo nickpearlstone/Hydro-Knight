@@ -1,30 +1,4 @@
-"""
-Swimmer-count labels: every person clicked on a handful of still frames.
-
-This is the ground truth behind hydroknight benchmark pose. Each frame record is
-{"clip_id", "frame", "label", "water": [[x, y], ...], "deck": [[x, y], ...]}:
-one point per person, in original-frame pixels, "water" for people in the pool and
-"deck" for people out of it (deck, stairs, guard stand). An optional "hidden" list marks
-people whose head isn't visible in the still (fully under water with only a shadow showing,
-only an arm or back visible, the head blocked by a tube, person or splash, or not sure it's
-a person). Scoring ignores deck and hidden points alike (`ignored`): a detector is neither
-penalised for missing them nor for boxing them. The file holds points only,
-no pixels, so it is safe to commit. The frame images are cached under raw_local/
-and are never committed.
-
-The benchmark script picks the frames (`benchmark_pose.py frames`); the labeler's
-Swimmer count tab edits the points.
-
-Head boxes (the tab's head-box mode) add optional keys to a frame record:
-"heads": {"water": [[x1, y1, x2, y2], ...], "deck": [...], "no_head": [[x, y], ...]}
-("no_head" = a person is visible but their head isn't, so a head detector can't be
-asked to find them), "heads_reviewed" (a person checked every box on the frame) and
-"heads_source" (who drew the boxes first, e.g. a model's pre-labels).
-
-Two frame sets share this format: the benchmark frames (COUNT_PATH, the test set)
-and the head validation frames (VAL_PATH, picked by `hydroknight heads frames` from
-other clips, for choosing checkpoints and thresholds without touching the test set).
-"""
+"""Swimmer-count labels: people clicked on still frames (points only, original-frame pixels; images cached in raw_local/)."""
 
 from __future__ import annotations
 
@@ -57,11 +31,7 @@ def frame_path(item: dict) -> Path:
 
 
 def read_frame(item: dict) -> np.ndarray:
-    """The frame as a BGR array: from the cache, or decoded from raw_local/<clip_id>.mp4 and cached.
-
-    Raises:
-        FileNotFoundError: the frame isn't cached and the video can't supply it.
-    """
+    """The frame as a BGR array, from the cache or decoded from raw_local/<clip_id>.mp4."""
     path = frame_path(item)
     if path.exists():
         return cv2.imread(str(path))
@@ -84,7 +54,7 @@ def load(path: Path = COUNT_PATH) -> dict:
 
 
 def save(data: dict, path: Path = COUNT_PATH) -> None:
-    """Write the label file atomically (temp file + rename), so a crash never truncates it."""
+    """Write the label file atomically."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
@@ -93,7 +63,6 @@ def save(data: dict, path: Path = COUNT_PATH) -> None:
 
 
 def _point(p) -> list[float]:
-    """One [x, y] point: two finite, non-negative numbers, rounded to 0.1 px."""
     if not (isinstance(p, list | tuple) and len(p) == 2):
         raise ValueError(f"bad point {p!r}")
     x, y = float(p[0]), float(p[1])
@@ -103,13 +72,7 @@ def _point(p) -> list[float]:
 
 
 def clean_points(body: dict) -> dict[str, list[list[float]]]:
-    """Validate {"water": [[x, y]...], "deck": [...], "hidden": [...]} posted by the UI.
-
-    "hidden" is optional (older clients and files don't send it). Rounds to 0.1 px.
-
-    Raises:
-        ValueError: a missing kind, or a point that isn't two finite, non-negative numbers.
-    """
+    """Validate posted water/deck points ("hidden" optional); rounded to 0.1 px."""
     out = {}
     for kind in KINDS + OPTIONAL_KINDS:
         pts = body.get(kind)
@@ -127,12 +90,7 @@ def ignored(frame: dict) -> list:
 
 
 def head_truth(frame: dict) -> tuple[list, list]:
-    """(heads to find, points ignored) for scoring a head detector on one frame.
-
-    A frame whose head boxes a person reviewed is scored on them: the centre of each
-    in-water head box must be found; out-of-water heads and "no head visible" marks are
-    ignored. Other frames fall back to the dots (water to find, deck + hidden ignored).
-    """
+    """(heads to find, points ignored): reviewed head boxes if present, else the dots."""
     h = frame.get("heads")
     if not (frame.get("heads_reviewed") and h):
         return list(frame["water"]), ignored(frame)
@@ -144,13 +102,7 @@ def head_truth(frame: dict) -> tuple[list, list]:
 
 
 def clean_heads(body: dict) -> dict[str, list[list[float]]]:
-    """Validate {"water": [[x1, y1, x2, y2]...], "deck": [...], "no_head": [[x, y]...]}.
-
-    Boxes are rounded to 0.1 px and must have x1 < x2 and y1 < y2.
-
-    Raises:
-        ValueError: a missing list, or a box or point that isn't finite and non-negative.
-    """
+    """Validate posted head boxes (x1 < x2, y1 < y2) and no_head points; rounded to 0.1 px."""
     if not isinstance(body, dict):
         raise ValueError("heads must be an object")
     out = {}

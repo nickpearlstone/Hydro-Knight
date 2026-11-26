@@ -1,9 +1,5 @@
 """Procedural swimmers, vinyl tubes and deck clutter for the wave-pool renders (no downloaded assets).
 
-Bodies grow from a stick skeleton with Blender's Skin modifier + subdivision, so they get
-smooth shoulders, a neck, elbows, hands, hips and knees. Heads get a nose, ears, eyes and
-brows; hair is a displaced cap (short, long or bald); swimwear is painted onto body faces
-by height (trunks, one-piece, bikini). Skin is wet: subsurface + a glossy clear coat.
 Imported by wavepool_v2.py inside Blender.
 """
 
@@ -14,7 +10,6 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
-# Fitzpatrick-like skin range (sRGB), wet-dark hair, swimwear colours
 SKIN = [
     (0.96, 0.80, 0.69),
     (0.91, 0.72, 0.58),
@@ -44,7 +39,6 @@ SUIT = [
     (0.95, 0.85, 0.15),
     (0.45, 0.15, 0.55),
 ]
-# wave-park tubes: mostly teal/aqua translucent vinyl, some blue (matched to the reference frame)
 TUBE = [
     (0.04, 0.62, 0.64),
     (0.06, 0.66, 0.62),
@@ -90,8 +84,6 @@ def skin_mat(name, color):
     p.inputs["Subsurface Scale"].default_value = 0.02
     return m
 
-
-# ---------------------------------------------------------------- skeleton + poses
 
 BASE = {  # standing adult, metres; x = side, y = forward, z = up
     "pelvis": (0, 0, 0.95),
@@ -152,7 +144,6 @@ RADII = {
 
 
 def limb(side, sh, el, wr, ha):
-    """Arm joints from offsets (x mirrored by side)."""
     s = -1 if side == "L" else 1
     out = {}
     for k, v in (("el", el), ("wr", wr), ("ha", ha)):
@@ -166,7 +157,7 @@ ARM_POSES = {
         (0.34, 0.12, 1.20),
         (0.46, 0.25, 1.06),
         (0.50, 0.30, 1.02),
-    ),  # sculling under the surface
+    ),
     "up": ((0.28, 0.02, 1.68), (0.32, 0.04, 1.92), (0.33, 0.05, 2.00)),
     "down": ((0.23, 0.0, 1.16), (0.26, 0.05, 0.92), (0.27, 0.07, 0.84)),
     "tube": ((0.30, 0.26, 1.30), (0.24, 0.47, 1.33), (0.20, 0.55, 1.33)),
@@ -174,17 +165,17 @@ ARM_POSES = {
         (0.36, -0.04, 1.30),
         (0.56, 0.02, 1.20),
         (0.63, 0.04, 1.17),
-    ),  # arms resting out on a tube rim
+    ),
     "press": (
         (0.32, 0.12, 1.24),
         (0.40, 0.22, 1.12),
         (0.43, 0.26, 1.06),
-    ),  # distress: pressing down
+    ),
     "forward": (
         (0.16, 0.30, 1.62),
         (0.14, 0.40, 1.88),
         (0.13, 0.42, 1.97),
-    ),  # crawl stroke reach
+    ),
 }
 LEG_POSES = {
     "stand": ((0.10, 0.0, 0.50), (0.10, -0.02, 0.09), (0.10, 0.12, 0.03)),
@@ -206,7 +197,6 @@ def skeleton(rng, arms_r, arms_l, legs, female):
         for k, v in (("kn", kn), ("an", an), ("to", to)):
             v = jit(v, 0.03)
             j[k + side] = (s * abs(v[0]), v[1], v[2])
-    # real swimmers read as bulkier than a skeleton: thicker trunk and limbs, varied build
     build = rng.uniform(1.15, 1.45)
     radii = {k: (a * build, b * build) for k, (a, b) in RADII.items()}
     if female:
@@ -247,7 +237,6 @@ def body_mesh(name, joints, radii):
 
 
 def paint_suit(ob, style):
-    """Material index 1 (suit) on faces by height/side in the standing frame."""
     me = ob.data
     for p in me.polygons:
         x, y, z = p.center
@@ -289,10 +278,10 @@ def head_mesh(name, r, hair_style, rng):
     bm = bmesh.new()
     add_sphere(
         bm, (0, 0, 0), (r * 0.86, r * 0.98, r * 1.08), mat_index=0, seg=32, rings=20
-    )  # skull
+    )
     add_sphere(
         bm, (0, r * 0.25, -r * 0.48), (r * 0.62, r * 0.62, r * 0.55), mat_index=0
-    )  # jaw
+    )
     add_sphere(
         bm,
         (0, r * 0.95, -r * 0.08),
@@ -300,7 +289,7 @@ def head_mesh(name, r, hair_style, rng):
         mat_index=0,
         seg=12,
         rings=8,
-    )  # nose
+    )
     for s in (-1, 1):
         add_sphere(
             bm,
@@ -317,7 +306,7 @@ def head_mesh(name, r, hair_style, rng):
             mat_index=3,
             seg=10,
             rings=6,
-        )  # eye
+        )
         add_sphere(
             bm,
             (s * r * 0.36, r * 0.86, r * 0.30),
@@ -325,7 +314,7 @@ def head_mesh(name, r, hair_style, rng):
             mat_index=2,
             seg=10,
             rings=6,
-        )  # brow
+        )
     add_sphere(
         bm,
         (0, r * 0.88, -r * 0.42),
@@ -333,7 +322,7 @@ def head_mesh(name, r, hair_style, rng):
         mat_index=4,
         seg=10,
         rings=6,
-    )  # mouth
+    )
     if hair_style != "bald":
         add_sphere(
             bm,
@@ -360,10 +349,7 @@ def head_mesh(name, r, hair_style, rng):
 
 
 def build_person(rng, pid, pose, role="swimmer"):
-    """Returns (object, head radius, head offset from object origin in the object's frame).
-
-    The object origin is the head centre, so placing the object places the head exactly.
-    """
+    """Returns (object, head radius, head offset); the object origin is the head centre."""
     child = role == "swimmer" and rng.random() < 0.25
     female = rng.random() < 0.5
     s = rng.uniform(0.66, 0.85) if child else rng.uniform(0.95, 1.12)
@@ -395,7 +381,7 @@ def build_person(rng, pid, pose, role="swimmer"):
     if child and rng.random() < 0.3:
         style = "rashguard"
     paint_suit(body, style)
-    r = 0.108 * (s**0.5) / s  # in skeleton units: kids have relatively bigger heads
+    r = 0.108 * (s**0.5) / s
     hair_style = rng.choice(
         ["short", "short", "long", "bun"]
         if female
@@ -403,9 +389,7 @@ def build_person(rng, pid, pose, role="swimmer"):
     )
     head = head_mesh(f"head_{pid}", r, hair_style, rng)
     head_c = Vector((0, 0.03, 1.52 + r * 1.05))
-    tilt = (
-        rng.uniform(-0.25, 0.15) if pose != "low" else rng.uniform(-0.7, -0.35)
-    )  # low: head back
+    tilt = rng.uniform(-0.25, 0.15) if pose != "low" else rng.uniform(-0.7, -0.35)
     head.rotation_euler = (tilt, 0, rng.uniform(-0.4, 0.4))
     head.location = head_c
     skin = SKIN[rng.integers(len(SKIN))]
@@ -433,7 +417,6 @@ def build_person(rng, pid, pose, role="swimmer"):
     bpy.context.view_layer.objects.active = body
     bpy.ops.object.join()
     ob = bpy.context.object
-    # put the origin at the head centre, scale to the person's size
     me = ob.data
     me.transform(__import__("mathutils").Matrix.Translation(-head_c))
     ob.location = (0, 0, 0)
@@ -443,21 +426,18 @@ def build_person(rng, pid, pose, role="swimmer"):
     return ob, r * s
 
 
-# ---------------------------------------------------------------- tubes + clutter
-
-
-TUBE_MATS = {}  # vinyl + handle materials shared by all tubes in a scene; cleared per scene
+TUBE_MATS = {}  # shared by all tubes in a scene; cleared per scene
 
 
 def build_tube(rng, loc, mats_cache=None, yaw=None):
-    """Thick translucent vinyl ring (air inside) with two dark-blue grab handles, ~1.1-1.3 m across."""
+    """Thick translucent vinyl ring with two dark-blue grab handles, ~1.1-1.3 m across."""
     if mats_cache is None:
         mats_cache = TUBE_MATS
     key = int(rng.integers(len(TUBE)))
     if key not in mats_cache or mats_cache[key].name not in bpy.data.materials:
         m = mat(
             f"vinyl{key}",
-            tuple(0.35 + 0.65 * c for c in TUBE[key]),  # light aqua vinyl
+            tuple(0.35 + 0.65 * c for c in TUBE[key]),
             rough=0.05,
             transmission=0.9,
             ior=1.4,
@@ -524,10 +504,8 @@ def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None, half_w=None
     white = mat("white_paint", (0.92, 0.92, 0.9), rough=0.5)
     steel = mat("steel", (0.8, 0.8, 0.82), rough=0.25, metal=1.0)
     people = []
-    # half pool width at a given y: fan-shaped pools are wider toward the beach, so everything on a side
-    # deck is placed relative to the wall at its own y (a rectangle put deck people in the water)
+    # place deck items relative to hw(y), never a fixed pool width
     hw = half_w or (lambda y: pool_w / 2)
-    # rope line with floats across the pool
     yr = rng.uniform(6, 14) if rope_y is None else rope_y
     rope = mat("rope", (0.9, 0.85, 0.3), rough=0.7)
     _cyl(
@@ -552,7 +530,6 @@ def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None, half_w=None
         )
         bpy.ops.object.shade_smooth()
         bpy.context.object.data.materials.append(float_cols[i % 3])
-    # ladders + railings on both sides
     for side in (-1, 1):
         for y in rng.uniform(3, pool_l - 5, 2):
             x = side * (hw(y) - 0.1)
@@ -565,7 +542,6 @@ def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None, half_w=None
                     steel,
                     rot=(0, math.pi / 2, 0),
                 )
-    # lifeguard stand on a side deck with a guard on it
     side = rng.choice([-1, 1])
     gy = rng.uniform(0.25, 0.75) * pool_l
     gx = side * (hw(gy) + 1.2)
@@ -584,7 +560,6 @@ def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None, half_w=None
     g.rotation_euler = (0, 0, math.pi / 2 * -side)
     people.append((g, r, "guard"))
     next_pid += 1
-    # umbrellas, chairs and people on the decks
     umb_cols = [
         mat(f"umb{i}", c, 0.6)
         for i, c in enumerate(
@@ -602,7 +577,7 @@ def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None, half_w=None
         bpy.context.object.data.materials.append(umb_cols[rng.integers(len(umb_cols))])
     for _ in range(int(rng.integers(8, 18))):
         side = rng.choice([-1, 1])
-        if rng.random() < 0.25:  # far end deck
+        if rng.random() < 0.25:
             x, y = rng.uniform(-pool_w / 2, pool_w / 2), pool_l + rng.uniform(1, 4)
         else:
             y = rng.uniform(0, pool_l)
@@ -612,7 +587,6 @@ def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None, half_w=None
         p.rotation_euler = (0, 0, rng.uniform(0, 6.3))
         people.append((p, r, "deck"))
         next_pid += 1
-    # huts with blue roofs past the far deck
     roof = mat("roof", (0.15, 0.35, 0.7), 0.6)
     for _ in range(int(rng.integers(3, 6))):
         x, y = rng.uniform(-pool_w, pool_w), pool_l + rng.uniform(8, 14)
@@ -630,9 +604,6 @@ def build_clutter(rng, pool_w, pool_l, waves, next_pid, rope_y=None, half_w=None
         bpy.context.object.scale = (1, 0.45, 1)
         bpy.context.object.data.materials.append(roof)
     return people, next_pid
-
-
-# ---------------------------------------------------------------- splash
 
 
 def foam_material(name="foam"):
@@ -685,7 +656,6 @@ def mist_material(name="mist"):
     nt.nodes.remove(nt.nodes["Principled BSDF"])
     vs = nt.nodes.new("ShaderNodeVolumeScatter")
     vs.inputs["Color"].default_value = (0.95, 0.98, 0.98, 1)
-    # density fades to zero at the edge (spherical gradient) and is broken up by noise
     tc = nt.nodes.new("ShaderNodeTexCoord")
     grad = nt.nodes.new("ShaderNodeTexGradient")
     grad.gradient_type = "SPHERICAL"
@@ -708,7 +678,7 @@ def mist_material(name="mist"):
 
 
 def build_splash(rng, x, y, wz, strength):
-    """Patchy foam ring on the surface + a cloud of spray droplets above it. strength 0..1."""
+    """Foam ring on the surface plus spray droplets above it; strength 0..1."""
     bm = bmesh.new()
     n_patch = 1 + int(strength * 2)
     for _ in range(n_patch):
@@ -729,7 +699,6 @@ def build_splash(rng, x, y, wz, strength):
     bpy.context.collection.objects.link(fo)
     fm.materials.append(foam_material())
     fo["category_id"] = 0
-    # spray: many fine droplets kept low over the water, plus a small white mist cloud
     n = int(80 + 320 * strength)
     bm = bmesh.new()
     for _ in range(n):

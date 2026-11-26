@@ -1,14 +1,6 @@
 """Pre-label head boxes on the head validation frames with an ensemble of trained detectors.
 
-Each model runs with score_heads.py's tiling. A box is kept when at least --votes models put
-a box on the same head (IoU >= --iou with the most confident box of the group) at confidence
->= --conf; the kept box is the mean of the group's boxes. Pre-labels go into the frame's
-head boxes (in the water) with "heads_reviewed": false and "heads_source" naming the models,
-so the labeler draws them dashed until a person has checked every box. Frames that already
-have head boxes are skipped unless --overwrite, so a person's work is never replaced.
-
-Only the validation frames get pre-labels: the benchmark (test) frames are labelled from
-scratch, so the test labels don't lean toward any model's boxes.
+Only validation frames are pre-labelled, never the benchmark (test) frames; frames that already have head boxes are skipped unless --overwrite.
 
     uv run --with transformers python synthetic/train/prelabel_heads.py \\
         synthetic/renders/train_out3/train/rtdetr_v3_seed*/best --votes 4 --conf 0.05
@@ -38,11 +30,7 @@ def iou_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 def vote(
     dets: list[tuple[np.ndarray, np.ndarray]], conf: float, votes: int, iou: float
 ):
-    """Boxes that at least `votes` of the models agree on, as their mean (K, 4).
-
-    Greedy: the most confident unused box starts a group; each other model adds its
-    best-overlapping unused box if the IoU reaches `iou`.
-    """
+    """Boxes that at least `votes` of the models agree on, as their mean (K, 4)."""
     boxes, scores, model = [], [], []
     for m, (b, c) in enumerate(dets):
         keep = c >= conf
@@ -104,7 +92,7 @@ def main():
         todo = todo[: a.limit]
     images = {i: count.read_frame(data["frames"][i]) for i in todo}
     dets = {i: [] for i in todo}
-    for p in a.models:  # one model in memory at a time
+    for p in a.models:
         model = HF(p) if Path(p).is_dir() else Yolo(p)
         for i in todo:
             dets[i].append(detect(model, images[i]))

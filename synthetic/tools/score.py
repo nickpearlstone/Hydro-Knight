@@ -1,17 +1,8 @@
 """Detector-level realism check: score a rendered frame and a real frame with identical rules.
 
-Both detectors run with the production tiling (480 px tiles + whole frame, IoS merge):
-YOLO11n-pose (current backend) and RT-DETRv2-R18 (likely head-detector base). For each
-frame we report, at conf 0.05 and 0.25: recall by size band, false boxes, and the median
-confidence of matched people. Size = body height at that image row from a perspective fit
-of the detector's own >= 0.25 boxes (YOLO), scaled to 1080p, so real and synthetic frames
-are measured the same way. Matching = benchmark_pose's greedy one-box-per-point rule.
-
-    uv run --with transformers python synthetic/tools/score.py real 6f5c67826a76_720
-    uv run --with transformers python synthetic/tools/score.py synth synthetic/renders/b01 [--prefix rgbv]
-    uv run python synthetic/tools/score.py compare synthetic/renders/b01
-
-Results are cached as <name>.dets.npz / scores.json beside the frame.
+uv run --with transformers python synthetic/tools/score.py real 6f5c67826a76_720
+uv run --with transformers python synthetic/tools/score.py synth synthetic/renders/b01 [--prefix rgbv]
+uv run python synthetic/tools/score.py compare synthetic/renders/b01
 """
 
 import argparse
@@ -22,9 +13,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-try:  # main: the benchmark lives in the package (hydroknight command)
+try:
     from hydro_knight.cli import benchmark_pose as bp
-except ImportError:  # older branches: scripts/benchmark_pose.py
+except ImportError:
     _spec = importlib.util.spec_from_file_location("bp", "scripts/benchmark_pose.py")
     bp = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(bp)

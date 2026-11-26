@@ -1,14 +1,4 @@
-"""
-Review of Claude's labels: one verdict per clip, so they can be checked quickly.
-
-Claude labels rescue clips and lists each one in data/annotations/labeled_by_claude.json
-({clip_id: {"date", "notes"}}). The labeler's Review tab plays each of those clips with
-the victim marked, and records the verdict here, in data/annotations/label_reviews.json:
-{clip_id: {"verdict": "good" | "not_good", "note": str, "date": "YYYY-MM-DD"}}.
-
-A "not_good" clip keeps Claude's label until someone fixes it in the Rescue timeline tab;
-the note says what is wrong. Neither file holds pixels, so both are safe to commit.
-"""
+"""Review of Claude's labels: one good / not_good verdict per clip (label_reviews.json)."""
 
 from __future__ import annotations
 
@@ -30,7 +20,7 @@ def load(path: Path) -> dict:
 
 
 def save(data: dict, path: Path = REVIEW_PATH) -> None:
-    """Write the review file atomically (temp file + rename), so a crash never truncates it."""
+    """Write the review file atomically."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
@@ -39,13 +29,7 @@ def save(data: dict, path: Path = REVIEW_PATH) -> None:
 
 
 def clean_verdict(body: dict) -> dict | None:
-    """Validate {"verdict", "note"} posted by the UI.
-
-    Returns:
-        The stored form with today's date, or None when verdict is null (clear the review).
-    Raises:
-        ValueError: a body that isn't an object, an unknown verdict, or a bad note.
-    """
+    """Validate a posted {"verdict", "note"}; None when verdict is null (clear the review)."""
     if not isinstance(body, dict):
         raise ValueError("expected a JSON object")
     verdict = body.get("verdict")

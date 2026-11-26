@@ -1,44 +1,24 @@
-# Docstring standard
+# Comment and docstring standard
 
-Concise **Google-style** docstrings on **public and non-obvious** functions.
-Trivial one-line helpers need only a one-line summary — no schema.
+Keep comments and docstrings to the minimum the code needs.
 
-## Template
+## Docstrings
 
-```python
-"""One-line summary of what it does. (+ one more sentence only if genuinely needed.)
+- Public functions, classes and methods (no leading `_`) get a one- or two-line
+  summary. No `Args:` / `Returns:` / `Raises:` sections; put units, shapes or a
+  sentinel return in the summary only when the signature can't say it.
+- Private helpers, nested functions and dunder methods get no docstring.
+- Modules get a one- or two-line summary. CLI modules that pass `__doc__` to
+  `argparse` keep their full docstring as the `--help` text.
+- Tests get no docstrings; name the test for what it checks.
 
-Preconditions: <one line — omit if none>
-Args:
-    name: terse description (shape / units / dtype where it matters).
-Returns:
-    terse description (shape / units; what a sentinel like None means).
-Raises:
-    ErrorType: when/why (omit if it doesn't raise).
-"""
-```
+## Comments
 
-## Rules
+A comment stays only if removing it would likely lead to a bug: a non-obvious
+invariant or ordering, units or time base, a boundary, a library version
+constraint, a known bias in the output, or a licence requirement. One short
+line each. Tool pragmas (`# noqa`, `# type: ignore`, `# fmt:`) are always kept.
 
-- The summary line is required and stays on one line. Add at most **one** more
-  sentence, and only for a genuinely non-obvious "why".
-- **Omit any section that doesn't apply** — a no-arg function has no `Args:`; a
-  function that can't fail a precondition has no `Preconditions:`.
-- Include **shapes, units, and dtypes** wherever they matter — this is
-  array-heavy code and those are the facts a caller actually needs.
-- Always state what a **sentinel return** means (e.g. `None` when the pose is unusable).
-- **Module docstrings stay free prose** (purpose + context). This schema is for
-  functions, not modules.
-- **No repeated reasoning (DRY for docs).** Each piece of "why" appears once, at
-  the right altitude: shared/overarching context lives in the *module* docstring;
-  a *function* docstring carries only what's specific to it. If the same rationale
-  would appear in two functions, it belongs in the module docstring instead.
-- **Schema is a floor, not a ceiling.** Always include the structured fields;
-  keep substantive function-specific "why" where it genuinely helps, but trim
-  padding. Thin docstrings get tightened; already-rich ones get *structured*, not gutted.
-
-## Scope of application
-
-Public API + any function whose behavior isn't obvious from its name and
-signature. Skip the full schema on dead-simple private helpers; a one-line
-summary is enough there.
+Kept comments and docstrings state the constraint, never the reason: "must run
+inside the manifest lock", "source time, not file time". No history and no
+"because".

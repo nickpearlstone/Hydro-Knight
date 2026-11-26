@@ -1,5 +1,3 @@
-"""Dataset v2: only labeled, active clips; victim tracks removed; whole-clip split."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -52,10 +50,8 @@ def kp_dir(tmp_path):
     for cid in ("lab1", "lab2", "lab3", "unlab", "held"):
         df = pd.concat(
             [
-                track_rows(7, range(0, 300), box=(100, 100, 140, 180)),  # victim
-                track_rows(
-                    9, range(0, 300), box=(300, 100, 340, 180)
-                ),  # normal swimmer
+                track_rows(7, range(0, 300), box=(100, 100, 140, 180)),
+                track_rows(9, range(0, 300), box=(300, 100, 340, 180)),
             ]
         )
         write_keypoints(tmp_path / f"{cid}.parquet", df, fps=30.0)
@@ -74,7 +70,7 @@ RECORDS = [
 
 def test_only_labeled_active_clips_and_no_victim_tracks(kp_dir):
     train, test, rep = build_datasets(kp_dir, RECORDS, test_frac=0.5, seed=0)
-    assert rep.used_train and rep.used_test  # both sides exercised
+    assert rep.used_train and rep.used_test
     assert sorted(rep.used_train + rep.used_test) == ["lab1", "lab2", "lab3"]
     assert (
         rep.unlabeled == ["unlab"]
@@ -91,7 +87,7 @@ def test_only_labeled_active_clips_and_no_victim_tracks(kp_dir):
 
 def test_trim_limits_the_windows(kp_dir):
     trimmed = _rec("lab1", [FULL])
-    trimmed.trim_end = 4.0  # 4 s of a 10 s track -> scored windows end by 4 s
+    trimmed.trim_end = 4.0
     train, test, _ = build_datasets(kp_dir, [trimmed], test_frac=0.0)
     ends = [train.info(i)[2] + 3.0 for i in range(len(train))]
     assert len(train) > 0 and max(ends) <= 4.0 + 1e-6
@@ -122,7 +118,7 @@ def test_victim_windows_are_the_removed_tracks_inside_the_event(kp_dir):
     vic, in_event = victim_windows(kp_dir, RECORDS, rep)
     assert len(vic) and {s.track_id for s in vic.series} == {7}
     starts = np.array([vic.info(i)[2] for i in range(len(vic))])
-    # event onset 1.0 s -> contact 3.0 s; a 3 s window overlaps it if it starts < 3.0
+    # onset 1.0 s, contact 3.0 s; a 3 s window overlaps iff it starts < 3.0
     assert in_event.any() and (starts[in_event] < 3.0).all()
     assert not in_event[starts >= 3.0].any()
 
@@ -140,7 +136,7 @@ def test_kfold_tests_every_clip_once_and_never_trains_on_it(kp_dir):
         assert set(frep.used_train).isdisjoint(frep.used_test)
         tested += frep.used_test
     assert sorted(tested) == ["lab1", "lab2", "lab3"]
-    assert rep.used_test == []  # the loaded report is never modified
+    assert rep.used_test == []
 
 
 def test_holdout_matches_load_then_split(kp_dir):

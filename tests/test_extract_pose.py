@@ -1,17 +1,3 @@
-"""
-Tests for extract_raw() in preprocess/extract_pose.py, with a fake YOLO and a fake video.
-
-extract_raw is Colab-GPU code: it needs real video and weights, so it never runs
-locally, and its worst failure is silent — output that looks valid but is empty
-or incomplete. 10 clips from the first extraction came back as empty keypoint
-files, and nothing on disk could say whether that meant "no swimmers" or "the
-run broke". These tests pin the guarantees that make that distinguishable:
-a frame row for every frame read (even with zero detections), a completion flag,
-and resume without gaps or duplicates.
-
-Uses pytest's built-in monkeypatch/tmp_path fixtures.
-"""
-
 from __future__ import annotations
 
 import json
@@ -32,10 +18,6 @@ from hydro_knight.preprocess.extract_pose import (
 
 
 def _install_fakes(monkeypatch, n_frames: int, people_per_frame=None, crash_at=None):
-    """Fake cv2.VideoCapture (n_frames 720p frames) and a YOLO that finds people_per_frame[i]
-    swimmers in the whole-frame pass of frame i (tiles find nothing). crash_at raises on that frame.
-    Returns a dict counting YOLO constructions.
-    """
     people = people_per_frame or [1] * n_frames
     state = {"frame": -1, "models": 0}
 
@@ -48,7 +30,7 @@ def _install_fakes(monkeypatch, n_frames: int, people_per_frame=None, crash_at=N
 
         def get(self, prop):
             if prop == extract_pose.cv2.CAP_PROP_FOURCC:
-                return float(0x34363268)  # "h264"
+                return float(0x34363268)
             return {
                 extract_pose.cv2.CAP_PROP_FRAME_WIDTH: 1280,
                 extract_pose.cv2.CAP_PROP_FRAME_HEIGHT: 720,
@@ -81,7 +63,7 @@ def _install_fakes(monkeypatch, n_frames: int, people_per_frame=None, crash_at=N
             state["models"] += 1
 
         def __call__(self, source, **kw):
-            if isinstance(source, list):  # tiles: nothing
+            if isinstance(source, list):
                 return [_Result(np.empty((0, 4)), []) for _ in source]
             f = state["frame"]
             if crash_at is not None and f == crash_at:
@@ -107,7 +89,7 @@ def test_every_frame_gets_a_row_even_with_no_detections(monkeypatch, tmp_path):
     assert frames["n_dets"].tolist() == [2, 0, 1, 0, 3]
     assert len(dets) == 6 and list(dets.columns) == DET_COLUMNS
     assert list(frames.columns) == FRAME_COLUMNS
-    assert meta["chunks_done"] == 3  # chunks of 2, 2, 1
+    assert meta["chunks_done"] == 3
 
 
 def test_detections_keep_crop_ids_and_storage_dtypes(monkeypatch, tmp_path):
@@ -115,7 +97,7 @@ def test_detections_keep_crop_ids_and_storage_dtypes(monkeypatch, tmp_path):
     extract_raw(tmp_path / "clip.mp4", tmp_path / "clip")
 
     raw = pd.read_parquet(tmp_path / "clip" / "det-00000.parquet")
-    assert raw["crop"].tolist() == [-1]  # found by the whole-frame pass
+    assert raw["crop"].tolist() == [-1]
     assert raw["bx1"].dtype == np.float32 and raw["x0"].dtype == np.float16
     assert raw[["bx1", "by1", "bx2", "by2"]].iloc[0].tolist() == [0, 100, 40, 200]
 
@@ -133,9 +115,7 @@ def test_crash_then_rerun_resumes_without_gaps_or_duplicates(monkeypatch, tmp_pa
     with pytest.raises(RuntimeError):
         extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=2)
     meta = json.loads((tmp_path / "clip" / "meta.json").read_text())
-    assert (
-        not meta["complete"] and meta["frames_processed"] == 4
-    )  # frame 4 was in the lost chunk
+    assert not meta["complete"] and meta["frames_processed"] == 4
 
     _install_fakes(monkeypatch, 7)
     extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=2)
@@ -144,9 +124,7 @@ def test_crash_then_rerun_resumes_without_gaps_or_duplicates(monkeypatch, tmp_pa
     assert meta["complete"]
     assert frames["frame"].tolist() == list(range(7))
     assert sorted(dets["frame"].tolist()) == list(range(7))
-    assert (
-        frames["scene_diff"].iloc[1:].notna().all()
-    )  # resume recovered the previous frame
+    assert frames["scene_diff"].iloc[1:].notna().all()
 
 
 def test_complete_folder_is_skipped_without_loading_the_model(monkeypatch, tmp_path):
@@ -176,8 +154,7 @@ def test_incomplete_folder_is_rejected_by_default(monkeypatch, tmp_path):
 
 
 def test_undecodable_video_is_not_marked_complete_and_retries(monkeypatch, tmp_path):
-    # The AV1 failure on Colab: the file opens and reports its frame count, but read()
-    # returns nothing. It must not be marked complete, or every rerun would skip it.
+    # A file that opens but whose read() returns nothing must not be marked complete.
     _install_fakes(monkeypatch, 5)
     monkeypatch.setattr(
         extract_pose.cv2.VideoCapture, "read", lambda self: (False, None)
@@ -187,7 +164,7 @@ def test_undecodable_video_is_not_marked_complete_and_retries(monkeypatch, tmp_p
     meta = json.loads((tmp_path / "clip" / "meta.json").read_text())
     assert not meta["complete"] and "error" in meta
 
-    _install_fakes(monkeypatch, 5)  # e.g. after re-encoding to H.264
+    _install_fakes(monkeypatch, 5)
     meta = extract_raw(tmp_path / "clip.mp4", tmp_path / "clip")
     assert meta["complete"] and "error" not in meta and meta["frames_processed"] == 5
 
@@ -240,7 +217,7 @@ def test_folder_from_before_frame_step_still_resumes(monkeypatch, tmp_path):
         extract_raw(tmp_path / "clip.mp4", tmp_path / "clip", chunk_frames=2)
     path = tmp_path / "clip" / "meta.json"
     meta = json.loads(path.read_text())
-    for k in ("frame_step", "stop_frame"):  # an older meta.json has neither key
+    for k in ("frame_step", "stop_frame"):
         meta["settings"].pop(k)
     path.write_text(json.dumps(meta))
     _install_fakes(monkeypatch, 6)

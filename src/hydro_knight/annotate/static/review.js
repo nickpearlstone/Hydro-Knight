@@ -1,7 +1,4 @@
-// Hydro-Knight labeler, Review tab: play each Claude-labeled clip around its event with
-// the victim marked, and record a good / not good verdict (annotate/review.py).
-// Times inside the UI are LOCAL FILE seconds; the server stores SOURCE seconds
-// (file + offset). Victim clicks are pixel positions in the original frame.
+// UI times are LOCAL FILE seconds; the server stores SOURCE seconds (file + offset).
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -12,8 +9,8 @@ const ctx = overlay.getContext("2d");
 const stage = $("#stage");
 const zoomer = $("#zoomer");
 
-const LEAD = 2.0; // seconds shown before onset
-const TAIL = 1.5; // seconds shown after the save
+const LEAD = 2.0;
+const TAIL = 1.5;
 const ZOOM = 3;
 const MARKS = [
   ["start", "Onset"],
@@ -26,20 +23,18 @@ const R = {
   rows: [],
   idx: -1,
   fps: 30, offset: 0, vw: 1, vh: 1, dur: 0,
-  ev: null,        // {start, lastSeen, contact, end, offCamera} in file seconds
-  clicks: [],      // [{t, x, y, kind}] in file seconds, sorted
-  a: 0, b: 0,      // loop window
+  ev: null,
+  clicks: [],
+  a: 0, b: 0,
   zoom: false,
   prevT: 0,
-  box: { x: 0, y: 0, w: 1, h: 1 }, // unzoomed video rectangle inside the stage
-  flash: null,     // {text, until}
-  load: 0,         // bumps on every openClip; a stale load's response is dropped
-  loading: false,  // true until the new clip's data is on screen
+  box: { x: 0, y: 0, w: 1, h: 1 },
+  flash: null,
+  load: 0,         // bumps on every openClip; drop stale responses
+  loading: false,
   saves: Promise.resolve(), // verdict saves run one at a time, in order
-  scrub: null,     // {t, dot, x0} while the timeline is pressed or dragged
+  scrub: null,
 };
-
-// ---------------------------------------------------------------- feedback
 
 function toast(msg, kind = "ok") {
   const el = document.createElement("div");
@@ -61,8 +56,6 @@ const fmt = (t) => {
   const s = (t - m * 60).toFixed(2).padStart(5, "0");
   return `${m}:${s}`;
 };
-
-// ---------------------------------------------------------------- queue
 
 async function loadQueue() {
   const res = await fetch("/api/review");
@@ -119,8 +112,8 @@ async function openClip(i) {
   R.loading = true;
   const row = R.rows[i];
   const c = await (await fetch(`/api/clip/${row.clip_id}`)).json();
-  if (tok !== R.load) return; // a newer openClip won
-  // R.idx changes only now, so a verdict always goes to the clip on screen
+  if (tok !== R.load) return;
+  // Set R.idx only after the clip loads.
   R.idx = i;
   R.loading = false;
   localStorage.setItem("hk.review.clip", row.clip_id);
@@ -140,8 +133,7 @@ async function openClip(i) {
     end: f(e.end),
     offCamera: !!e.saved_off_camera,
   };
-  // loop window: LEAD before onset to TAIL after the save, never outside the trims
-  // (trimmed-out footage can hold overlays and end cards)
+  // Loop window stays inside the trims.
   const trimA = f(c.trim_start) ?? 0;
   const trimB = f(c.trim_end) ?? (R.dur || Infinity);
   const first = R.ev.start ?? (R.clicks[0] || {}).t ?? 0;
@@ -176,9 +168,6 @@ async function openClip(i) {
   );
 }
 
-// ---------------------------------------------------------------- verdicts
-
-// Saves are chained so two (a note save on blur, then a verdict click) can't land out of order.
 function sendVerdict(verdict) {
   const row = R.rows[R.idx];
   const note = $("#note").value;
@@ -237,8 +226,6 @@ function nextUnreviewed() {
   toast("All clips reviewed");
 }
 
-// ---------------------------------------------------------------- panel
-
 function renderTimes() {
   const box = $("#times");
   box.innerHTML = "";
@@ -291,8 +278,6 @@ function renderTimeline() {
   }
 }
 
-// ---------------------------------------------------------------- stage
-
 function fitStage() {
   const w = stage.clientWidth, h = stage.clientHeight;
   const k = Math.min(w / R.vw, h / R.vh);
@@ -303,8 +288,6 @@ function fitStage() {
   });
 }
 
-// Where the victim marker sits at time t: on a click, between two clicks (linear), or
-// held at the first / last click outside them. style: "exact" | "between" | "held".
 function victimAt(t) {
   const c = R.clicks;
   if (!c.length) return null;
@@ -336,15 +319,12 @@ function phaseAt(t) {
   return ["after", "After save"];
 }
 
-// Seek, kept inside the loop window.
 function seek(t) {
   video.currentTime = Math.min(Math.max(t, R.a), Math.max(R.a, R.b - 0.5 / R.fps));
   R.prevT = video.currentTime;
 }
 
-// Back to the window start once playback reaches its end. Runs from the video's own
-// timeupdate/ended events (they keep firing in a background tab, unlike animation frames),
-// and never while the user is dragging the timeline or a seek is still pending.
+// Drive from timeupdate/ended, not rAF; skip during a scrub or pending seek.
 function keepInWindow() {
   if (R.scrub || video.seeking || !R.b) return;
   if (video.ended || video.currentTime >= R.b) {
@@ -353,11 +333,10 @@ function keepInWindow() {
   }
 }
 
-// The per-frame loop. It always schedules the next frame, even if drawing throws, so one
-// error can never freeze the playhead, clock and victim marker for good.
+// Always reschedule, even if draw throws.
 function loop() {
   try {
-    if (R.ev) draw(); // nothing to draw until the first clip has loaded
+    if (R.ev) draw();
   } catch (err) {
     console.error(err);
   } finally {
@@ -368,7 +347,6 @@ function loop() {
 function draw() {
   if (!video.paused) keepInWindow();
   const t = R.scrub ? R.scrub.t : video.currentTime;
-  // flash a mark's name as the playhead crosses it
   for (const [key, name] of MARKS) {
     const m = R.ev[key];
     if (m != null && R.prevT < m && t >= m && t - R.prevT < 0.5) {
@@ -414,8 +392,6 @@ function draw() {
     ctx.fillText(R.flash.text, (R.vw - w) / 2, size * 1.45);
   }
 
-  // follow the victim when zoomed
-  // keeps the zoomed frame covering the stage (the stage clips the rest), like the Rescue tab
   const { w: bw, h: bh } = R.box;
   if (R.zoom && v) {
     const mx = (v.x / R.vw) * bw, my = (v.y / R.vh) * bh;
@@ -429,7 +405,7 @@ function draw() {
   if ($("#playBtn").innerHTML !== playLabel) $("#playBtn").innerHTML = playLabel;
 }
 
-// Write the zoom transform only when it changes: rewriting it every frame can blank the video.
+// Write the zoom transform only when it changes.
 function setTransform(value) {
   if (zoomer.style.transform !== value) zoomer.style.transform = value;
 }
@@ -449,8 +425,6 @@ function toggleZoom() {
   $("#zoomBadge").hidden = !R.zoom;
 }
 
-// ---------------------------------------------------------------- wiring
-
 $("#prev").onclick = () => openClip(R.idx - 1);
 $("#next").onclick = () => openClip(R.idx + 1);
 $("#nextTodo").onclick = nextUnreviewed;
@@ -465,9 +439,6 @@ $$("[data-speed]").forEach((b) => {
     $$("[data-speed]").forEach((x) => x.classList.toggle("active", x === b));
   };
 });
-// Timeline: press to jump, drag to scrub. Either one pauses, so the frame you picked stays
-// on screen (a playing loop would carry on and wrap back to the start); Space resumes.
-// A press on a victim dot jumps to that click's exact time.
 const timeline = $("#timeline");
 const timeAtX = (x) => {
   const box = timeline.getBoundingClientRect();
@@ -486,12 +457,11 @@ timeline.addEventListener("pointerdown", (e) => {
 timeline.addEventListener("pointermove", (e) => {
   if (!R.scrub) return;
   if (R.scrub.dot) {
-    // a press on a dot stays on that click's time unless the pointer really moves
     if (Math.abs(e.clientX - R.scrub.x0) < 4) return;
     R.scrub.dot = false;
   }
   R.scrub.t = timeAtX(e.clientX);
-  if (!video.seeking) seek(R.scrub.t); // skip while the last seek is still decoding
+  if (!video.seeking) seek(R.scrub.t);
 });
 const endScrub = () => {
   if (!R.scrub) return;
@@ -502,17 +472,15 @@ const endScrub = () => {
 timeline.addEventListener("pointerup", endScrub);
 timeline.addEventListener("pointercancel", endScrub);
 video.addEventListener("timeupdate", keepInWindow);
-// each seek decodes from the last keyframe (often 5 s back), so moves arriving meanwhile are
-// skipped; when a seek lands, go straight to wherever the pointer is now
+// Skip moves while a seek is pending; on seeked, seek to the pointer.
 video.addEventListener("seeked", () => {
   if (R.scrub && Math.abs(video.currentTime - R.scrub.t) > 1 / R.fps) seek(R.scrub.t);
 });
 video.addEventListener("ended", keepInWindow);
-// a clicked button keeps focus, and Space would then press it as well as toggle play
+// Blur clicked buttons; Space must not press them.
 document.addEventListener("pointerup", () => {
   if (document.activeElement && document.activeElement.tagName === "BUTTON") document.activeElement.blur();
 });
-// a note typed after the verdict is saved when you leave the box
 $("#note").addEventListener("change", () => {
   const row = R.rows[R.idx];
   if (row && row.verdict) sendVerdict(row.verdict);

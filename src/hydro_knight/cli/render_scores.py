@@ -1,20 +1,14 @@
-"""
-Draw each swimmer's v2 anomaly score on the video: box color = score.
+"""Draw each swimmer's v2 anomaly score on the video: box color = score.
 
     uv run hydroknight score-video runs/v2_ckpt_after scratch/scores.mp4 7096dfde4791@0 cc9bd9e965e3@0
     uv run hydroknight score-video runs/v2_ckpt_after scratch/scores.mp4 829a5075e439@1 --window
 
-Reads a `train_v2.py --detection` run (alarms_small_s<seed>.parquet + summary.json),
-the tracked boxes in data/keypoints_tiled/ and the video in raw_local/. Each clip is
-given as clip_id@seed, the seed whose test split held it. Colors run from green (the
-run's median held-out score) to red (its 120 false-alarms/hour threshold) on a log
-scale; red boxes are drawn thicker, grey = no score. Causal view: a box shows the
-latest score already available at that moment, so color lags motion by about 4.5 s
-(window plus right context), as a live system would.
+Reads a `train_v2.py --detection` run. Each clip is clip_id@seed, the seed whose test
+split held it. Green = the run's median held-out score, red = its 120 false-alarms/hour
+threshold (log scale); grey = no score. A box shows the latest score already available.
 
-Output is unblurred footage of identifiable people, often minors: write it under
-scratch/ and never commit or publish it. `--pixelate N` pixelates the footage (N blocks
-across) before the boxes are drawn; only pixelated output may go in docs/images/.
+Output is unblurred footage of identifiable people: write it under scratch/, never
+commit or publish it. Only `--pixelate N` output may go in docs/images/.
 """
 
 from __future__ import annotations
@@ -31,7 +25,7 @@ import pandas as pd
 from hydro_knight.cli.make_pose_figure import pixelate
 
 OUT_W, OUT_H, OUT_FPS = 1280, 720, 30
-STALE_S = 1.0  # drop a track's score once no newer window has arrived for this long
+STALE_S = 1.0
 WHITE, GREY = (255, 255, 255), (150, 150, 150)
 
 
@@ -43,7 +37,7 @@ class Scale:
 
     def color(self, score: float) -> tuple[int, int, int]:
         u = (np.log(score) - np.log(self.lo)) / (np.log(self.hi) - np.log(self.lo))
-        hue = int(60 * (1 - np.clip(u, 0, 1)))  # OpenCV hue 60 = green, 0 = red
+        hue = int(60 * (1 - np.clip(u, 0, 1)))
         b, g, r = cv2.cvtColor(np.uint8([[[hue, 255, 255]]]), cv2.COLOR_HSV2BGR)[0, 0]
         return int(b), int(g), int(r)
 
@@ -63,7 +57,7 @@ def _text(img, txt, xy, size, color=WHITE, thick=1):
 
 
 def run_scale(results: list[dict], seed: int) -> Scale:
-    # K-fold runs also hold per-fold rows; the pooled row matches the pooled alarm table.
+    # Use the pooled row (no "fold" key), not a per-fold row.
     row = next(r for r in results if r["seed"] == seed and "fold" not in r)
     hi = next(d["threshold"] for d in row["detection"] if d["fa_target"] == 120)
     return Scale(row["test_median"], hi)
@@ -113,7 +107,7 @@ def render_clip(
         ok, frame = cap.read()
         if not ok:
             break
-        if f + 1e-6 >= f_next:  # resample any source fps to OUT_FPS
+        if f + 1e-6 >= f_next:
             f_next += fps / OUT_FPS
             now = f / fps
             img = cv2.resize(frame, (OUT_W, OUT_H), interpolation=cv2.INTER_AREA)

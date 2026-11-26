@@ -1,35 +1,4 @@
-"""
-Two-tier evaluation protocol: a direction check that works today, and the full protocol for later.
-
-Input is one neutral score table from any model (columns `clip_id, track_id, t, score`,
-where `t` is the file-time second at which a live system could have raised that score),
-plus the truth per rescue event (`EventTruth`). Nothing here knows how scores were made.
-
-Shared rules
-- A catch is a victim-track score at or above the threshold inside the catch window:
-  from `onset_lo - onset_tol_s` to guard contact. `onset_lo` is the earlier of our onset
-  and an independent labeller's onset (when one exists), so the onset is a range, not a
-  point, and an alarm a few seconds before the labelled onset still counts.
-- Rescue clips are scored from the footage start (trim) to guard contact; after contact
-  the rescue's commotion is excluded. Victim scores before the catch window are ordinary
-  false alarms.
-- False alarms are episodes per track (a run of firings with gaps under `merge_gap_s`), so
-  twenty swimmers firing at once are twenty alarms.
-- Every headline number comes with a random baseline (same table, scores replaced by
-  uniform noise) and a bootstrap interval that resamples whole clips.
-
-Tier 1 ("are we heading the right way?") needs only the labelled rescue clips. Its
-negatives are the other swimmers in the same clip, so it asks how the victim ranks among
-the people a lifeguard is actually watching, never pooled across clips (pooled AUC rewards
-telling clips apart). It also reports catches against false alarms counted on the rescue
-footage itself, clearly a proxy: crowded, short, and right next to a rescue.
-
-Tier 2 (the real protocol) counts false alarms only on normal footage (`NormalSpan`), gives
-exact Poisson (Garwood) intervals on the alarm rate, reports alerts per pool per day next to
-alerts per hour, and marks a budget as verified only when the interval's upper end is under
-it. With zero alarms in `h` hours the best provable rate is about 3.0 / h, so with a quarter
-hour of normal footage no budget under ~12 per hour can be verified.
-"""
+"""Two-tier evaluation protocol: a direction check that works today, and the full protocol for later."""
 
 from __future__ import annotations
 
@@ -52,14 +21,13 @@ class EventTruth:
     """One labelled rescue: times in file seconds."""
 
     clip_id: str
-    start: float  # footage start (trim start, else 0)
-    onset: float  # our onset
-    contact: float  # guard contact: scoring stops here
+    start: float
+    onset: float
+    contact: float
     victim_tracks: frozenset[int]
-    onset_alt: float | None = None  # independent labeller's onset, if any
-    silent: bool = False  # no visible struggle before going under
-    # tracks scored as nothing: their rows are dropped before scoring (no catch, no false
-    # alarm, not in the AUC, not a rival in the rank), e.g. unconfirmed victim fragments
+    onset_alt: float | None = None
+    silent: bool = False
+    # rows dropped before scoring: no catch, no false alarm, not in AUC or rank
     ignore_tracks: frozenset[int] = frozenset()
 
     @property
@@ -86,19 +54,15 @@ class ProtocolConfig:
     merge_gap_s: float = 2.0
     open_hours_per_day: float = 10.0
     top_k: tuple[int, ...] = (1, 3, 5)
-    rank_window_s: float = (
-        2.0  # a track's score at time t = its max over (t - window, t]
-    )
-    step_s: float = 0.5  # time step of the rank timeline
+    # a track's score at time t = its max over (t - window, t]
+    rank_window_s: float = 2.0
+    step_s: float = 0.5
     budgets_per_hour: tuple[float, ...] = (0.1, 0.3, 1.0, 3.0, 10.0, 20.0)
     n_thresholds: int = 200
     n_boot: int = 1000
     n_random: int = 20
     conf: float = 0.95
     seed: int = 0
-
-
-# ---------------------------------------------------------------- truth from the manifest
 
 
 def truths_from_records(
@@ -109,18 +73,7 @@ def truths_from_records(
     silent: Iterable[str] = (),
     ignore_tracks: dict[str, Sequence[int]] | None = None,
 ) -> dict[str, EventTruth]:
-    """EventTruth per clip from manifest records (first event of each clip).
-
-    Args:
-        records: manifest ClipRecords.
-        clip_ids: the clips to evaluate (e.g. a run's held-out set).
-        victim_tracks: clip_id -> matched victim track ids (eval.victims).
-        onset_alt: clip_id -> an independent onset in SOURCE seconds (converted here).
-        silent: clip ids whose drowning shows no visible struggle.
-        ignore_tracks: clip_id -> track ids whose rows are dropped before scoring.
-    Returns:
-        clip_id -> EventTruth; clips without onset or contact are left out.
-    """
+    """EventTruth per clip from manifest records (first event of each clip)."""
     by_id = {r.clip_id: r for r in records}
     onset_alt = onset_alt or {}
     ignore_tracks = ignore_tracks or {}
@@ -156,15 +109,8 @@ def pre_onset_spans(
     ]
 
 
-# ---------------------------------------------------------------- statistics
-
-
 def garwood(k: int, hours: float, conf: float = 0.95) -> tuple[float, float, float]:
-    """Exact Poisson rate and two-sided interval, per hour.
-
-    Returns:
-        (rate, lo, hi) alarms per hour; (nan, 0, inf) when there is no footage.
-    """
+    """Exact Poisson rate and two-sided interval, per hour."""
     if hours <= 0:
         return math.nan, 0.0, math.inf
     a = 1 - conf
@@ -195,14 +141,7 @@ def bootstrap_clips(
     seed: int = 0,
     conf: float = 0.95,
 ) -> dict:
-    """Point value and percentile interval of `stat`, resampling whole clips with replacement.
-
-    Args:
-        clip_ids: the clips the statistic is computed over.
-        stat: list of clip ids (with repeats) -> float (nan allowed).
-    Returns:
-        {"value", "lo", "hi"}.
-    """
+    """Point value and percentile interval of `stat`, resampling whole clips with replacement."""
     ids = list(clip_ids)
     value = stat(ids)
     if not ids:
@@ -228,11 +167,7 @@ def paired_difference(
     seed: int = 0,
     conf: float = 0.95,
 ) -> dict:
-    """B minus A on the same resampled clips: is model B really better than model A?
-
-    Returns:
-        {"diff", "lo", "hi", "p_b_better"}: p_b_better = share of resamples where B > A.
-    """
+    """B minus A on the same resampled clips: is model B really better than model A?"""
     ids = list(clip_ids)
     rng = np.random.default_rng(seed)
     diffs = []
@@ -258,29 +193,11 @@ def randomize(table: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
 def shuffle_within_clip(
     groups: dict[str, pd.DataFrame], rng: np.random.Generator
 ) -> dict[str, pd.DataFrame]:
-    """Each clip's whole track score sequences handed to random tracks of the same clip.
-
-    The zero-skill rival with the model's own habits (a surrogate in the sense of Theiler
-    et al. 1992: keep everything unrelated to victim identity). It keeps ties, firing rate,
-    each track's rhythm in time (a 3 s alarm stays one 3 s alarm) and where in a track the
-    scores fall, and changes only WHO gets them:
-    - sequences move between any two tracks in the clip, not stratified by track length,
-      since track breakup is itself a distress signal the baseline must not get for free;
-    - each borrowed sequence starts at the start of its new track (offset 0), because
-      window models warm up and Plan A rules run timers from track start;
-    - a longer source is cut, a shorter one repeated from its start (keeps the firing
-      rate, at the cost of a small rhythm artifact where it restarts);
-    - the only randomness is the permutation. A victim track may get its own or another
-      victim track's sequence, which is a valid draw of the null.
-
-    Only the any-moment and budget metrics depend on this surrogate (reach_top{k}, the
-    proxy and tier-2 budget curves); within-clip AUC (chance 0.5) and time_in_top{k}
-    (chance k/N, ties split) have exact chance levels.
-    """
+    """Each clip's whole track score sequences handed to random tracks of the same clip."""
     out = {}
     for c, g in groups.items():
         tid = g["track_id"].to_numpy()
-        order = np.lexsort((g["t"].to_numpy(float), tid))  # by track, then time
+        order = np.lexsort((g["t"].to_numpy(float), tid))
         sc = g["score"].to_numpy(float)[order]
         _, starts, counts = np.unique(tid[order], return_index=True, return_counts=True)
         seqs = [sc[a : a + n] for a, n in zip(starts, counts, strict=True)]
@@ -290,12 +207,9 @@ def shuffle_within_clip(
             s = seqs[src[k]]
             new[a : a + n] = s[np.arange(n) % len(s)]
         score = np.empty(len(sc))
-        score[order] = new  # back to the clip's original row order
+        score[order] = new
         out[c] = g.assign(score=score)
     return out
-
-
-# ---------------------------------------------------------------- per-clip primitives
 
 
 def _by_clip(table: pd.DataFrame) -> dict[str, pd.DataFrame]:
@@ -305,7 +219,6 @@ def _by_clip(table: pd.DataFrame) -> dict[str, pd.DataFrame]:
 def _drop_ignored(
     groups: dict[str, pd.DataFrame], truths: dict[str, EventTruth]
 ) -> dict[str, pd.DataFrame]:
-    """Remove each clip's ignore_tracks rows, so those tracks count as nothing at all."""
     out = dict(groups)
     for cid, t in truths.items():
         if t.ignore_tracks and cid in out:
@@ -366,19 +279,7 @@ def false_alarms(
 def victim_rank_timeline(
     rows: pd.DataFrame, truth: EventTruth, cfg: ProtocolConfig
 ) -> pd.DataFrame:
-    """The victim's rank among the swimmers in view, every `step_s` across the catch window.
-
-    A track's score at time t is its max over (t - rank_window_s, t]. Ties with other
-    swimmers are handled two ways, and every metric says which one it uses:
-    - rank is the OUTRIGHT rank, 1 + (others >= victim): ties count against the victim,
-      so a detector that gives everyone the same score never "reaches" the top k;
-    - p_top{k} is the chance of being in the top k when ties are broken at random
-      (McSherry & Najork 2008; the same idea as AUC counting a tie as half):
-      clip((k - higher) / tied, 0, 1), with `tied` including the victim.
-    Returns:
-        DataFrame t, victim_score (nan = victim not scored then), rank (nan likewise),
-        n_tracks (tracks scored in that slice), p_top{k} per cfg.top_k (0 when not scored).
-    """
+    """The victim's rank among the swimmers in view, every `step_s` across the catch window."""
     t0, t1 = truth.onset_lo - cfg.onset_tol_s, truth.contact
     times = np.arange(t0, t1 + 1e-9, cfg.step_s)
     tt = rows["t"].to_numpy(float)
@@ -400,9 +301,7 @@ def victim_rank_timeline(
         v = sc[m][vm].max()
         others = best[~best.index.isin(list(truth.victim_tracks))].to_numpy(float)
         higher = int((others > v).sum())
-        tied = (
-            int((others == v).sum()) + 1
-        )  # the victim plus swimmers with the same score
+        tied = int((others == v).sum()) + 1
         p = [min(max((k - higher) / tied, 0.0), 1.0) for k in ks]
         out.append((t, float(v), float(higher + tied), len(best), *p))
     cols = ["t", "victim_score", "rank", "n_tracks", *[f"p_top{k}" for k in ks]]
@@ -423,22 +322,10 @@ def within_clip_auc(rows: pd.DataFrame, truth: EventTruth, onset_tol_s: float) -
     return float(roc_auc_score(y, np.r_[s[pos], s[neg]]))
 
 
-# ---------------------------------------------------------------- tier 1
-
-
 def victim_detected_share(
     tracks: pd.DataFrame, truth: EventTruth, cfg: ProtocolConfig
 ) -> float:
-    """Share of catch-window moments where the INPUT tracks hold the victim (model-free).
-
-    Same moments and trailing window as victim_rank_timeline, so it sits directly beside
-    "scored": the gap between the two is the model's own blind spot (window, warm-up,
-    minimum track length), not the detector's.
-    Args:
-        tracks: the track table the model was given, columns t (file s) and track_id.
-    Returns:
-        Share in [0, 1].
-    """
+    """Share of catch-window moments where the INPUT tracks hold the victim (model-free)."""
     times = np.arange(
         truth.onset_lo - cfg.onset_tol_s, truth.contact + 1e-9, cfg.step_s
     )
@@ -478,10 +365,9 @@ def _tier1_per_clip(
             "within_clip_auc": within_clip_auc(g, truth, cfg.onset_tol_s),
         }
         for k in cfg.top_k:
-            top = (
-                tl["rank"] <= k
-            ).to_numpy()  # outright: ties count against the victim
-            # ties split by chance; moments without a victim score count as 0
+            # outright: ties count against the victim; p_top ties split by chance,
+            # moments without a victim score count as 0
+            top = (tl["rank"] <= k).to_numpy()
             rec[f"time_in_top{k}"] = float(tl[f"p_top{k}"].mean()) if len(tl) else 0.0
             rec[f"first_top{k}_s"] = (
                 float(tl["t"].to_numpy()[top][0] - truth.onset)
@@ -493,7 +379,6 @@ def _tier1_per_clip(
 
 
 def _tier1_summary(per_clip: pd.DataFrame, cfg: ProtocolConfig) -> dict:
-    """Clip-averaged headline numbers with clip-bootstrap intervals."""
     pc = per_clip.set_index("clip_id")
     ids = list(pc.index)
 
@@ -536,7 +421,6 @@ def _tier1_summary(per_clip: pd.DataFrame, cfg: ProtocolConfig) -> dict:
 
 
 def _thresholds(scores: np.ndarray, n: int) -> np.ndarray:
-    """Score quantiles plus +inf (fire nothing), so a zero-alarm operating point always exists."""
     q = (
         np.unique(np.quantile(scores, np.linspace(0, 1, n)))
         if len(scores)
@@ -551,11 +435,6 @@ def _proxy_counts(
     thresholds: np.ndarray,
     cfg: ProtocolConfig,
 ) -> tuple[list[str], np.ndarray, np.ndarray]:
-    """Per clip and threshold: delay of the first catch (nan = missed) and false-alarm count.
-
-    Returns:
-        (clip ids in truths order, latency (clips, thresholds), false alarms (clips, thresholds)).
-    """
     ids = list(truths)
     lat = np.full((len(ids), len(thresholds)), np.nan)
     fa = np.zeros((len(ids), len(thresholds)), int)
@@ -577,7 +456,6 @@ def _proxy_counts(
 def _pick(
     lat: np.ndarray, fa: np.ndarray, hours: float, thresholds: np.ndarray, budget: float
 ) -> int | None:
-    """Threshold index catching the most events within the alarm budget (ties: the higher threshold)."""
     if hours <= 0:
         return None
     caught, rate = np.isfinite(lat).sum(0), fa.sum(0) / hours
@@ -596,7 +474,6 @@ def _budget_point(
     cfg: ProtocolConfig,
     **extra,
 ) -> dict:
-    """One budget row: catches with an exact binomial interval, alarm rate with a Garwood interval."""
     caught = latencies[np.isfinite(latencies)]
     rate, lo, hi = garwood(int(n_alarms), hours, cfg.conf)
     rec, rlo, rhi = clopper_pearson(len(caught), n_events, cfg.conf)
@@ -621,14 +498,7 @@ def proxy_operating_points(
     cfg: ProtocolConfig,
     folds: dict[str, int] | None = None,
 ) -> dict:
-    """Catches vs false alarms counted on the rescue footage itself (start..contact): a proxy budget curve.
-
-    "points" picks each budget's threshold on the same clips it then counts, so they are
-    an upper bound. With `folds` (clip -> K-fold test fold), "crossfit" also gives the
-    honest version: each fold's threshold is picked on the other folds' clips only, then
-    applied to that fold, and catches and alarms are summed over folds. Candidate
-    thresholds are quantiles of all scores (values only, no labels) in both.
-    """
+    """Catches vs false alarms counted on the rescue footage itself (start..contact): a proxy budget curve."""
 
     def hours_of(rows) -> float:
         return sum(truths[ids[i]].contact - truths[ids[i]].start for i in rows) / 3600
@@ -695,22 +565,7 @@ def tier1(
     tracks: dict[str, pd.DataFrame] | None = None,
     folds: dict[str, int] | None = None,
 ) -> dict:
-    """Direction check from rescue clips alone: victim detected and scored, rank among swimmers in view, proxy budget curve.
-
-    Args:
-        table: score table (SCORE_COLUMNS).
-        truths: clip_id -> EventTruth for the evaluated rescue clips.
-        tracks: clip_id -> the input track table (columns t, track_id) for the model-free
-            "victim detected" row; None leaves that row empty.
-        folds: clip_id -> K-fold test fold, for a pooled K-fold table: adds the
-            cross-fitted proxy curve (see proxy_operating_points) and the per-fold spread.
-    Returns:
-        {"per_clip": DataFrame, "summary": {...}, "random": {...} and "shuffled": {...}
-        (summary values averaged over n_random noise / within-clip shuffle tables),
-        "proxy": proxy_operating_points, "proxy_random_caught" and "proxy_shuffled_caught"
-        (budget -> mean events caught)}; with folds also "crossfit_random_caught",
-        "crossfit_shuffled_caught" and "fold_spread" (fold_spread).
-    """
+    """Direction check from rescue clips alone: victim detected and scored, rank among swimmers in view, proxy budget curve."""
     cfg = cfg or ProtocolConfig()
     groups = _drop_ignored(_by_clip(table), truths)
     per_clip = _tier1_per_clip(groups, truths, cfg, tracks)
@@ -750,11 +605,7 @@ def tier1(
 def fold_spread(
     per_clip: pd.DataFrame, folds: dict[str, int], cfg: ProtocolConfig
 ) -> pd.DataFrame:
-    """Tier-1 headline values per K-fold test fold (clip means, no intervals: folds are small).
-
-    Shows whether one fold carries the pooled result. Columns: fold, clips, detected,
-    scored, within_clip_auc, time_in_top<k>, reach_top<k> (k = 3, or the first top_k).
-    """
+    """Tier-1 headline values per K-fold test fold (clip means, no intervals: folds are small)."""
     k = 3 if 3 in cfg.top_k else cfg.top_k[0]
     pc = per_clip.assign(
         fold=per_clip["clip_id"].map(folds),
@@ -772,7 +623,6 @@ def fold_spread(
 
 
 def _mean_summary(runs: list[dict]) -> dict[str, float]:
-    """Average each headline value over baseline runs."""
     if not runs:
         return {}
     keys = [k for k in runs[0] if isinstance(runs[0][k], dict)]
@@ -784,7 +634,6 @@ def _mean_summary(runs: list[dict]) -> dict[str, float]:
 
 
 def _mean_caught(runs: list[list[dict]]) -> dict[float, float]:
-    """Budget -> events caught, averaged over baseline runs."""
     if not runs:
         return {}
     return {
@@ -793,26 +642,13 @@ def _mean_caught(runs: list[list[dict]]) -> dict[float, float]:
     }
 
 
-# ---------------------------------------------------------------- tier 2
-
-
 def tier2(
     table: pd.DataFrame,
     truths: dict[str, EventTruth],
     normal: list[NormalSpan],
     cfg: ProtocolConfig | None = None,
 ) -> dict:
-    """Full protocol: false alarms on normal footage only, recall at fixed budgets, latency curve, readiness.
-
-    Args:
-        table: score table covering the rescue clips AND the normal spans' clips.
-        truths: clip_id -> EventTruth for rescue clips.
-        normal: incident-free footage spans; false alarms are counted only here.
-    Returns:
-        {"normal_hours", "min_verifiable_per_hour", "points": [...], "amoc": DataFrame,
-        "silent": {...} or None}. A point is "verified" when the Garwood upper bound on
-        its alarm rate is within the budget.
-    """
+    """Full protocol: false alarms on normal footage only, recall at fixed budgets, latency curve, readiness."""
     cfg = cfg or ProtocolConfig()
     groups = _drop_ignored(_by_clip(table), truths)
     hours = sum(max(s.end - s.start, 0) for s in normal) / 3600
@@ -898,7 +734,7 @@ def tier2(
             {
                 "threshold": r["threshold"],
                 "fa_per_hour": r["false_alarms"] / hours if hours > 0 else math.nan,
-                # misses count as the whole window: a lifeguard learns at contact anyway
+                # misses count as the whole window
                 "mean_delay_s": float(
                     np.mean(
                         [
@@ -945,9 +781,6 @@ def tier2(
         "amoc": amoc,
         "silent": silent,
     }
-
-
-# ---------------------------------------------------------------- report
 
 
 def _s(x: float, fmt: str = "{:.1f} s") -> str:

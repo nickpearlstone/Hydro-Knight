@@ -1,15 +1,5 @@
 """
 Build keypoint Parquets from raw detections: merge duplicates, then track (CPU, no video needed).
-
-Reads every complete clip folder under --detections and writes
-<out>/<clip_id>.parquet, the table `features/` and `eval/` consume. Existing
-keypoint files are left alone unless --overwrite is passed, so older extractions
-are never replaced by accident.
-
-Usage:
-    uv run hydroknight tracks                         # fixed defaults
-    uv run hydroknight tracks --legacy --out data/keypoints_legacy   # original behavior
-    uv run hydroknight tracks --lost-track-seconds 2 --overwrite
 """
 
 from __future__ import annotations
@@ -73,7 +63,7 @@ def main() -> None:
             continue
         try:
             df = build_tracks(folder, dest, settings)
-        except RuntimeError as e:  # extraction not finished yet
+        except RuntimeError as e:
             print(f"skip {folder.name}: {e}")
             continue
         n_tracks = df.loc[df["track_id"] >= 0, "track_id"].nunique()

@@ -1,5 +1,3 @@
-"""TCN autoencoder v2: shapes per size, masked loss, it can fit, scoring."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -38,17 +36,15 @@ def test_sizes_grow():
 def test_missing_step_coordinates_are_not_graded_by_default():
     target = torch.zeros(1, 58, 4)
     pred = target.clone()
-    pred[0, :34, 2] = 5.0  # wrong coordinates on step 2 ...
-    det = torch.tensor([[True, True, False, True]])  # ... which is a missing step
+    pred[0, :34, 2] = 5.0
+    det = torch.tensor([[True, True, False, True]])
     assert masked_errors(pred, target, det).item() == 0.0
     assert masked_errors(pred, target, det, coord_weight=1.0).item() > 0.0
-    pred[0, 40, 2] = 5.0  # a confidence on the missing step is always graded
+    pred[0, 40, 2] = 5.0
     assert masked_errors(pred, target, det).item() > 0.0
 
 
 def _tiny_set(n_tracks=4, n=140):
-    """Smooth, compressible tracks (a few sine rhythms): random noise can't be squeezed
-    through a small code, so it would make the fit test meaningless."""
     t = np.arange(n)[:, None]
     f = np.arange(58)[None, :]
     series = []
@@ -71,8 +67,7 @@ def test_small_model_can_fit_a_tiny_set_and_scores_every_window():
 
 
 def test_constant_feature_gets_unit_scale_not_a_blowup():
-    # feature 52 (detected) is 1 everywhere in the tiny set; a 1e-6 std floor would
-    # turn one missing step at test time into a value around a million
+    # std floor must stay well above 1e-6 (feature 52 is constant here)
     from hydro_knight.models.tcn_ae_v2 import fit_scaler
 
     mean, std = fit_scaler(_tiny_set())

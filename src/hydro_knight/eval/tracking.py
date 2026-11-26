@@ -1,15 +1,5 @@
 """Thin wrapper around MLflow: the single place all experiment-tracking calls live, so
 scripts stay clean and the backend can change in one spot. Importing this module imports
-mlflow (the optional `tracking` extra); scripts import it only behind their --mlflow flag.
-
-Run layout (MLflow parent/child runs): one parent run per script command, one nested
-child run per (size, seed) or per model. Summary numbers and cross-seed figures sit on
-the parent; per-step loss, datasets, checkpoints and per-seed figures on the children.
-Tags follow the vocabulary in eval/run_meta.py; the run description shown in the UI is
-the standard `mlflow.note.content` tag.
-
-The backend is sqlite:///mlflow.db unless MLFLOW_TRACKING_URI is set (MLflow's own
-variable), which is how a throwaway database is used for test runs.
 """
 
 from __future__ import annotations
@@ -26,9 +16,9 @@ from mlflow.tracking import MlflowClient
 
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 
-DEFAULT_TRACKING_URI = "sqlite:///mlflow.db"  # was "./mlruns"
-DEFAULT_EXPERIMENT = "hydro-knight"  # v1 eval_report runs; v2 scripts name their own
-BATCH = 1000  # MLflow's per-call metric limit (mlflow.utils.validation.MAX_METRICS_PER_BATCH)
+DEFAULT_TRACKING_URI = "sqlite:///mlflow.db"
+DEFAULT_EXPERIMENT = "hydro-knight"
+BATCH = 1000  # max metrics per MLflow call
 
 
 def default_uri() -> str:
@@ -47,16 +37,13 @@ def log_metrics(metrics: dict, step: int | None = None) -> None:
 
 
 def log_series(key: str, values, start_step: int = 1) -> None:
-    """Log a whole per-step series (e.g. training loss) as one metric with step = 1, 2, ...
-
-    Sent in batches of 1000 through MlflowClient.log_batch instead of one call per step.
-    """
+    """Log a whole per-step series (e.g. training loss) as one metric with step = 1, 2, ..."""
     run_id = mlflow.active_run().info.run_id
     now = int(time.time() * 1000)
     ms = [
         Metric(key, float(v), now, start_step + i)
         for i, v in enumerate(values)
-        if v == v  # skip NaN
+        if v == v
     ]
     client = MlflowClient()
     for i in range(0, len(ms), BATCH):
@@ -74,11 +61,7 @@ def log_artifact(path, artifact_path: str | None = None) -> None:
 
 
 def log_figure(fig, name: str) -> None:
-    """Attach a matplotlib Figure as an image artifact (e.g. "figures/loss.png"); None is skipped.
-
-    Figures from eval/figures.py are never registered with pyplot, so there is nothing
-    to close; any pyplot figure passed in is closed after logging.
-    """
+    """Attach a matplotlib Figure as an image artifact (e.g. "figures/loss.png"); None is skipped."""
     if fig is None:
         return
     mlflow.log_figure(fig, name)
@@ -90,7 +73,7 @@ def log_figure(fig, name: str) -> None:
 
 def log_dataset(df, name: str, context: str, source: str | Path) -> None:
     """Record a table (e.g. a train/test clip list) as a run input; MLflow hashes it into a digest."""
-    # MLflow hints that int columns cannot hold NaN; ours never do, so silence it.
+    # columns never hold NaN
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         ds = mlflow.data.from_pandas(df, source=str(source), name=name)
@@ -115,10 +98,7 @@ def run(
     tags: dict | None = None,
     note: str | None = None,
 ):
-    """Open an MLflow run (parent, or child of the active run with nested=True), closing it on exit.
-
-    A run whose body raises is closed with status FAILED, so crashed runs are visible as such.
-    """
+    """Open an MLflow run (parent, or child of the active run with nested=True), closing it on exit."""
     if not nested:
         mlflow.set_tracking_uri(tracking_uri or default_uri())
         mlflow.set_experiment(experiment)

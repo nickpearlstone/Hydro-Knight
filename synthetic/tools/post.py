@@ -1,13 +1,6 @@
 """Camera + video degradation for clean renders, so they look like a frame from a YouTube upload.
 
-Geometry never moves on the kept frame, so labels and segmentation stay exact. Steps:
-  1. camera tone: white-balance gains, local tone mapping (CLAHE on L), saturation
-  2. optics: soft lens blur, then in-camera sharpening (unsharp mask, gives halos)
-  3. sensor noise, signal dependent (shot + read, in linear light; Brooks et al. 2019)
-  4. codec: a short clip of the frame with independent noise, a sub-pixel camera-shake random
-     walk and a ~1 px wobble, encoded camera-like (x264 40 Mbps) and then YouTube-like
-     (x264 at the reference clip's measured ~5.8 Mbps, B-frames); the kept frame sits mid-GOP
-     with zero shake. A single encoded still is unrealistically clean (it becomes an I-frame).
+Geometry never moves on the kept frame (labels and segmentation stay exact).
 
     uv run python synthetic/tools/post.py synthetic/renders/b01 [--params '{"sat": 1.2}']
 writes rgbv_<n>.png beside each rgb_<n>.png.
@@ -22,14 +15,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-DEFAULTS = {  # tuned against 6f5c67826a76 #720 (batch b02, see docs/research synthetic log)
-    "gain": None,  # None = by render backend (below); a number overrides
-    # Cycles backends differ in brightness on this scene: Metal (the Mac, where the look was tuned)
-    # renders the water ~6% brighter than the CPU reference, OptiX and CUDA. Gains equalise them
-    # (10-19: Kaggle OptiX frame at 0.96 scored like the Mac frame at 0.90).
+DEFAULTS = {
+    "gain": None,
+    # gain None = per-backend default
     "gain_by_backend": {"METAL": 0.9, "CPU": 0.96, "OPTIX": 0.96, "CUDA": 0.96},
     "wb": [0.95, 1.05, 1.0],  # B, G, R gains
-    "clahe": 1.2,  # 0 = off
+    "clahe": 1.2,
     "sat": 1.4,
     "black": 0.08,
     "blur": 0.9,
@@ -39,12 +30,12 @@ DEFAULTS = {  # tuned against 6f5c67826a76 #720 (batch b02, see docs/research sy
     "read": 1e-4,
     "fps": 60,
     "cam_mbps": 40,
-    "yt_mbps": 2.5,  # b13 sweep: best detector-level match (1.8 too hard, 3.5+ too easy)
+    "yt_mbps": 2.5,
     "n_frames": 16,
     "keep": 11,
     "shake_px": 2.0,
     "wobble_px": 2.5,
-    "grain": 0.45,  # post-codec grain, 8-bit levels (real flat-water high-pass ~0.42)
+    "grain": 0.45,
     "grain_blur": 0.6,
 }
 
@@ -61,7 +52,7 @@ def tone(img, p):
     hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV)
     hsv[..., 1] = np.clip(hsv[..., 1] * p["sat"], 0, 1)
     out = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-    if p.get("black", 0) > 0:  # consumer cameras crush shadows to true black
+    if p.get("black", 0) > 0:
         out = np.clip((out - p["black"]) / (1 - p["black"]), 0, 1)
     if p["blur"] > 0:
         out = cv2.GaussianBlur(out, (0, 0), p["blur"])
@@ -165,10 +156,7 @@ def encode(frames, p):
 
 
 def grain(img, p, rng):
-    """Visible grain on the decoded frame (survives the codec, like grain in real uploads).
-
-    Slightly blurred, luma-weighted gaussian noise; strength in 8-bit levels.
-    """
+    """Visible grain on the decoded frame; strength in 8-bit levels."""
     if p.get("grain", 0) <= 0:
         return img
     g = rng.normal(0, 1, img.shape[:2]).astype(np.float32)
@@ -181,15 +169,11 @@ def grain(img, p, rng):
 
 
 def degrade(img, p, rng, clip=None, clip_keep=0):
-    """clip = rendered neighbouring frames (moving water) in order, img's own slot at clip_keep.
-
-    They sit around the kept slot of the encoded sequence; slots beyond them reuse the nearest
-    rendered frame with extra wobble. Without a clip every slot is the still plus wobble.
-    """
+    """clip = rendered neighbouring frames (moving water) in order, img's own slot at clip_keep."""
     clip = clip or [img]
     bases = [tone(c, p) for c in clip]
     n, keep = p["n_frames"], p["keep"]
-    # shake: random walk anchored so the kept frame has zero offset (labels stay exact)
+    # shake random walk keeps zero offset on the kept frame
     steps = rng.normal(0, p["shake_px"] / 2, (n, 2))
     walk = np.cumsum(steps, axis=0)
     walk -= walk[keep]
@@ -207,11 +191,7 @@ def degrade(img, p, rng, clip=None, clip_keep=0):
 
 
 def fisheye_maps(W, H, k):
-    """Barrel ("fish-eye") distortion that keeps the frame full.
-
-    An output pixel at normalised radius r (r = 1 at the corners) samples the clean render at radius
-    r * s * (1 + k r^2), with s = 1 / (1 + k) so corners map to corners. k = 0 is a straight lens.
-    """
+    """Barrel ("fish-eye") distortion that keeps the frame full: r_in = r * (1 + k r^2) / (1 + k), r = 1 at the corners."""
     cx, cy, R = W / 2, H / 2, np.hypot(W / 2, H / 2)
     gx, gy = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
     dx, dy = (gx - cx) / R, (gy - cy) / R
@@ -225,7 +205,7 @@ def fisheye_point(u, v, W, H, k):
     xu, yu = (u - cx) / R, (v - cy) / R
     ru = np.hypot(xu, yu)
     rd = ru
-    for _ in range(30):  # Newton on g(r) = r (1 + k r^2) / (1 + k) - ru
+    for _ in range(30):
         g = rd * (1 + k * rd * rd) / (1 + k) - ru
         rd = rd - g / ((1 + 3 * k * rd * rd) / (1 + k))
     sc = rd / ru if ru > 0 else 1.0 / (1 / (1 + k))
@@ -301,7 +281,7 @@ def main():
         img = supersample(d, n, img, p.get("target_w", 1920))
         clip, ck = None, 0
         meta = d / f"clip_{n}.json"
-        if meta.exists():  # moving-water neighbours rendered by scene.py --clip
+        if meta.exists():
             m = json.loads(meta.read_text())
             ck = m["keep"]
             clip = [
@@ -315,9 +295,7 @@ def main():
                 for k in range(m["n"])
             ]
         k = lab.get("config", {}).get("camera", {}).get("lens_k", 0.0)
-        if (
-            k > 0
-        ):  # fish-eye lens: same curve on the image, every clip frame, labels and masks
+        if k > 0:  # same curve on the image, every clip frame, labels and masks
             mx, my = fisheye_maps(img.shape[1], img.shape[0], k)
             img = cv2.remap(
                 img, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT

@@ -1,22 +1,5 @@
 """
 Harvest new clips: find candidates, fetch, accept or reject, extract.
-
-The mechanical half of the unattended sourcing pipeline (`make harvest`). Judging and
-labeling are done by Claude following .claude/HARVEST.md (local, not in git); this script
-only does what needs no judgment. Candidates live in data/harvest/candidates.jsonl
-(metadata only, safe to commit), separate from the manifest: a clip enters the
-manifest only once accepted.
-
-    uv run hydroknight harvest search             # find new candidates (metadata only)
-    uv run hydroknight harvest next               # print the next pending candidate
-    uv run hydroknight harvest fetch URL_ID       # download it to raw_local/ for judging
-    uv run hydroknight harvest accept URL_ID --kind rescue|normal [--section A B]
-    uv run hydroknight harvest reject URL_ID --reason "..."
-    uv run hydroknight harvest extract            # pose + tracks for accepted clips (Mac GPU)
-    uv run hydroknight harvest status
-
-URL_ID is the candidate's short id from `next`. Rejected URLs go on the blocklist, so no
-search ever brings them back. Every accepted clip is tagged "[AUTO <date>]" in its notes.
 """
 
 from __future__ import annotations
@@ -45,10 +28,9 @@ from hydro_knight.ingest.manifest import Label, Manifest, make_clip_id
 
 MANIFEST = Path("data/manifests/pool_footage.jsonl")
 CANDIDATES = Path("data/harvest/candidates.jsonl")
-MAX_FETCH_S = 10 * 60  # longer videos are skipped: too slow to judge and extract
-MAX_NORMAL_S = 3 * 60  # normal footage is kept as a section at most this long
-# Only these sites are ever searched or downloaded from (all through yt-dlp, never a
-# direct file link). Anything else is refused, so nothing unvetted reaches the disk.
+MAX_FETCH_S = 10 * 60
+MAX_NORMAL_S = 3 * 60
+# Only these sites may be searched or downloaded from; anything else is refused.
 TRUSTED_SITES = {
     "youtube.com": "youtube",
     "youtu.be": "youtube",
@@ -56,8 +38,7 @@ TRUSTED_SITES = {
     "dai.ly": "dailymotion",
     "vimeo.com": "vimeo",
 }
-SOURCES = ("youtube", "dailymotion")  # searchable. Vimeo has no public search and its
-# videos now need a logged-in account to download, so it only works via `add` with login.
+SOURCES = ("youtube", "dailymotion")
 QUERIES = [
     "spot the drowning lifeguard",
     "lifeguard rescue wavepool",
@@ -97,7 +78,6 @@ def _find(rows, cid) -> dict:
 
 
 def _record(row: dict, start: float = 0.0, end: float | None = None):
-    """A manifest ClipRecord for a candidate (whole video, or a section)."""
     end = row["duration"] if end is None else end
     meta = {
         "webpage_url": row["url"],
@@ -129,7 +109,7 @@ def dailymotion_search(query: str, limit: int) -> list[dict]:
     q = urllib.parse.urlencode(
         {"search": query, "fields": "id,title,duration,url", "limit": limit}
     )
-    ctx = ssl.create_default_context(cafile=certifi.where())  # verified HTTPS
+    ctx = ssl.create_default_context(cafile=certifi.where())
     with urllib.request.urlopen(
         f"https://api.dailymotion.com/videos?{q}", timeout=30, context=ctx
     ) as r:
@@ -246,8 +226,6 @@ def cmd_next(args) -> None:
 
 
 def _is_video(path: Path) -> bool:
-    """True if ffprobe sees a real video stream in an .mp4 container. Anything else is
-    deleted: only video files from trusted sites are ever kept, and nothing is executed."""
     out = subprocess.run(
         [
             "ffprobe",
@@ -273,8 +251,6 @@ def _is_video(path: Path) -> bool:
 
 
 def _download(rec) -> bool:
-    """download_clip with a clean start: a leftover .part from a failed try makes yt-dlp
-    resume with an expired link (HTTP 403). One retry after a pause for transient 403s."""
     for attempt in range(2):
         for part in local_path(rec).parent.glob(f"{rec.clip_id}.mp4*.part"):
             part.unlink()
@@ -292,7 +268,7 @@ def _download(rec) -> bool:
     return False
 
 
-HASH_DIR = Path("raw_local/frame_hashes")  # gitignored cache, one .npy per clip
+HASH_DIR = Path("raw_local/frame_hashes")
 
 
 def frame_hashes(path: Path, step_s: float = 1.0) -> np.ndarray:
@@ -332,9 +308,7 @@ def duplicates_of(path: Path, min_matches: int = 5, max_bits: int = 8) -> list[t
     for r in Manifest(MANIFEST).load():
         p = local_path(r)
         long = r.end_sec and r.end_sec - (r.start_sec or 0) > MAX_FETCH_S
-        if (
-            not p.exists() or long
-        ):  # long recordings can't hold a short re-upload's event
+        if not p.exists() or long:  # skip long recordings
             continue
         ref = _cached_hashes(r.clip_id, p)
         if not len(ref):

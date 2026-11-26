@@ -1,17 +1,5 @@
 """
 Rung 3 sanity demo: does the TCN autoencoder learn temporal structure?
-
-Windows the poses in a keypoint Parquet, trains the temporal-conv autoencoder
-on normal motion windows, then reports mean reconstruction error on:
-  - held-out REAL windows         (should be lowest)
-  - time-shuffled windows         (frame order scrambled -> tests if it learned MOTION)
-  - vertically-flipped windows    (wrong body orientation)
-  - randomized windows            (nonsense)
-
-If 'time-shuffled' scores clearly above 'held-out REAL', the model is using
-temporal order, not just per-frame pose — the whole point of Rung 3.
-
-Run: uv run hydroknight legacy rung3-demo <keypoints.parquet>
 """
 
 import argparse
@@ -43,7 +31,7 @@ def main() -> None:
 
     shuffled = test.copy()
     for i in range(len(shuffled)):
-        shuffled[i] = shuffled[i][np.random.permutation(WINDOW)]  # scramble time order
+        shuffled[i] = shuffled[i][np.random.permutation(WINDOW)]
     flipped = test.copy().reshape(len(test), WINDOW, 17, 2)
     flipped[..., 1] *= -1
     flipped = flipped.reshape(len(test), WINDOW, 34)

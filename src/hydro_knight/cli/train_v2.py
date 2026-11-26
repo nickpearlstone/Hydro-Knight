@@ -1,35 +1,18 @@
-"""
-Train the v2 TCN autoencoder sizes on non-victim swimmers and compare them on
+"""Train the v2 TCN autoencoder sizes on non-victim swimmers and compare them on
 clips they never trained on.
 
     uv run hydroknight train tcn-v2 --sizes small medium large --seeds 0 1 2 --out runs/v2_sizes
     uv run hydroknight train tcn-v2 --sizes medium --rates capped --out runs/v2_rates_capped
-    uv run hydroknight train tcn-v2 --holdout --seeds 0      # old single 20% hold-out, one model
-    uv run hydroknight train tcn-v2 --smoke        # code-path check before labels exist
+    uv run hydroknight train tcn-v2 --holdout --seeds 0      # single 20% hold-out, one model
+    uv run hydroknight train tcn-v2 --smoke                  # code-path check
 
-Grouped K-fold (default, --folds 5): each seed gives every usable clip one fold
-(eval/split.assign_folds) and its own initialization. Each fold's model trains on the other
-folds and scores only its own, so every clip is tested exactly once per seed, by a model
-that never saw it; the K held-out score tables are then pooled (eval/kfold.py), each model's
-scores divided by the median score of its own training windows so one alarm threshold
-means the same for every fold. --holdout instead trains one model per seed on a random
-~80% of clips (split_clips) and tests the rest, as before.
-
-For every (size, seed) it reports two checks on the pooled held-out clips, and the same
-per fold:
-  1. reconstruction error on normal swimmers (median, p90): can the size describe
-     normal swimming it never saw?
-  2. victim separation (eval/separation.py): do the victim's windows between onset and
-     guard contact score as more unusual than everyone else's? Always next to the same
-     number for random scores.
---detection adds recall at false-alarm targets with the threshold picked on the scored
-clips themselves (an upper bound) and, for K-fold, picked on the other folds (honest).
-Clips whose labels a review marked "not_good" (data/annotations/label_reviews.json) are
-left out until fixed, and Claude-labeled clips with no review verdict yet are held out
-until reviewed. Writes runs/<out>/summary.json and one checkpoint per model,
-runs/<out>/model_<size>_s<seed>_f<fold>.pt (model_<size>_s<seed>.pt with --holdout; load
-with tcn_ae_v2.load_checkpoint). --load-dir skips training and re-scores the checkpoints
-of an earlier run, so an evaluation change can be measured on the exact same models.
+Grouped K-fold (default, --folds 5): each fold's model scores only its own clips;
+scores are pooled and divided by the median score of the model's training windows.
+Reports reconstruction error on normal swimmers and victim separation (onset to guard
+contact) next to random scores. --detection adds recall at false-alarm targets.
+Clips reviewed "not_good" or not yet reviewed (data/annotations/label_reviews.json)
+are left out. Writes runs/<out>/summary.json and runs/<out>/model_<size>_s<seed>_f<fold>.pt.
+--load-dir re-scores the checkpoints of an earlier run.
 """
 
 from __future__ import annotations
@@ -75,7 +58,6 @@ from hydro_knight.models.tcn_ae_v2 import (
 
 
 def _clips_of(ws) -> np.ndarray:
-    """Clip id of every window in a window set."""
     by_series = np.array([ts.clip_id for ts in ws.series], dtype=object)
     return by_series[ws.index[:, 0]] if len(ws) else np.empty(0, dtype=object)
 
@@ -166,14 +148,14 @@ def main() -> None:
     if args.smoke:
         print("SMOKE TEST: unlabeled clips, victims NOT removed. Not a result.")
         args.steps = 30
-        args.folds = min(args.folds, 3)  # only 3 clips
+        args.folds = min(args.folds, 3)
     # A smoke run must never overwrite a real result.
     args.out = args.out or ("runs/v2_smoke" if args.smoke else "runs/v2_sizes")
 
     records = Manifest(Path(args.manifest)).load()
     verdicts = review.load(Path(args.reviews))
     rejected = {cid for cid, v in verdicts.items() if v.get("verdict") == "not_good"}
-    # Claude's labels count only after a review marks them good (held until reviewed).
+    # Machine labels count only once a review marks them good.
     unreviewed = {
         cid
         for cid in review.load(review.CLAUDE_PATH)
@@ -189,7 +171,7 @@ def main() -> None:
     tracking = None
     with contextlib.ExitStack() as stack:
         if args.mlflow:
-            from hydro_knight.eval import tracking  # imports mlflow (optional extra)
+            from hydro_knight.eval import tracking
 
             stack.enter_context(
                 tracking.run(
@@ -229,7 +211,6 @@ def main() -> None:
 
 
 def _flat_args(args) -> dict:
-    """Command-line settings as MLflow params (lists joined, so sizes/seeds read as one value)."""
     return {
         k: " ".join(map(str, v)) if isinstance(v, list) else v
         for k, v in vars(args).items()
@@ -252,7 +233,6 @@ def _parent_note(args, rejected) -> str:
 
 
 def _child(tracking, args, size: str, seed: int):
-    """Nested MLflow run for one (size, seed), or a no-op without --mlflow."""
     if tracking is None:
         return contextlib.nullcontext()
     return tracking.run(
@@ -270,17 +250,12 @@ def _child(tracking, args, size: str, seed: int):
 
 
 def _log_child(tracking, args, row, fits, parts, ckpts) -> None:
-    """Everything one (size, seed) child run carries: params, loss per step, metrics, datasets, files.
-
-    K-fold runs log one loss series, dataset pair and checkpoint per fold, the pooled
-    metrics unprefixed and each fold's metrics under `fold<f>.`.
-    """
     out = Path(args.out)
     size, seed = row["size"], row["seed"]
     shas = {
         p.fold: run_meta.file_sha256(ck) for p, ck in zip(parts, ckpts, strict=True)
     }
-    tags = {"checkpoint_sha256": next(iter(shas.values()))}  # fold 0 with K-fold
+    tags = {"checkpoint_sha256": next(iter(shas.values()))}
     if not args.holdout:
         tags |= {f"checkpoint_sha256.f{f}": sha for f, sha in shas.items()}
     tracking.set_tags(tags)
@@ -328,7 +303,6 @@ def _log_child(tracking, args, row, fits, parts, ckpts) -> None:
 
 
 def _demo_video(args, records, rep, alarms, det, held, size, seed) -> None:
-    """Best and worst held-out clip with boxes coloured by score -> runs/<out>/demo_<size>_s<seed>.mp4 (local only)."""
     from hydro_knight.eval import demo_video
     from hydro_knight.eval import protocol as P
 
@@ -359,7 +333,6 @@ def _demo_video(args, records, rep, alarms, det, held, size, seed) -> None:
 
 
 def _summarize(args, results: list[dict]) -> list[dict]:
-    """Mean and SD across seeds of each size's pooled rows (per-fold rows are skipped)."""
     summary_rows = []
     for size in args.sizes:
         rows = [r for r in results if r["size"] == size and "fold" not in r]
@@ -382,8 +355,6 @@ def _summarize(args, results: list[dict]) -> list[dict]:
 
 @dataclass
 class _Part:
-    """One model's data: its fold (None for --holdout), windows, report and victim windows."""
-
     fold: int | None
     train: WindowSet
     test: WindowSet
@@ -393,7 +364,6 @@ class _Part:
 
 
 def _splits(args, clip_ids: list[str], seed: int) -> list[tuple[int | None, list[str]]]:
-    """(fold, test clips) for every model of one seed: the hold-out, or one per fold."""
     if args.holdout:
         return [(None, split_clips(clip_ids, args.test_frac, seed)[1])]
     folds = assign_folds(clip_ids, args.folds, seed)
@@ -410,11 +380,6 @@ def _fold_label(fold: int | None) -> str:
 
 
 def _fit(args, part: _Part, size: str, seed: int) -> dict:
-    """Train (or re-load) one model, score its held-out clips; returns its scores and row.
-
-    K-fold models also score a sample of their own training windows: its median is the
-    model's common-scale unit (eval/kfold.py). The hold-out model keeps raw scores.
-    """
     if args.load_dir:
         ckpt = _ckpt_path(args, size, seed, part.fold, load=True)
         model, scaler, _ = load_checkpoint(ckpt, args.device)
@@ -477,7 +442,6 @@ def _fit(args, part: _Part, size: str, seed: int) -> dict:
 
 
 def _score_row(size, seed, model, held, test, vs, part) -> dict:
-    """Reconstruction error and victim separation of one set of held-out scores."""
     row = {
         "size": size,
         "seed": seed,
@@ -503,16 +467,12 @@ def _score_row(size, seed, model, held, test, vs, part) -> dict:
 def _pooled(
     parts: list[_Part], fits: list[dict], rep
 ) -> tuple[_Part, np.ndarray, np.ndarray]:
-    """All held-out windows of one seed as one part, with their scores on the common scale.
-
-    The hold-out run has one part and scale 1, so this returns it unchanged.
-    """
     if len(parts) == 1:
         return parts[0], fits[0]["held"], fits[0]["vs"]
     vics = [p.vic for p in parts if p.vic is not None]
     pooled = _Part(
         None,
-        parts[0].train,  # unused: every clip trained K-1 of the models
+        parts[0].train,
         WindowSet.concat([p.test for p in parts]),
         rep,
         WindowSet.concat(vics) if vics else None,
@@ -524,11 +484,6 @@ def _pooled(
 
 
 def _alarms(parts: list[_Part], fits: list[dict]) -> pd.DataFrame:
-    """Pooled alarm table: one row per held-out window (normal and victim).
-
-    K-fold tables also carry `raw_score` (before scaling) and `fold`; `score` is the
-    common-scale score, which every evaluation reads.
-    """
     tables = {}
     for part, fit in zip(parts, fits, strict=True):
         frames = [alarm_table(part.test, fit["held"] / fit["ref"])]
@@ -542,7 +497,6 @@ def _alarms(parts: list[_Part], fits: list[dict]) -> pd.DataFrame:
 
 
 def _detection(args, records, rep, parts, fits, size, seed, held) -> dict:
-    """Recall at false-alarm targets on the pooled held-out clips, plus random scores; writes sweeps and alarms."""
     alarms = _alarms(parts, fits)
     clips = clip_evals(alarms, records, rep)
     det = operating_points(clips, args.fa_targets)
@@ -584,7 +538,6 @@ def _detection(args, records, rep, parts, fits, size, seed, held) -> dict:
 
 
 def _train_all(args, records, rejected, tracking):
-    """Train (or re-load) and score every (size, seed, fold); returns (result rows, dataset reports, loss histories)."""
     results, reports = [], {}
     histories: dict[str, dict] = {s: {} for s in args.sizes}
     sets, base = load_clips(

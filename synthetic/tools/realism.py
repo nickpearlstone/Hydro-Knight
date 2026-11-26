@@ -1,13 +1,6 @@
 """Feature-level realism: do person crops from a render look like person crops from the real frame?
 
-Crops are fixed 64x64 windows at native resolution around each person point (real: the
-hand-counted clicks; render: projected head centres of visible swimmers), never per-person
-rescaled. Features: DINOv2-small CLS token (Apache-2.0). Two measures, each next to a
-real-vs-real baseline (real crops split into left/right halves of the frame):
-  - KID: unbiased squared MMD, cubic polynomial kernel, with a bootstrap interval
-  - C2ST: logistic regression on PCA-32 features, GroupKFold over 256 px spatial tiles,
-    AUC (0.5 = indistinguishable; ~0.6 or less = close)
-Also a water-only C2ST (crops away from people) to see whether the water alone gives it away.
+Fixed 64x64 native-resolution crops, DINOv2-small CLS features; KID and C2ST, each next to a real-vs-real baseline.
 
     uv run --with transformers --with scikit-learn python synthetic/tools/realism.py synthetic/renders/b01 [--prefix rgbv]
 """
@@ -21,7 +14,7 @@ import numpy as np
 
 REAL = "6f5c67826a76_720"
 GT = Path("data/annotations/pose_bench_gt.json")
-C = 32  # half crop
+C = 32
 
 
 def crops(img, pts):
@@ -110,7 +103,7 @@ def c2st(xa, xb, ga, gb):
 
     X = np.vstack([xa, xb])
     y = np.r_[np.zeros(len(xa)), np.ones(len(xb))]
-    g = np.r_[ga, gb + 10_000]  # different images never share a group
+    g = np.r_[ga, gb + 10_000]
     aucs = []
     for rep in range(5):
         p = np.zeros(len(y))

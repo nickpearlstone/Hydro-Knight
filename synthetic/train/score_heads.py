@@ -1,24 +1,7 @@
 """Step 3: score head detectors on the real hand-counted frames (runs on the Mac; real frames stay local).
 
-Each model runs on the 10 swimmer-count frames with the same tiling it was trained for: 640 px tiles
-at native resolution with 25% overlap, boxes merged across tiles (IoU-or-IoS, as in extraction).
-Ground truth (count.head_truth): on frames whose head boxes were hand-reviewed, the centre of each
-in-water head box (out-of-water heads and "no head visible" marks are allowed but not counted);
-elsewhere the hand clicks (one per swimmer; deck and hidden clicks allowed but not counted). The
-Jupiter Reef frames were removed on 2026-10-26 (too far, wrong angle), leaving 8 frames. A click is found when a box covers it with the "fair" head rule from the 10-16 bake-off:
-padding of half the box height (min 6 px), since a head box can sit just above a click on the body.
-One box per click (greedy, most confident first); boxes covering no click are false boxes.
-
---in-range (the 10-16 range rule): only swimmers inside the clip's hand-drawn zone whose expected
-body height there is >= 60 px at 1080p count. The expected height comes from a perspective fit
-(log height vs image row) of YOLO11n-pose boxes >= 0.25 on that frame. Clicks out of range, and
-boxes centred outside the zone, are ignored: neither found nor false.
-
-Models are compared at MATCHED false boxes over all 10 frames (20 / 50 / 100), so a detector that
-fires everywhere cannot win, plus the raw numbers at conf 0.25.
-
---val scores the 12 hand-labelled head-validation frames (count.VAL_PATH, dots) instead, for picking a seed and
-checkpoint; the test frames are scored only once, on the pick. Results go to head_scores_val.json.
+--in-range counts only swimmers inside the hand-drawn zone with expected body height >= 60 px at 1080p.
+--val scores the 12 head-validation frames instead (results in head_scores_val.json).
 
     uv run --with transformers python synthetic/train/score_heads.py \\
         rtdetr=synthetic/renders/train/rtdetrv2_head/best yolo=runs/yolo11n_head/weights/best.pt \\
@@ -168,11 +151,11 @@ def main():
     sys.argv = [x for x in sys.argv if x not in ("--in-range", "--val")]
     gt = count.load(count.VAL_PATH if val else count.COUNT_PATH)["frames"]
     frames = [f for f in gt if f["water"]]
-    for f in frames:  # reviewed head boxes replace the dots (count.head_truth)
+    for f in frames:
         f["water"], f["deck"] = count.head_truth(f)
         f["hidden"] = []
     imgs = {f"{f['clip_id']}_{f['frame']}": count.read_frame(f) for f in frames}
-    if in_range:  # out-of-range clicks become "allowed" points like deck clicks
+    if in_range:  # out-of-range clicks become "allowed" points
         zs = zones.load()
         for f in frames:
             inr, out = in_range_split(
@@ -188,7 +171,6 @@ def main():
         dets = {k: detect(model, im) for k, im in imgs.items()}
         rows = []
         allc = np.concatenate([c for _, c in dets.values()])
-        # 200 thresholds spread over the confidence distribution, plus 0.25
         cuts = set(np.quantile(allc, np.linspace(0, 1, 200)).tolist()) | {0.25}
         for cut in sorted(cuts, reverse=True):
             f_tot = fp_tot = 0

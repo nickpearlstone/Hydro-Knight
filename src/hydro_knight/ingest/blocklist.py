@@ -1,13 +1,4 @@
-"""
-Blocklist of source URLs that have been reviewed and rejected.
-
-When a clip is deleted from the manifest, its source URL is added here.
-The collector checks this list before registering new clips so rejected
-videos are never re-added by a future search run.
-
-The blocklist is a plain text file — one URL per line. It is committed
-to the repo so the exclusion is permanent and shared.
-"""
+"""Blocklist of source URLs that have been reviewed and rejected."""
 
 from __future__ import annotations
 

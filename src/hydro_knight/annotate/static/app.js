@@ -1,6 +1,4 @@
-// Hydro-Knight labeler — single-page UI talking to annotate/server.py.
-// Times inside the UI are LOCAL FILE seconds; the server stores SOURCE seconds
-// (file + offset). Victim marks are pixel positions in the original frame.
+// UI times are LOCAL FILE seconds; the server stores SOURCE seconds (file + offset).
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -15,15 +13,15 @@ const S = {
   filter: localStorage.getItem("hk.filter") || "needs_victim",
   clips: [],
   idx: -1,
-  clip: null,        // server payload for the open clip
+  clip: null,
   fps: 30, offset: 0, vw: 1, vh: 1, dur: 0,
   label: null,
-  trimStart: null,   // file seconds, null = start of file
-  trimEnd: null,     // file seconds, null = end of file
-  ev: null,          // {start, end, contact, victim:[{t,x,y,kind}]} in file seconds, or null
-  extraEvents: [],   // any further events, passed through untouched
+  trimStart: null,
+  trimEnd: null,
+  ev: null,
+  extraEvents: [],
   history: [],
-  armed: null,       // "onset" | "last_seen" | "extra" | null
+  armed: null,
   zoom: { k: 1, tx: 0, ty: 0, bx: 0, by: 0, bw: 0, bh: 0 },
   showBoxes: false,
   boxCache: new Map(),
@@ -32,8 +30,6 @@ const S = {
   saveTimer: null,
   lastFrame: -1,
 };
-
-// ---------------------------------------------------------------- feedback
 
 function toast(msg, kind = "ok") {
   const el = document.createElement("div");
@@ -62,10 +58,7 @@ const fmt = (t) => {
   return `${m}:${s}`;
 };
 
-// ---------------------------------------------------------------- queue
-
 async function loadQueue(keepClip) {
-  // /?clip=<id> (the Review tab's "Open in Rescue tab") opens that clip, even if it's done.
   const linked = keepClip ? null : new URLSearchParams(location.search).get("clip");
   if (linked) {
     S.filter = "distress";
@@ -96,7 +89,7 @@ function updateCounter() {
 
 async function openClip(i) {
   if (i < 0 || i >= S.clips.length) return;
-  if (S.saveTimer) { clearTimeout(S.saveTimer); S.saveTimer = null; await save(); } // flush pending edit
+  if (S.saveTimer) { clearTimeout(S.saveTimer); S.saveTimer = null; await save(); }
   S.idx = i;
   const id = S.clips[i].clip_id;
   localStorage.setItem("hk.clip", id);
@@ -149,11 +142,8 @@ async function openClip(i) {
   updateCounter();
 }
 
-// ---------------------------------------------------------------- playback
-
 const frameNow = () => Math.floor(video.currentTime * S.fps + 1e-4);
-// Stored times sit in the middle of their frame, so two fields set on one frame are equal
-// and converting back to a frame number can't round into the neighbouring frame.
+// Stored times are mid-frame: (frame + 0.5) / fps.
 const frameTime = () => Math.round(((frameNow() + 0.5) / S.fps) * 1e6) / 1e6;
 
 function seek(t) {
@@ -161,7 +151,7 @@ function seek(t) {
 }
 
 function seekFrame(f) {
-  seek((f + 0.5) / S.fps); // land in the middle of the frame so the browser shows it
+  seek((f + 0.5) / S.fps);
 }
 
 function setPlaying(on) {
@@ -181,8 +171,6 @@ const transport = {
   back1s: () => seek(video.currentTime - 1),
   fwd1s: () => seek(video.currentTime + 1),
 };
-
-// ---------------------------------------------------------------- edits + save
 
 function snapshot() {
   return JSON.stringify({ label: S.label, trimStart: S.trimStart, trimEnd: S.trimEnd, ev: S.ev });
@@ -211,8 +199,7 @@ function ensureEvent() {
   return S.ev;
 }
 
-// Any event with at least one mark is sent, even half-finished: the server keeps unset
-// fields as null, so clearing one time never deletes the rest of the clip's marks.
+// Send half-finished events; unset fields stay null.
 function hasMarks(e) {
   return e.start != null || e.end != null || e.offCamera || e.contact != null || (e.victim || []).length > 0;
 }
@@ -239,8 +226,7 @@ function scheduleSave() {
   S.saveTimer = setTimeout(() => { S.saveTimer = null; save(); }, 400);
 }
 
-// Trims go back to the source timeline; null = untrimmed. start_sec/end_sec (the download
-// window) are never sent: the labeler doesn't own them.
+// Never send start_sec/end_sec; trims go in source time.
 function savePayload() {
   const toSource = (t) => (t == null ? null : t + S.offset);
   return {
@@ -279,12 +265,10 @@ function isDone() {
   if (!e || e.start == null || e.contact == null) return false;
   if (e.end == null && !e.offCamera) return false;
   const times = [e.start, e.contact, e.end].filter((v) => v != null);
-  if (times.some((v, i) => i > 0 && v < times[i - 1])) return false; // out of order
+  if (times.some((v, i) => i > 0 && v < times[i - 1])) return false;
   const kinds = new Set((e.victim || []).map((m) => m.kind));
   return kinds.has("onset") && kinds.has("last_seen");
 }
-
-// ---------------------------------------------------------------- field rows
 
 const FIELD_NAMES = {
   start: "Drowning onset", contact: "Guard contact", end: "Victim saved",
@@ -303,7 +287,7 @@ function setField(f, v) {
   else {
     const e = ensureEvent();
     e[f] = v;
-    if (f === "end" && v != null) e.offCamera = false; // a real save time replaces "not on camera"
+    if (f === "end" && v != null) e.offCamera = false;
   }
 }
 
@@ -326,7 +310,6 @@ function onRowAction(row, action) {
   }
 }
 
-// "Victim saved" happens after the clip ends: clears any save time and counts as set.
 function toggleOffCamera() {
   const on = !(S.ev && S.ev.offCamera);
   edit(() => { const e = ensureEvent(); e.offCamera = on; if (on) e.end = null; },
@@ -348,8 +331,6 @@ function checkOrder() {
   warn.hidden = msgs.length === 0;
   warn.textContent = msgs.join(" ");
 }
-
-// ---------------------------------------------------------------- victim marks
 
 function arm(kind) {
   if (S.label !== "distress") { toast("Label the clip Distress first", "warn"); return; }
@@ -383,7 +364,7 @@ function placeMark(clientX, clientY) {
   const names = { onset: "Victim at onset", last_seen: "Last visible", extra: "Extra point" };
   edit(() => {
     const e = ensureEvent();
-    if (kind !== "extra") e.victim = e.victim.filter((m) => m.kind !== kind); // one of each
+    if (kind !== "extra") e.victim = e.victim.filter((m) => m.kind !== kind);
     e.victim.push({ t, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, kind });
     e.victim.sort((a, b) => a.t - b.t);
   }, `${names[kind]} marked at ${fmt(t)}`);
@@ -396,8 +377,6 @@ function placeMark(clientX, clientY) {
 function removeMark(i) {
   edit(() => S.ev.victim.splice(i, 1), "Mark removed");
 }
-
-// ---------------------------------------------------------------- zoom + pan
 
 function fitStage(reset) {
   const sw = stage.clientWidth, sh = stage.clientHeight;
@@ -432,7 +411,7 @@ stage.addEventListener("wheel", (e) => {
   const z = S.zoom;
   const rect = stage.getBoundingClientRect();
   const px = e.clientX - rect.left - z.bx, py = e.clientY - rect.top - z.by;
-  const lx = (px - z.tx) / z.k, ly = (py - z.ty) / z.k; // point under cursor, unzoomed
+  const lx = (px - z.tx) / z.k, ly = (py - z.ty) / z.k;
   const k = Math.min(10, Math.max(1, z.k * Math.exp(-e.deltaY * 0.0015)));
   z.tx = px - lx * k; z.ty = py - ly * k; z.k = k;
   applyZoom();
@@ -461,11 +440,9 @@ window.addEventListener("mouseup", (e) => {
   stage.classList.remove("panning");
   if (!wasClick || !stage.contains(e.target) || e.target.closest("button")) return;
   if (S.armed) placeMark(e.clientX, e.clientY);
-  else setPlaying(video.paused); // plain click on the video toggles play, like any player
+  else setPlaying(video.paused);
 });
 window.addEventListener("resize", () => fitStage(false));
-
-// ---------------------------------------------------------------- detector boxes
 
 async function fetchBoxes(frame) {
   if (S.boxCache.has(frame) || S.boxFetching) return;
@@ -476,18 +453,16 @@ async function fetchBoxes(frame) {
     const res = await fetch(`/api/boxes/${S.clip.clip_id}?frame=${frame}`);
     const data = await res.json();
     S.boxCache.set(frame, data.boxes || []);
-    if (frame === frameNow()) drawOverlay(); // paused video: nothing else would trigger a redraw
+    if (frame === frameNow()) drawOverlay();
   } finally {
     S.boxFetching = false;
   }
 }
 
-// ---------------------------------------------------------------- rendering
-
 function drawOverlay() {
   ctx.clearRect(0, 0, overlay.width, overlay.height);
   const k = S.zoom.k;
-  const unit = Math.max(S.vh / 540, 1) / k; // ~1 display px at this zoom
+  const unit = Math.max(S.vh / 540, 1) / k;
   const now = video.currentTime;
 
   if (S.showBoxes) {
@@ -637,8 +612,6 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
-// ---------------------------------------------------------------- wiring
-
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("button");
   if (btn) flash(btn);
@@ -711,7 +684,6 @@ document.addEventListener("keydown", (e) => {
   else if (e.key.toLowerCase() === "b" && !$("#boxesBtn").disabled) $("#boxesBtn").click();
 });
 
-// Closing the tab with an edit still waiting on the 400 ms save timer: send it anyway.
 window.addEventListener("beforeunload", () => {
   if (!S.saveTimer || !S.clip) return;
   navigator.sendBeacon(`/api/clip/${S.clip.clip_id}`, new Blob([JSON.stringify(savePayload())], { type: "application/json" }));

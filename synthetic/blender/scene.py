@@ -1,15 +1,9 @@
 """Wave-pool scene v3: one config file in, rendered frames + exact labels out.
 
-v3 is matched to a real reference frame (camera pose, crowd density, tubes, water colour) from
-a JSON config, so one render can be compared with that frame by the detectors
-(synthetic/tools/score.py). Builds on the 2026-10-17 rendering spike.
-
     synthetic/blender-bin/Blender.app/Contents/MacOS/Blender -b -P synthetic/blender/scene.py -- \\
         --config synthetic/configs/ref_6f5c.json --out synthetic/renders/b01 [--samples 32] [--res 1920]
 
-Writes per frame: rgb_<n>.png (linear-ish AgX render), depth_<n>.npy (metres, for haze),
-seg_<n>.npy (person id per pixel, 0 = none), labels_<n>.json (per person: projected head
-centre u/v, head radius px, fraction of head under water, pose, visible pixels, role).
+Per frame: rgb_<n>.png, depth_<n>.npy (metres), seg_<n>.npy (person id per pixel, 0 = none), labels_<n>.json.
 """
 
 import argparse
@@ -79,7 +73,7 @@ POOL_W, POOL_L, DEPTH = (
     CFG["pool"]["length"],
     CFG["pool"].get("depth", 1.4),
 )
-# wave pools are fans: narrow at the wave-machine end (camera, y = 0), wide at the beach (y = POOL_L)
+# y = 0 is the wave-machine/camera end; width grows to POOL_L at the beach
 POOL_W0 = CFG["pool"].get("width_near", POOL_W)
 
 
@@ -100,7 +94,6 @@ class Waves:
         self.dir2 = rng.uniform(-0.8, 0.8)
 
     def __call__(self, x, y, t=0.0):
-        """t = seconds from the labelled frame; each wave moves at its deep-water speed."""
         w1, w2 = math.sqrt(9.81 * self.k1), math.sqrt(9.81 * self.k2)
         return self.a1 * np.sin(self.k1 * y + self.p1 - w1 * t) + self.a2 * np.sin(
             self.k2 * (self.dir2 * x + y) + self.p2 - w2 * t
@@ -111,7 +104,7 @@ def link(nt, a, b):
     nt.links.new(a, b)
 
 
-ANIM = {}  # per-scene handles for clip frames: water grid, ripple nodes, floating objects
+ANIM = {}
 
 
 def build_water(rng, waves, c):
@@ -160,10 +153,9 @@ def build_water(rng, waves, c):
     p.inputs["Roughness"].default_value = rng.uniform(*c["roughness"])
     p.inputs["Transmission Weight"].default_value = 1.0
     p.inputs["IOR"].default_value = 1.333
-    # two scales of ripple: metre-scale chop + fine wind ripples (glints)
     tc = nodes.new("ShaderNodeTexCoord")
     n1 = nodes.new("ShaderNodeTexNoise")
-    n1.noise_dimensions = "4D"  # W = time, so ripples evolve between clip frames
+    n1.noise_dimensions = "4D"
     n1.inputs["Scale"].default_value = rng.uniform(0.6, 1.4)
     n1.inputs["Detail"].default_value = 6
     n2 = nodes.new("ShaderNodeTexNoise")
@@ -185,7 +177,7 @@ def build_water(rng, waves, c):
     link(nt, n2.outputs["Fac"], b2.inputs["Height"])
     link(nt, b1.outputs["Normal"], b2.inputs["Normal"])
     link(nt, b2.outputs["Normal"], p.inputs["Normal"])
-    # shadow rays pass through the surface (no caustics), so submerged bodies are lit
+    # shadow rays pass through the water surface
     lp = nodes.new("ShaderNodeLightPath")
     tr = nodes.new("ShaderNodeBsdfTransparent")
     mix = nodes.new("ShaderNodeMixShader")
@@ -211,7 +203,6 @@ def build_water(rng, waves, c):
 
 def build_pool(rng, c):
     fm = humans.mat("floor", tuple(c["floor_color"]), rough=0.85)
-    # floor: soft blotchy pattern stands in for caustics and stains
     nt = fm.node_tree
     nz = nt.nodes.new("ShaderNodeTexNoise")
     nz.inputs["Scale"].default_value = 0.8
@@ -222,7 +213,6 @@ def build_pool(rng, c):
     )
     ramp.color_ramp.elements[1].color = (*humans.lin(c["floor_color"]), 1)
     link(nt, nz.outputs["Fac"], ramp.inputs["Fac"])
-    # fake caustics: thin bright network from Voronoi cell edges, warped by noise, added to the floor colour
     tcf = nt.nodes.new("ShaderNodeTexCoord")
     warp = nt.nodes.new("ShaderNodeTexNoise")
     warp.inputs["Scale"].default_value = 0.7
@@ -233,7 +223,7 @@ def build_pool(rng, c):
         0.8,
         0.8,
         0.8,
-    )  # strong warp hides the Voronoi cell grid
+    )
     vor = nt.nodes.new("ShaderNodeTexVoronoi")
     vor.feature = "DISTANCE_TO_EDGE"
     vor.inputs["Scale"].default_value = c.get("caustic_scale", 2.2)
@@ -279,10 +269,7 @@ def build_pool(rng, c):
         w = bpy.context.object
         w.scale = (0.3, side_len, DEPTH + 0.44)
         w.data.materials.append(wm)
-        # side deck: a wide slab whose inner edge sits on the wall top
-        xd = side * (
-            half_w(POOL_L / 2) + 0.25 + 15 / math.cos(ang)
-        )  # inner edge on the wall top
+        xd = side * (half_w(POOL_L / 2) + 0.25 + 15 / math.cos(ang))
         bpy.ops.mesh.primitive_cube_add(
             size=1, location=(xd, POOL_L / 2, 0.3), rotation=(0, 0, -side * ang)
         )
@@ -305,7 +292,6 @@ def build_pool(rng, c):
         d = bpy.context.object
         d.scale = sc
         d.data.materials.append(dm)
-    # grass beyond the far deck, then trees: clusters of small lumpy spheres read as foliage
     gm = humans.mat("grass", (0.32, 0.45, 0.18), rough=0.95)
     bpy.ops.mesh.primitive_plane_add(size=1, location=(0, POOL_L + 40, 0.38))
     g = bpy.context.object
@@ -327,7 +313,7 @@ def build_pool(rng, c):
     leaf = [humans.mat(f"leaf{i}", col, rough=0.8) for i, col in enumerate(leaf_cols)]
     tex = bpy.data.textures.new("leafy", "CLOUDS")
     tex.noise_scale = 0.5
-    n_behind = int(c.get("trees_behind", 0))  # trees past the wave-machine end (y < 0)
+    n_behind = int(c.get("trees_behind", 0))
     for t in range(int(c["trees"]) + n_behind):
         side = rng.random()
         if t >= int(c["trees"]):
@@ -396,23 +382,18 @@ def sample_crowd(rng, c, sc, cam):
     tries = 0
     while len(pts) < n_target and tries < n_target * 200:
         tries += 1
-        if pts and rng.random() < c.get("cluster", 0.0):  # families and friend groups
+        if pts and rng.random() < c.get("cluster", 0.0):
             q = pts[int(rng.integers(len(pts)))]
             x, y = q[0] + rng.normal(0, 1.0), q[1] + rng.normal(0, 1.0)
             if not (1.2 < y < POOL_L - 0.8 and abs(x) < half_w(y) - 0.7):
                 continue
         else:
-            y = rng.uniform(
-                c.get("y_min", 1.2), c.get("y_max", POOL_L - 0.8)
-            )  # where the crowd stands
+            y = rng.uniform(c.get("y_min", 1.2), c.get("y_max", POOL_L - 0.8))
             x = rng.uniform(-half_w(y) + 0.7, half_w(y) - 0.7)
-        if rng.random() > (1 + grad * y / POOL_L) / max(
-            1.0, 1 + grad
-        ):  # grad < 0: denser at y = 0
+        if rng.random() > (1 + grad * y / POOL_L) / max(1.0, 1 + grad):
             continue
         if not in_view(sc, cam, (x, y, 0.3)):
             continue
-        # tube riders are more common near the camera in the reference; far end = mostly heads
         p_tube = (
             c["tube_frac_near"]
             + (c["tube_frac_far"] - c["tube_frac_near"]) * y / POOL_L
@@ -463,7 +444,7 @@ def load_lib(path):
         for m in o.data.materials if coat is not None else []:
             for n in m.node_tree.nodes if m and m.use_nodes else []:
                 if n.type == "BSDF_PRINCIPLED" and not m.name.startswith("suit_"):
-                    n.inputs["Coat Weight"].default_value = coat  # wet-skin gloss
+                    n.inputs["Coat Weight"].default_value = coat
     return by
 
 
@@ -494,9 +475,7 @@ def place_lounger(rng, pid, x, y, wz, lib=None):
     s = ob.scale[0]
     r = r_world / s
     pelvis_local = Vector((0, -0.03, 0.95 - (1.52 + r * 1.05)))
-    pitch = rng.uniform(
-        0.45, 0.75
-    )  # lean back (+x rotation tips the head toward -y, behind the body)
+    pitch = rng.uniform(0.45, 0.75)  # +x rotation tips the head toward -y
     rot = Euler((pitch, 0, yaw), "XYZ")
     ob.rotation_euler = rot
     target = Vector((x, y, wz - 0.12))
@@ -504,7 +483,7 @@ def place_lounger(rng, pid, x, y, wz, lib=None):
     return ob, r_world
 
 
-USED = {}  # camera + crowd actually used for the current scene, after per-frame variation
+USED = {}
 
 
 def varied(rng):
@@ -532,7 +511,7 @@ def build_scene(rng):
         for item in list(coll):
             coll.remove(item)
     humans.TUBE_MATS.clear()
-    if "tube_colors" in CFG["crowd"]:  # e.g. deep blue tubes at some parks
+    if "tube_colors" in CFG["crowd"]:
         humans.TUBE[:] = [tuple(c) for c in CFG["crowd"]["tube_colors"]]
     sc = bpy.context.scene
     world = sc.world
@@ -584,7 +563,6 @@ def build_scene(rng):
             )
             continue
         u = rng.random()
-        # the far end is the beach: mostly people standing waist to chest deep
         if y / POOL_L > cc.get("beach_from", 1.0) and rng.random() < cc.get(
             "beach_stand_prob", 0.0
         ):
@@ -595,7 +573,7 @@ def build_scene(rng):
                 "vertical",
                 rng.uniform(0.05, 0.25),
                 rng.uniform(-0.15, 0.15),
-            )  # head and shoulders out
+            )
         elif u < mix[1]:
             pose, dz, pitch = "arms_up", rng.uniform(0.12, 0.32), rng.uniform(-0.1, 0.1)
         elif u < mix[2]:
@@ -603,13 +581,13 @@ def build_scene(rng):
                 "swim",
                 rng.uniform(-0.1, -0.02),
                 -rng.uniform(1.0, 1.3),
-            )  # body slopes down into the water
+            )
         elif u < mix[3]:
             pose, dz, pitch = (
                 "shallow",
                 rng.uniform(*CFG["crowd"].get("beach_dz", [0.25, 0.6])),
                 rng.uniform(-0.05, 0.05),
-            )  # chest- to waist-deep at the beach
+            )
         else:
             pose, dz, pitch = "low", rng.uniform(-0.09, 0.06), rng.uniform(-0.2, 0.2)
         yaw = rng.uniform(0, 2 * math.pi)
@@ -619,7 +597,7 @@ def build_scene(rng):
                 0,
                 0,
                 yaw,
-            )  # library poses are already oriented (prone is baked horizontal)
+            )  # library poses are pre-oriented; prone is baked horizontal
             if pose == "swim":
                 dz = rng.uniform(-0.04, 0.04)
         else:
@@ -673,7 +651,6 @@ def build_scene(rng):
                 "role": role,
             }
         )
-    # everything placed in the pool after the pool itself floats on the waves between clip frames
     ANIM["floaters"] = [
         (o, o.location.x, o.location.y, o.location.z)
         for o in bpy.data.objects
@@ -707,7 +684,7 @@ def setup_render():
     sc = bpy.context.scene
     sc.render.engine = "CYCLES"
     prefs = bpy.context.preferences.addons["cycles"].preferences
-    # CUDA first: it matches the CPU reference (OptiX drops shadows cast through the water, 10-19)
+    # CUDA before OptiX
     order = [args.backend] if args.backend else ["CUDA", "OPTIX", "METAL"]
     for dev_type in order:
         try:
@@ -718,9 +695,7 @@ def setup_render():
         except TypeError:
             continue
     for d in prefs.devices:
-        d.use = (
-            d.type != "CPU"
-        )  # GPUs only: CPU in a hybrid render slows multi-GPU machines
+        d.use = d.type != "CPU"  # GPUs only; no CPU in a hybrid render
     print(
         "DEVICES",
         prefs.compute_device_type,
@@ -761,7 +736,7 @@ def rgb_mode():
         sc.cycles.volume_bounces,
     ) = 8, 8, 1
     sc.cycles.sample_clamp_indirect = 8.0
-    sc.cycles.blur_glossy = 0.0  # keep sun glints sharp
+    sc.cycles.blur_glossy = 0.0
     sc.cycles.filter_width = 1.5
     sc.view_settings.view_transform = CFG["light"].get("view_transform", "AgX")
     sc.view_settings.look = CFG["light"].get("look", "None")
@@ -772,10 +747,7 @@ def rgb_mode():
 
 
 def seg_material(heads_only=False):
-    """Flat emission whose colour encodes the object's category_id: r = id % 256, g = id // 256.
-
-    heads_only: multiply by the mesh's is_head attribute, so only (visible) head pixels keep their id.
-    """
+    """Flat emission whose colour encodes category_id (r = id % 256, g = id // 256); heads_only masks by is_head."""
     name = "seg_head" if heads_only else "seg"
     m = bpy.data.materials.get(name) or bpy.data.materials.new(name)
     m.use_nodes = True
@@ -872,7 +844,7 @@ def main():
         nm = f"{n + s:04d}"
         rgb_mode()
         keep = args.clip // 2 if args.keep is None else args.keep
-        for f in range(args.clip):  # neighbours first, the labelled frame (t = 0) last
+        for f in range(args.clip):  # neighbours first, labelled frame (t = 0) last
             if f == keep:
                 continue
             set_time((f - keep) / 60.0)

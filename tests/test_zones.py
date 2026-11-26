@@ -1,10 +1,3 @@
-"""
-Tests for coverage zones (annotate/zones.py + the labeler's /api/zones routes).
-
-These pin the point-in-polygon rule evaluation will rely on, that bad polygons are
-refused instead of written, and that a saved zone round-trips through the labeler.
-"""
-
 from __future__ import annotations
 
 import cv2
@@ -34,7 +27,6 @@ def test_in_zone_square_and_concave_shape():
         False,
         True,
     ]
-    # an L shape: the notch at top right is outside
     ell = {"points": [[0, 0], [50, 0], [50, 50], [100, 50], [100, 100], [0, 100]]}
     assert zones.in_zone(ell, [25, 75, 75], [25, 25, 75]).tolist() == [
         True,
@@ -51,8 +43,8 @@ def test_no_zone_or_moving_camera_contains_everything():
 @pytest.mark.parametrize(
     "body",
     [
-        {"points": [[0, 0], [1, 1]], "frame": 0},  # 2 points on a fixed camera
-        {"points": [[0, 0], [1, 1], [-1, 2]], "frame": 0},  # negative
+        {"points": [[0, 0], [1, 1]], "frame": 0},
+        {"points": [[0, 0], [1, 1], [-1, 2]], "frame": 0},
         {"points": [[0, 0], [1, 1], [2, float("nan")]], "frame": 0},
         {"points": [[0, 0], [1, 1], [2, 2]], "frame": -3},
         {"points": [[0, 0], [1, 1], [2, 2]], "frame": True},
@@ -109,7 +101,7 @@ def test_zone_round_trips_and_clears(client):
     c, path = client
     row = c.get("/api/zones").get_json()[0]
     assert row["clip_id"] == "aaa" and row["zone"] is None
-    assert row["default_frame"] == 10  # event onset, 1.0 s at 10 fps
+    assert row["default_frame"] == 10
     assert c.post("/api/zones/aaa", json=SQUARE | {"frame": 10}).status_code == 200
     assert zones.load(path)["aaa"]["points"][1] == [110.0, 10.0]
     assert c.get("/api/zones").get_json()[0]["zone"]["frame"] == 10

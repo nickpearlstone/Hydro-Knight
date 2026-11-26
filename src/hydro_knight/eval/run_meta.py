@@ -1,18 +1,4 @@
-"""
-Run metadata shared by every experiment-tracking call: git state, data fingerprints,
-the standard tag set, and small table builders. No MLflow import here, so all of it is
-testable (and usable) without the optional `tracking` extra.
-
-Tag vocabulary (every Hydro-Knight MLflow run carries the keys that apply to it):
-    command          which script made the run (train_v2, eval_protocol, benchmark_pose, eval_report)
-    model_family     tcn_ae_v2, tcn_ae_v1, pose_backend
-    size, seed       model size name and seed (child runs only)
-    data_version     short hash over the manifest + label review files: same hash, same labels
-    manifest_sha256  short hash of the manifest alone
-    git_commit       short commit, with "-dirty" when tracked files had uncommitted edits
-    run_folder       the runs/<name> folder the script wrote
-    checkpoint_sha256  hash of the .pt file, the key an eval run uses to find its training run
-"""
+"""Run metadata for experiment tracking: git state, data fingerprints, standard tags."""
 
 from __future__ import annotations
 
@@ -48,7 +34,7 @@ def data_version(manifest: Path = MANIFEST, extra=LABEL_FILES) -> str:
 
 
 def git_commit() -> str:
-    """Short HEAD commit, suffixed "-dirty" if tracked files have uncommitted changes; "unknown" outside git."""
+    """Short HEAD commit, "-dirty" suffix if uncommitted changes, "unknown" outside git."""
     try:
         sha = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -91,12 +77,7 @@ def numeric_items(row: dict, prefix: str = "") -> dict[str, float]:
 
 
 def mean_sd_metrics(rows: list[dict], prefix: str = "") -> dict[str, float]:
-    """For every numeric key shared by the rows: its mean and standard deviation across rows.
-
-    Returns:
-        {"<prefix><key>.mean": ..., "<prefix><key>.sd": ...}; keys missing or non-finite
-        in some rows are averaged over the rows that have them.
-    """
+    """For every numeric key shared by the rows: its mean and standard deviation across rows."""
     vals: dict[str, list[float]] = {}
     for r in rows:
         for k, v in numeric_items(r).items():
@@ -109,14 +90,7 @@ def mean_sd_metrics(rows: list[dict], prefix: str = "") -> dict[str, float]:
 
 
 def split_table(clip_ids, window_clips=None) -> pd.DataFrame:
-    """One row per clip of a train or test split: clip_id and its window count.
-
-    Args:
-        clip_ids: the clips in the split.
-        window_clips: clip id of every window (e.g. one per WindowSet row); None counts 0.
-    Returns:
-        DataFrame clip_id, n_windows, sorted by clip_id (so the hash is order-free).
-    """
+    """One row per clip of a train or test split: clip_id and its window count."""
     counts = pd.Series(window_clips).value_counts() if window_clips is not None else {}
     rows = [{"clip_id": c, "n_windows": int(counts.get(c, 0))} for c in clip_ids]
     return pd.DataFrame(rows, columns=["clip_id", "n_windows"]).sort_values(
@@ -125,11 +99,7 @@ def split_table(clip_ids, window_clips=None) -> pd.DataFrame:
 
 
 def flatten_search_runs(runs: pd.DataFrame) -> pd.DataFrame:
-    """mlflow.search_runs output with "metrics." stripped and one run_folder column.
-
-    run_folder is the run_folder tag, else the folder name of the run_folder param
-    (eval runs logged before the tag existed); missing stays missing.
-    """
+    """mlflow.search_runs output with "metrics." stripped and one run_folder column."""
     runs = runs.copy()
     runs.columns = [c.removeprefix("metrics.") for c in runs.columns]
     empty = pd.Series(None, index=runs.index, dtype=object)

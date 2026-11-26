@@ -1,21 +1,4 @@
-"""
-Window set v2: fixed 3-second windows over track series, with real context.
-
-A window is WINDOW scored steps that lie entirely inside one track. The model also
-reads `context` steps on each side, taken from the same track wherever it exists, so
-its unpadded dilated convolutions see real frames instead of invented padding. Only
-where the track itself starts or ends is the context made of "not detected" steps,
-which is the honest value there. The context equals the sum of the encoder's
-dilations, so the encoder's output is exactly the WINDOW scored steps.
-
-Tracks shorter than one window can still be scored (min_track_s): they get a single
-window centered on the track, and the steps beyond the track are "not detected" steps,
-exactly like context at a track's ends. The same rule applies to every swimmer, so short
-tracks are treated alike whoever they belong to.
-
-Windows are gathered lazily: materializing every window for 57 clips would need tens
-of GB, while the series themselves are about 1 GB.
-"""
+"""Window set v2: fixed 3-second windows over track series, with real context."""
 
 from __future__ import annotations
 
@@ -30,10 +13,7 @@ STRIDE_S = 0.25
 
 
 def dilations_for(window: int) -> list[int]:
-    """Encoder dilations: doubling from 1, then a remainder, so the reach fits the window.
-
-    Starting at 1 avoids gridding; reach = 1 + 2 * sum(dilations) <= window.
-    """
+    """Encoder dilations: doubling from 1, then a remainder, so the reach fits the window."""
     half = (window - 1) // 2
     out, d = [], 1
     while sum(out) + d <= half:
@@ -50,7 +30,6 @@ def context_for(window: int) -> int:
 
 
 def _padded_slice(ts: TrackSeries, lo: int, hi: int) -> tuple[np.ndarray, np.ndarray]:
-    """Steps lo..hi-1 of a series; steps beyond either end become not-detected steps."""
     a, b = max(lo, 0), min(hi, len(ts))
     x, m = ts.feats[a:b], ts.detected[a:b]
     before, after = a - lo, hi - b
@@ -69,7 +48,7 @@ class WindowSet:
     """Index of scored windows over a list of track series; gathers batches on demand."""
 
     series: list[TrackSeries]
-    index: np.ndarray  # (N, 2) int64: series position, first scored step
+    index: np.ndarray  # series position, first scored step
     window: int
     context: int
 
@@ -87,12 +66,7 @@ class WindowSet:
         return ts.clip_id, ts.track_id, ts.t0 + a / TARGET_FPS
 
     def gather(self, rows) -> tuple[np.ndarray, np.ndarray]:
-        """Windows with context for the given row numbers.
-
-        Returns:
-            (x, detected): x is (n, window + 2*context, F) float32, detected is
-            (n, window + 2*context) bool.
-        """
+        """Windows with context for the given row numbers."""
         span = self.window + 2 * self.context
         x = np.empty((len(rows), span, self.n_feat), np.float32)
         m = np.empty((len(rows), span), bool)
@@ -120,13 +94,7 @@ def make_window_set(
     stride_s: float = STRIDE_S,
     min_track_s: float | None = None,
 ) -> WindowSet:
-    """Index every scored window (one every stride_s) that fits inside its track.
-
-    Args:
-        min_track_s: if set, a track shorter than `window` steps but at least this long
-            gets one window centered on it, padded with not-detected steps. If None,
-            tracks shorter than `window` steps give no windows.
-    """
+    """Index every scored window (one every stride_s) that fits inside its track."""
     step = stride_s * TARGET_FPS
     min_steps = None if min_track_s is None else max(1, round(min_track_s * TARGET_FPS))
     index = []

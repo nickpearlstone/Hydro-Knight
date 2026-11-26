@@ -1,15 +1,6 @@
-"""
-Backfill the manifest's `fps` field from source metadata.
+"""Backfill the manifest's `fps` field from source metadata.
 
-Events are stored in SECONDS; keypoint Parquets index by FRAME. Every conversion
-between them needs the clip's frame rate, and until now nothing recorded it — so
-eval fell back to a flat fps=30. That is wrong for most of this dataset (many
-clips are 60fps), which shifts every event label by 2x and quietly destroys the
-ground truth. Recording fps once, in the manifest, removes the guess.
-
-YouTube clips are read with a single metadata-only yt-dlp call (no video is
-downloaded, and one process avoids the rate limiting that repeated queries hit).
-Local clips fall back to reading the file with OpenCV, when it is present.
+YouTube clips: one metadata-only yt-dlp call. Local clips: read with OpenCV.
 
 Usage:
     uv run hydroknight backfill-fps --dry-run   # show what would change
@@ -34,35 +25,22 @@ _ENV = {
     "PATH": f"/opt/homebrew/bin:/usr/local/bin:{os.environ.get('PATH', '')}",
 }
 
-# Real-world frame rates. Reported values are matched to the nearest of these so
-# a 59.94 NTSC reading and a clean 60 don't end up as two different numbers.
 STANDARD_FPS = [23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0, 120.0]
 
 
 def _youtube_id(url: str) -> str | None:
-    """Extract the 11-character video id from a YouTube URL, or None."""
     m = re.search(r"(?:v=|youtu\.be/|/shorts/)([A-Za-z0-9_-]{11})", url)
     return m.group(1) if m else None
 
 
 def _snap(fps: float, tol: float = 0.02) -> float:
-    """Snap a reported rate to the nearest standard frame rate, if one is within `tol`.
-
-    Nearest, not first: 60.0 is within 2% of 59.94 too, and taking the first match
-    turned every 60 fps clip into 59.94 (a 0.1% clock drift).
-    """
+    # nearest standard rate, not first match
     std = min(STANDARD_FPS, key=lambda s: abs(fps - s))
     return std if abs(fps - std) / std <= tol else round(fps, 3)
 
 
 def fetch_youtube_fps(urls: list[str]) -> dict[str, tuple[float, float]]:
-    """Fetch (fps, duration) per YouTube video id in ONE metadata-only call.
-
-    Args:
-        urls: YouTube watch URLs.
-    Returns:
-        {video_id: (fps, duration_sec)} for every video that answered.
-    """
+    """{video_id: (fps, duration_sec)} for YouTube URLs, in one metadata-only yt-dlp call."""
     if not urls:
         return {}
     cmd = [
@@ -74,7 +52,7 @@ def fetch_youtube_fps(urls: list[str]) -> dict[str, tuple[float, float]]:
         "--no-playlist",
         "--quiet",
         "--no-warnings",
-        "--ignore-errors",  # one dead video must not abort the whole batch
+        "--ignore-errors",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, env=_ENV)
 
@@ -87,7 +65,7 @@ def fetch_youtube_fps(urls: list[str]) -> dict[str, tuple[float, float]]:
         try:
             out[vid] = (_snap(float(fps_s)), float(dur_s))
         except ValueError:
-            continue  # "NA" for fields yt-dlp could not determine
+            continue
     return out
 
 
@@ -149,8 +127,6 @@ def main() -> None:
     print(f"{'clip':14}{'fps':>8}{'source':>10}{span:>9}{'src_dur':>9}  trim?")
     for r, fps, dur, how in sorted(resolved, key=lambda x: -x[1]):
         clip_span = (r.end_sec - r.start_sec) if r.end_sec > 0 else 0.0
-        # A source noticeably longer than the trimmed span means extraction that
-        # ran on the whole video produced frames outside this record's window.
         trim = "yes" if dur and clip_span and dur > clip_span * 1.1 else ""
         print(
             f"{r.clip_id[:12]:14}{fps:>8}{how:>10}{clip_span:>9.1f}{dur:>9.1f}  {trim}"
@@ -165,8 +141,7 @@ def main() -> None:
         return
 
     for r, fps, _dur, _how in resolved:
-        # modify() changes only fps on the latest saved record, so labels written by an
-        # open labeler while this ran are kept.
+        # use modify(), not a full rewrite
         manifest.modify(
             r.clip_id, lambda rec, fps=fps: dataclasses.replace(rec, fps=fps)
         )

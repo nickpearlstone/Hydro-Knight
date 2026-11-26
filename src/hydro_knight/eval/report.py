@@ -1,20 +1,4 @@
-"""
-Single-run evaluation report: PNGs + a markdown summary in one folder.
-
-Each run writes into its own directory (e.g. runs/2026-07-08_tcn_baseline/),
-so comparing two runs = opening two folders side by side. The report never
-touches footage — every figure is derived from keypoints/scores only, so
-there is nothing to pixelate.
-
-Chart conventions (kept deliberately boring and consistent):
-- normal = blue (#2a78d6), distress = red (#e34948) — same two colors everywhere
-- caught = green (#0ca30c) / missed = red (#d03b3b), always with a text label,
-  never color alone
-- recall-first: accuracy appears nowhere in this report by design
-
-Each plot_* helper takes its data plus the run's out_dir and returns the written
-filename (or None when there's nothing to plot); generate_report runs them all.
-"""
+"""Single-run evaluation report: PNGs + a markdown summary in one folder."""
 
 from __future__ import annotations
 
@@ -23,7 +7,7 @@ from pathlib import Path
 
 import matplotlib
 
-matplotlib.use("Agg")  # headless: we only ever write files
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -38,9 +22,8 @@ from .metrics import (
     sweep_recall_fa,
 )
 
-# --- palette (validated light-mode set) --------------------------------------
-NORMAL = "#2a78d6"  # blue
-DISTRESS = "#e34948"  # red
+NORMAL = "#2a78d6"
+DISTRESS = "#e34948"
 GOOD = "#0ca30c"
 CRITICAL = "#d03b3b"
 INK = "#0b0b0b"
@@ -50,7 +33,6 @@ SURFACE = "#fcfcfb"
 
 
 def _style(ax):
-    """House style: recessive chrome so the data is the loudest thing."""
     ax.set_facecolor(SURFACE)
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
@@ -88,8 +70,7 @@ def plot_loss(history: list[float], out_dir: Path) -> str | None:
 def plot_error_overlap(
     err_n: np.ndarray, err_d: np.ndarray, out_dir: Path
 ) -> str | None:
-    """
-    The 0.539 storyteller: both error distributions on one axis. If these two
+    """The 0.539 storyteller: both error distributions on one axis. If these two
     shapes sit on top of each other, no threshold can separate them.
     """
     if len(err_n) == 0 or len(err_d) == 0:
@@ -150,8 +131,7 @@ def plot_roc_pr(res: dict, out_dir: Path) -> str | None:
 
 
 def plot_recall_fa(sweep: pd.DataFrame, out_dir: Path) -> str | None:
-    """
-    The operating-point curve: event recall vs false alarms per hour. The
+    """The operating-point curve: event recall vs false alarms per hour. The
     project's safety philosophy in one picture — buy recall, pay in alarms.
     """
     s = sweep.dropna(subset=["fa_per_hour"]).sort_values("fa_per_hour")
@@ -182,11 +162,7 @@ def plot_latency(latencies_s: list[float], out_dir: Path) -> str | None:
 
 
 def plot_event_board(catches: list[dict], out_dir: Path) -> str | None:
-    """
-    Per-event catch/miss board. One row per annotated event: green bar whose
-    length is the latency for a catch, red full-row marker for a miss. Labels
-    carry the verdict too (✓/✗) so color never stands alone.
-    """
+    """Per-event catch/miss board: green latency bar for a catch, red marker for a miss."""
     if not catches:
         return None
     n = len(catches)
@@ -251,7 +227,6 @@ def plot_track_lengths(stats: pd.DataFrame, out_dir: Path) -> str | None:
 
 
 def _md_table(df: pd.DataFrame) -> str:
-    """Tiny DataFrame -> markdown table (avoids the `tabulate` dependency)."""
 
     def fmt(v):
         return f"{v:.3f}" if isinstance(v, float) else str(v)
@@ -278,25 +253,10 @@ def generate_report(
     census: dict | None = None,
     run_name: str = "run",
 ) -> Path:
-    """Compute every metric from the neutral detections and write all figures + stats + summary.md.
-
-    Args:
-        out_dir: run folder to create and write into.
-        clips: per-clip evaluation bundles (detections + events).
-        threshold: operating alarm threshold for the per-event board and latencies.
-        loss_history: per-epoch training loss, if available (plots the convergence curve).
-        coverage_rows: pose-coverage-in-events rows for the representation-gap plot.
-        tracks: per-track stats for the fragmentation plot.
-        census: dataset census dict for the summary.
-        run_name: label used in summary.md's title.
-    Returns:
-        (summary_path, metrics): the written summary.md Path, and a dict of headline
-        metrics (roc_auc, pr_auc, event_recall, threshold, n_clips, n_events).
-    """
+    """Compute every metric from the neutral detections and write all figures + stats + summary.md."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Only clips whose victims are matched to tracks can be scored; the rest are listed.
     skipped = [c.clip_id for c in clips if not is_scorable(c)]
     clips = [c for c in clips if is_scorable(c)]
     err_n, err_d = split_scores(clips)
@@ -355,7 +315,6 @@ def generate_report(
     summary = out_dir / "summary.md"
     summary.write_text("\n".join(lines), encoding="utf-8")
 
-    # Headline metrics, also returned so callers (e.g. the --mlflow path) can log them.
     metrics = {
         "threshold": threshold,
         "n_clips": len(clips),

@@ -1,28 +1,4 @@
-"""
-Offline merge + tracking (the CPU step): raw detections -> per-swimmer keypoint Parquet.
-
-Reads a clip folder written by `extract_pose.extract_raw`, merges tile-overlap
-duplicates frame by frame, runs ByteTrack over the merged boxes, and writes the
-keypoint table everything downstream consumes (`features/`, `eval/`). Because
-the raw detections are kept, this step can be rerun with different settings in
-minutes, with no GPU and no video.
-
-Tracking is geometry only: ByteTrack predicts where each track's box should be
-(Kalman filter), matches confident detections to predictions by overlap, then
-gives weaker detections a second chance against unmatched tracks. It never
-looks at pixels.
-
-Two presets:
-- `TrackSettings()` — current defaults, which fix three problems in the original
-  pipeline: half-body seam duplicates survived the merge; a lost track was
-  deleted after a fixed 30 frames (0.5 s at 60 fps) regardless of fps; and new
-  tracks could only start from detections >= 0.6, which made the configured
-  activation threshold of 0.3 dead.
-- `LEGACY` — reproduces the original behavior, for before/after comparison.
-
-Output columns: COLUMNS = frame, track_id, box_conf, 17 x (x, y, c), bx1..by2.
-track_id -1 marks a detection the tracker has not confirmed (or matched to nothing).
-"""
+"""Offline merge + ByteTrack over raw detections -> per-swimmer keypoint Parquet (CPU step)."""
 
 from __future__ import annotations
 
@@ -47,19 +23,14 @@ COLUMNS = ["frame", "track_id", "box_conf"] + KP_COLUMNS + BOX_COLUMNS
 class TrackSettings:
     """Merge + tracker parameters; stored in the output file's metadata."""
 
-    merge: str = "ios"  # "ios" (cross-crop IoU or IoS) or "iou" (original)
+    merge: str = "ios"
     iou_thresh: float = 0.5
     ios_thresh: float = 0.8
-    # None = fixed 30 frames at any fps (original).
     lost_track_seconds: float | None = 1.0
-    # First-round matching and the bar to start a track. 0.5 kept nearly all the long tracks
-    # 0.4 found on a real rescue clip, with a third of the short fragments.
     high_conf_threshold: float = 0.5
     activation_threshold: float = 0.5
     min_consecutive_frames: int = 2
     min_iou: float = 0.1
-    # Also merge same-crop overlaps below this confidence (None = never). Needed at a low
-    # extraction floor, where YOLO adds faint copies of one person inside a tile.
     same_crop_conf: float | None = None
 
 
@@ -72,19 +43,13 @@ LEGACY = TrackSettings(
 
 
 def make_tracker(fps: float, settings: TrackSettings) -> ByteTrackTracker:
-    """ByteTrack configured from settings, with the lost-track buffer converted to frames at `fps`.
-
-    Args:
-        fps: the clip's frame rate.
-        settings: merge/tracker parameters.
-    Returns:
-        A fresh tracker whose ids start at 0.
-    """
+    """ByteTrack with the lost-track buffer converted to frames at `fps`."""
     if settings.lost_track_seconds is None:
+        # rate must stay 30.0 so the buffer is exactly 30 frames
         buffer_frames, rate = (
             30,
             30.0,
-        )  # trackers scales buffer by rate/30 -> exactly 30
+        )
     else:
         buffer_frames, rate = max(1, round(settings.lost_track_seconds * fps)), 30.0
     tracker = ByteTrackTracker(
@@ -95,25 +60,14 @@ def make_tracker(fps: float, settings: TrackSettings) -> ByteTrackTracker:
         minimum_iou_threshold=settings.min_iou,
         high_conf_det_threshold=settings.high_conf_threshold,
     )
-    tracker.reset()  # the id counter is class-level; start every clip at 0
+    tracker.reset()  # reset required: id counter is class-level
     return tracker
 
 
 def track_detections(
     dets: pd.DataFrame, frames: pd.DataFrame, fps: float, settings: TrackSettings
 ) -> pd.DataFrame:
-    """Merge and track raw detections frame by frame.
-
-    Every processed frame is fed to the tracker, including frames with no detections, so a
-    track's lost-time counts real frames rather than only frames where something was seen.
-    Args:
-        dets: raw detections (extract_pose.DET_COLUMNS).
-        frames: every processed frame (extract_pose.FRAME_COLUMNS).
-        fps: the clip's frame rate.
-        settings: merge/tracker parameters.
-    Returns:
-        DataFrame with COLUMNS, one row per merged detection the tracker returned.
-    """
+    """Merge and track raw detections frame by frame; empty frames must be fed too."""
     tracker = make_tracker(fps, settings)
     dets = dets.sort_values("frame", kind="stable", ignore_index=True)
     frame_col = dets["frame"].to_numpy()
@@ -141,7 +95,7 @@ def track_detections(
                 confidence=conf_all[idx].astype(float),
                 class_id=np.zeros(len(idx), dtype=int),
             )
-            # The tracker reorders its output; this column rides along to find each row again.
+            # "row" column required: tracker reorders output
             detections.data["row"] = idx
         else:
             detections = sv.Detections.empty()
@@ -168,28 +122,14 @@ def track_detections(
 
 
 def tracking_fps(meta: dict) -> float:
-    """Rate of the frames the tracker sees: the video fps divided by the extraction frame step.
-
-    The lost-track buffer is counted in tracker updates, so with every second frame
-    processed, 1 s of real time is fps / 2 updates.
-    """
+    """Rate of the frames the tracker sees: video fps divided by the extraction frame step."""
     return meta["video"]["fps"] / meta["settings"].get("frame_step", 1)
 
 
 def build_tracks(
     det_dir: Path, out_path: Path, settings: TrackSettings | None = None
 ) -> pd.DataFrame:
-    """Build one clip's keypoint Parquet from its raw-detection folder.
-
-    The settings and source extraction facts are written into the Parquet's schema metadata
-    under the key "hydro_knight", so every keypoint file records how it was made.
-    Args:
-        det_dir: clip folder written by extract_raw (must be complete).
-        out_path: destination .parquet (parent dirs created).
-        settings: merge/tracker parameters; None = TrackSettings() defaults.
-    Returns:
-        The tracked DataFrame that was written.
-    """
+    """Build one clip's keypoint Parquet from its raw-detection folder; settings go in the schema metadata."""
     settings = settings or TrackSettings()
     meta, dets, frames = load_detections(det_dir)
     df = track_detections(dets, frames, tracking_fps(meta), settings)

@@ -1,16 +1,10 @@
-"""Cut real pool stills into 640 px training tiles, with SAM 3's head boxes as the labels.
+"""Cut real pool stills into 640 px training tiles, with SAM 3's head boxes (at or above --cut) as the labels.
 
-SAM 3 (text prompt "head") is the teacher: its boxes at or above --cut become the labels the student
-detector (RT-DETR) learns from. The cut is chosen on the 12 hand-labelled validation frames, never on the test
-frames (0.40 = best F1 there: 93% of his heads found, 87% of boxes on a head). Tiles use make_tiles.py's
-grid and 60%-inside rule, so real and synthetic tiles look the same to the trainer and can share a folder.
-Whole clips are held out for the trainer's validation loss (never frames of one clip on both sides).
+Uses make_tiles.py's grid and 60%-inside rule; output layout matches make_tiles.py (images/, labels/, tiles.json).
+Stills and tiles show real people: keep them out of git, private datasets only.
 
-    uv run python synthetic/train/make_real_tiles.py <stills dir> heads_gpu0.json heads_gpu1.json \
+    uv run python synthetic/train/make_real_tiles.py <stills dir> heads_gpu0.json heads_gpu1.json \\
         --out synthetic/renders/tiles_real --cut 0.40
-
-Tile names: real_<clip_id>_<frame>_<x>_<y>. Output layout matches make_tiles.py (images/, labels/,
-tiles.json); stills and tiles show real people, so they stay out of git and go only to private datasets.
 """
 
 import argparse
@@ -39,7 +33,7 @@ def main():
     clips = sorted({name.rsplit("_", 1)[0] for name in heads})
     val = set(random.Random(a.seed).sample(clips, a.val_clips))
     out = Path(a.out)
-    meta, counts = [], {"train": [0, 0], "val": [0, 0]}  # tiles, head boxes
+    meta, counts = [], {"train": [0, 0], "val": [0, 0]}
     for name, h in sorted(heads.items()):
         img = cv2.imread(str(Path(a.stills) / f"{name}.jpg"))
         H, W = img.shape[:2]

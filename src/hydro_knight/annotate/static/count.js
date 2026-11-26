@@ -1,8 +1,4 @@
-// Hydro-Knight labeler, Swimmer count tab: one point per person on still frames, and in
-// head-box mode one box per visible head. Points and boxes are pixels in the original frame.
-// Zoom/pan works like the Rescue timeline tab; the frame always opens fitted to the stage,
-// so nothing starts off-screen. Two frame sets share the tab: the benchmark (test) frames
-// and the head validation frames (?set=val).
+// Points and boxes are pixels in the original frame.
 
 const $ = (s) => document.querySelector(s);
 
@@ -18,14 +14,14 @@ const S = {
   frames: [],
   idx: -1,
   w: 1, h: 1,
-  // ?set=val&mode=dots in the URL wins over the last choice remembered in this browser
+  // URL ?set=/&mode= overrides the remembered mode.
   set: (URL_ARGS.get("set") || localStorage.getItem("hk.countSet")) === "val" ? "val" : "bench",
   mode: (URL_ARGS.get("mode") || localStorage.getItem("hk.countMode")) === "heads" ? "heads" : "dots",
-  history: [],       // [{idx, snap}] snapshots for undo
+  history: [],
   zoom: { k: 1, tx: 0, ty: 0, bx: 0, by: 0, bw: 0, bh: 0 },
   saveTimer: null,
-  space: false,      // space held: drag pans in head-box mode
-  box: null,         // head box being drawn: {x0, y0, x1, y1, deck}
+  space: false,
+  box: null,
 };
 
 const cur = () => S.frames[S.idx];
@@ -36,8 +32,6 @@ const snap = (f) => JSON.parse(JSON.stringify({
   water: f.water, deck: f.deck, hidden: f.hidden ?? [],
   heads: f.heads ?? null, heads_reviewed: f.heads_reviewed ?? null,
 }));
-
-// ---------------------------------------------------------------- feedback
 
 function toast(msg, kind = "ok") {
   const el = document.createElement("div");
@@ -52,8 +46,6 @@ function setSaveState(state, text) {
   pill.className = `pill ${state}`;
   pill.textContent = text;
 }
-
-// ---------------------------------------------------------------- frames
 
 async function loadFrames() {
   await flushSave();
@@ -100,8 +92,6 @@ async function openFrame(i) {
   render();
 }
 
-// ---------------------------------------------------------------- edits + save
-
 function edit(fn) {
   const f = cur();
   S.history.push({ idx: S.idx, snap: snap(f) });
@@ -117,7 +107,7 @@ async function undo() {
   if (prev.idx !== S.idx) await openFrame(prev.idx);
   const f = cur(), s = prev.snap;
   Object.assign(f, { water: s.water, deck: s.deck, hidden: s.hidden });
-  // A frame that had no head boxes yet gets empty lists (not none), so the save clears them.
+  // A frame with no head boxes yet gets empty lists, not none.
   f.heads = s.heads ?? (f.heads ? { water: [], deck: [], no_head: [] } : undefined);
   f.heads_reviewed = s.heads_reviewed ?? (typeof f.heads_reviewed === "boolean" ? false : undefined);
   render();
@@ -139,7 +129,6 @@ async function flushSave() {
   await save(S.idx);
 }
 
-// The dots always; head boxes and the reviewed flag only once the frame has them.
 function body(f) {
   const out = { water: f.water, deck: f.deck };
   if (f.hidden) out.hidden = f.hidden;
@@ -165,8 +154,6 @@ async function save(idx) {
   }
 }
 
-// ---------------------------------------------------------------- clicks + boxes
-
 function toFrame(clientX, clientY) {
   const r = img.getBoundingClientRect();
   return [((clientX - r.left) / r.width) * S.w, ((clientY - r.top) / r.height) * S.h];
@@ -180,7 +167,6 @@ const clampY = (y) => Math.min(S.h, Math.max(0, y));
 function addPoint(e) {
   const [x, y] = toFrame(e.clientX, e.clientY);
   if (!inFrame(x, y)) return;
-  // alt = a person whose head isn't visible here (under, blocked, or not sure): ignored in scoring
   const kind = e.altKey ? "hidden" : e.shiftKey ? "deck" : "water";
   edit((f) => (f[kind] ||= []).push([r1(x), r1(y)]));
 }
@@ -194,7 +180,7 @@ function addNoHead(e) {
 function finishBox(e) {
   const b = S.box;
   S.box = null;
-  b.deck ||= e.shiftKey; // shift held at the start or the end of the drag
+  b.deck ||= e.shiftKey;
   const x1 = clampX(Math.min(b.x0, b.x1)), x2 = clampX(Math.max(b.x0, b.x1));
   const y1 = clampY(Math.min(b.y0, b.y1)), y2 = clampY(Math.max(b.y0, b.y1));
   if (x2 - x1 < 2 || y2 - y1 < 2) { drawOverlay(); return; }
@@ -204,10 +190,9 @@ function finishBox(e) {
 function removeNearest(e) {
   const [x, y] = toFrame(e.clientX, e.clientY);
   const f = cur();
-  const reach = 14 * unit(); // about 14 screen pixels at any zoom
+  const reach = 14 * unit();
   let best = null;
   if (S.mode === "heads") {
-    // the smallest box under the cursor, else the nearest "no head" mark
     for (const kind of ["water", "deck"]) {
       heads(f)[kind].forEach(([x1, y1, x2, y2], j) => {
         const area = (x2 - x1) * (y2 - y1);
@@ -241,8 +226,6 @@ function toggleReviewed() {
   toast(cur().heads_reviewed ? "Marked reviewed" : "Marked not reviewed");
 }
 
-// ---------------------------------------------------------------- zoom + pan
-
 function fitStage(reset) {
   const sw = stage.clientWidth, sh = stage.clientHeight;
   const scale = Math.min(sw / S.w, sh / S.h);
@@ -266,7 +249,6 @@ function applyZoom() {
   drawOverlay();
 }
 
-// Frame pixels per screen pixel at the current fit and zoom.
 const unit = () => S.w / (S.zoom.bw * S.zoom.k || 1);
 
 stage.addEventListener("wheel", (e) => {
@@ -280,12 +262,10 @@ stage.addEventListener("wheel", (e) => {
   applyZoom();
 }, { passive: false });
 
-// Dots mode: a click adds a dot and a drag pans. Head-box mode: a drag draws a box,
-// alt-click marks "person, no head visible", and space-drag pans.
 let drag = null;
 stage.addEventListener("mousedown", (e) => {
   if (e.button !== 0 || S.idx < 0) return;
-  if (S.mode === "heads") e.preventDefault(); // no text selection while drawing
+  if (S.mode === "heads") e.preventDefault();
   drag = { x: e.clientX, y: e.clientY, tx: S.zoom.tx, ty: S.zoom.ty, moved: false };
   if (S.mode === "heads" && !S.space && !e.altKey) {
     const [x, y] = toFrame(e.clientX, e.clientY);
@@ -326,8 +306,6 @@ stage.addEventListener("contextmenu", (e) => {
 });
 window.addEventListener("resize", () => fitStage(false));
 
-// ---------------------------------------------------------------- rendering
-
 const COLORS = {
   water: "#ef4444", deck: "#3b82f6", hidden: "#f59e0b", headWater: "#22c55e", noHead: "#f59e0b",
 };
@@ -338,7 +316,6 @@ function drawOverlay() {
   if (!f) return;
   const u = unit();
   const heading = S.mode === "heads";
-  // dots: full size in dots mode, small and faint as a guide in head-box mode
   ctx.globalAlpha = heading ? 0.45 : 1;
   for (const kind of ["water", "deck"]) {
     ctx.fillStyle = COLORS[kind];
@@ -351,7 +328,7 @@ function drawOverlay() {
       if (!heading) ctx.stroke();
     }
   }
-  ctx.strokeStyle = COLORS.hidden; // hidden: hollow amber ring
+  ctx.strokeStyle = COLORS.hidden;
   ctx.lineWidth = 2 * u;
   for (const [x, y] of f.hidden || []) {
     ctx.beginPath();
@@ -361,7 +338,7 @@ function drawOverlay() {
   ctx.globalAlpha = 1;
   if (!heading) return;
   const h = heads(f);
-  const suggested = f.heads_source && !f.heads_reviewed; // a model's boxes, not yet checked
+  const suggested = f.heads_source && !f.heads_reviewed;
   ctx.lineWidth = 2 * u;
   ctx.setLineDash(suggested ? [5 * u, 3 * u] : []);
   for (const [kind, color] of [["water", COLORS.headWater], ["deck", COLORS.deck]]) {
@@ -450,8 +427,6 @@ async function setFrameSet(set) {
   render();
 }
 
-// ---------------------------------------------------------------- wiring
-
 $("#prev").onclick = () => openFrame(S.idx - 1);
 $("#next").onclick = () => openFrame(S.idx + 1);
 $("#zoomReset").onclick = () => fitStage(true);
@@ -481,7 +456,6 @@ document.addEventListener("keyup", (e) => {
   if (e.key === " ") { S.space = false; stage.classList.remove("pan-ready"); }
 });
 
-// Closing the tab with a save still waiting on its timer: send it anyway.
 window.addEventListener("beforeunload", () => {
   if (!S.saveTimer) return;
   navigator.sendBeacon(api(`/${S.idx}`),

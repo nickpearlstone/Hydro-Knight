@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Full check of one render batch against the real reference frame:
-# degrade -> image stats -> detector scores (YOLO11n-pose, RT-DETRv2) -> DINOv2 crop realism.
-#   synthetic/tools/evaluate.sh synthetic/renders/b01 ['{"sat": 1.2}']
 set -euo pipefail
 D=$1
 P=${2:-'{}'}

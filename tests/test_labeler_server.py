@@ -1,12 +1,3 @@
-"""
-Tests for the browser labeler's server (annotate/server.py), via Flask's test client.
-
-The labeler writes the manifest every other file depends on, so these pin that a
-save keeps every field it doesn't own, that bad marks are refused instead of
-written, and that the "needs victim marks" queue matches what the UI treats as done.
-Videos and manifests are throwaway files under tmp_path.
-"""
-
 from __future__ import annotations
 
 import json
@@ -109,7 +100,7 @@ def test_save_writes_marks_and_keeps_fields_it_does_not_own(app_env):
             "label": "distress",
             "trim_start": 0.5,
             "trim_end": 6.0,
-            "start_sec": 99.0,  # the download window is not the labeler's to change
+            "start_sec": 99.0,
             "events": [DONE_EVENT],
         },
     )
@@ -119,8 +110,8 @@ def test_save_writes_marks_and_keeps_fields_it_does_not_own(app_env):
     assert rec.events[0]["contact"] == 3.0
     assert [m["kind"] for m in rec.events[0]["victim"]] == ["onset", "last_seen"]
     assert (rec.trim_start, rec.trim_end) == (0.5, 6.0)
-    assert (rec.start_sec, rec.end_sec) == (0.0, -1.0)  # download window untouched
-    assert rec.fps == 30.0 and rec.camera_view == CameraView.ELEVATED  # untouched
+    assert (rec.start_sec, rec.end_sec) == (0.0, -1.0)
+    assert rec.fps == 30.0 and rec.camera_view == CameraView.ELEVATED
     client_ids = _ids(client, "needs_victim")
     assert "todo" not in client_ids
 
@@ -130,13 +121,13 @@ def _event(manifest_path, cid="todo"):
 
 
 def test_clearing_saved_keeps_the_rest_of_the_event(app_env):
-    # The old UI dropped an event with no "saved" time, deleting contact and clicks.
+    # regression: event with no "saved" time keeps contact and clicks.
     client, manifest_path, *_ = app_env
     half = {**DONE_EVENT, "end": None}
     assert client.post("/api/clip/todo", json={"events": [half]}).status_code == 200
     (ev,) = _event(manifest_path)
     assert ev["end"] is None and ev["contact"] == 3.0 and len(ev["victim"]) == 2
-    assert "todo" in _ids(client, "needs_victim")  # unfinished until saved is set
+    assert "todo" in _ids(client, "needs_victim")
 
 
 def test_saved_off_camera_counts_as_done(app_env):
@@ -169,7 +160,7 @@ def test_event_without_onset_is_kept(app_env):
 @pytest.mark.parametrize(
     "bad",
     [
-        {"start": -1.0, "end": 5.0},  # negative time
+        {"start": -1.0, "end": 5.0},
         {
             "start": 1.0,
             "end": 5.0,
@@ -186,9 +177,9 @@ def test_malformed_events_are_refused_and_nothing_is_written(app_env, bad):
 
 
 def test_wrong_order_is_saved_but_clip_stays_unfinished(app_env):
-    # One slip (saved before onset) used to fail the whole save, label and trims too.
+    # regression: saved before onset must not fail label and trims.
     client, manifest_path, *_ = app_env
-    backwards = {**DONE_EVENT, "start": 6.0}  # onset after contact and save
+    backwards = {**DONE_EVENT, "start": 6.0}
     body = {"events": [backwards], "trim_start": 9.0, "trim_end": 2.0}
     assert client.post("/api/clip/todo", json=body).status_code == 200
     rec = {r.clip_id: r for r in Manifest(manifest_path).load()}["todo"]
@@ -261,7 +252,7 @@ def test_boxes_are_merged_per_frame_and_absent_when_not_extracted(app_env):
     (folder / "meta.json").write_text(json.dumps({"chunks_done": 1, "complete": True}))
 
     f0 = client.get("/api/boxes/todo?frame=0").get_json()
-    assert f0["available"] and len(f0["boxes"]) == 1  # half-body duplicate merged away
+    assert f0["available"] and len(f0["boxes"]) == 1
     assert client.get("/api/boxes/todo?frame=1").get_json()["boxes"][0]["conf"] == 0.8
 
 
@@ -274,14 +265,13 @@ def test_delete_blocklists_url_and_removes_video(app_env):
 
 
 def test_offset_comes_from_the_download_window_not_from_trims(tmp_path, monkeypatch):
-    # The old labeler guessed "sectioned" from file length vs. start/end, so a small
-    # trim on a whole download could flip the offset. Now trims never move it.
+    # Trims must never move the section offset.
     raw = tmp_path / "raw_local"
     raw.mkdir()
     monkeypatch.setattr(download, "RAW_LOCAL", raw)
     m = Manifest(tmp_path / "m.jsonl")
     trimmed = _record("trimmed")
-    trimmed.trim_start, trimmed.trim_end = 0.5, 0.9  # trims that fooled the old guess
+    trimmed.trim_start, trimmed.trim_end = 0.5, 0.9
     m.append(trimmed)
     m.append(_record("section", start=14.0, end=15.0))
     for cid in ("trimmed", "section"):
@@ -291,9 +281,6 @@ def test_offset_comes_from_the_download_window_not_from_trims(tmp_path, monkeypa
     ).test_client()
     assert client.get("/api/clip/trimmed").get_json()["offset"] == 0.0
     assert client.get("/api/clip/section").get_json()["offset"] == 14.0
-
-
-# ------------------------------------------------------------ review tab
 
 
 @pytest.fixture

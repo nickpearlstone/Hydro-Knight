@@ -43,7 +43,7 @@ jobs:
       - name: Check out the repo with its full history
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0  # every commit, so a key committed and later deleted is still caught
+          fetch-depth: 0  # full history required
 
       - name: Install gitleaks (pinned version, checksum verified)
         env:

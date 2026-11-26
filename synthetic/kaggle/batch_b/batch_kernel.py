@@ -1,10 +1,7 @@
 """Kaggle GPU job: render a varied batch of labelled wave-pool frames (one notebook = one PLAN entry).
 
-Each config renders FRAMES frames with its "vary" block (camera, crowd), a 4-frame moving-water clip
-per frame, then post.py (camera look + lens + video codec) and export_yolo.py (person + head boxes).
-Two workers run side by side, one per T4 (CUDA_VISIBLE_DEVICES), each taking every second config.
-A worker stops starting new frames after MAX_HOURS so the session never hits Kaggle's 12 h limit and
-loses its output. Inputs: the private dataset npstone/hk-synth.
+Each config renders FRAMES frames with its "vary" block, a 4-frame moving-water clip per frame, then post.py and export_yolo.py.
+Two workers, one per T4; each stops starting frames after MAX_HOURS. Inputs: the private dataset npstone/hk-synth.
 """
 
 import glob
@@ -17,13 +14,11 @@ from pathlib import Path
 
 import numpy as np
 
-PLAN = "b"  # set per notebook folder by synthetic/kaggle/make_batch.py
+PLAN = "b"
 ALL = ["ref_6f5c", "ref_dc93", "ref_9992", "ref_1d50", "ref_644c", "ref_8c83"]
 CONFIGS = {"a": ALL[:3], "b": ALL[3:], "c": ALL, "d": ALL}[PLAN]
-FRAMES = {"a": 50, "b": 50, "c": 25, "d": 25}[
-    PLAN
-]  # c, d: all six cameras in one notebook (half-size batch); d = more of c, new seeds
-MAX_HOURS = 9.5  # leaves ~1 h for post + export before Kaggle's 12 h limit
+FRAMES = {"a": 50, "b": 50, "c": 25, "d": 25}[PLAN]
+MAX_HOURS = 9.5  # MAX_HOURS must leave ~1 h for post + export (Kaggle limit 12 h)
 W = "/kaggle/working"
 BL_URL = (
     "https://download.blender.org/release/Blender4.2/blender-4.2.1-linux-x64.tar.xz"
@@ -39,9 +34,7 @@ def sh(cmd, env=None):
 
 
 src = os.path.dirname(glob.glob("/kaggle/input/**/scene.py", recursive=True)[0])
-if (
-    "--exact" not in Path(f"{src}/scene.py").read_text()
-):  # stale dataset version mounted
+if "--exact" not in Path(f"{src}/scene.py").read_text():
     raise SystemExit(
         f"stale scene.py in {src}: re-version the hk-synth dataset and re-run"
     )
@@ -59,8 +52,7 @@ sh(f"cd /tmp && wget -q {BL_URL} && tar xf blender-4.2.1-linux-x64.tar.xz")
 sh("pip -q install opencv-python-headless scipy > /dev/null 2>&1 || true")
 B = "/tmp/blender-4.2.1-linux-x64/blender"
 
-# one shell script per GPU; GPU g renders frames i with i % 2 == g of every config, one Blender run per
-# frame (so the time guard can stop between frames)
+# one Blender run per frame
 procs = []
 for gpu in (0, 1):
     lines = ["set -u"]
@@ -69,7 +61,7 @@ for gpu in (0, 1):
             1000 * (ALL.index(name) + 1)
             + {"a": 0, "b": 50000, "c": 90000, "d": 130000}[PLAN]
         )
-        out = f"{W}/batch_{PLAN}/{name}/gpu{gpu}"  # own folder: frame numbers come from file counts
+        out = f"{W}/batch_{PLAN}/{name}/gpu{gpu}"
         lines.append(f"mkdir -p {out}")
         lines.append(
             f"for i in $(seq {gpu} 2 {FRAMES - 1}); do "
@@ -84,7 +76,6 @@ for gpu in (0, 1):
 for p in procs:
     p.wait()
 
-# post (look + lens + codec), boxes, then drop the clip neighbours and compress masks
 summary = {"plan": PLAN, "configs": {}, "hours": None}
 for name, gpu in [(n, g) for n in CONFIGS for g in (0, 1)]:
     out = f"{W}/batch_{PLAN}/{name}/gpu{gpu}"

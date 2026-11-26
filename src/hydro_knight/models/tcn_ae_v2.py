@@ -1,18 +1,4 @@
-"""
-TCN autoencoder v2: dilated residual encoder, squeezed code, mirrored decoder.
-
-Encoder: one residual block per dilation (dilations_for(window), e.g. 1, 2, 4, 8,
-16, 13 for 90 steps) at constant width. The convolutions are unpadded ("valid"): the
-input is the scored window plus `context` real steps on each side, and each block
-trims 2 * dilation steps, so the encoder ends exactly on the scored window. Residual
-connections add each block's input (center-cropped, or 1x1-projected when channels
-change) to its output, which keeps deep stacks trainable.
-
-Squeeze: three stride-2 convolutions shrink time (90 -> 45 -> 23 -> 12) while channels
-halve toward the code size. Decoder: upsample + convolution back to 23, 45, 90 steps,
-two padded residual blocks to restore detail, then a 1-wide convolution to the input
-features. The anomaly score is the masked reconstruction error of the scored window.
-"""
+"""TCN autoencoder v2: dilated residual encoder, squeezed code, mirrored decoder."""
 
 from __future__ import annotations
 
@@ -28,15 +14,11 @@ SIZES = {
     "small": (32, 8),
     "medium": (64, 16),
     "large": (128, 32),
-}  # (width, code channels)
+}
 
 
 class DilatedBlock(nn.Module):
-    """3-tap dilated convolution + ReLU with a residual connection.
-
-    Unpadded by default (output shorter by 2 * dilation, residual center-cropped);
-    pad=True keeps the length with reflect padding (used inside the decoder only).
-    """
+    """3-tap dilated convolution + ReLU with a residual connection."""
 
     def __init__(self, c_in: int, c_out: int, dilation: int, pad: bool = False):
         super().__init__()
@@ -128,16 +110,7 @@ def n_params(model: nn.Module) -> int:
 
 
 def masked_errors(pred, target, detected, coord_weight: float = 0.0):
-    """Per-window weighted MSE; pose coordinates on missing steps weigh coord_weight.
-
-    Args:
-        pred, target: (B, F, T) tensors.
-        detected: (B, T) bool, True where the swimmer was detected.
-        coord_weight: weight of pose coordinates (features 0-33) on missing steps;
-            their inputs are held placeholders with no ground truth.
-    Returns:
-        (B,) tensor.
-    """
+    """Per-window weighted MSE; pose coordinates on missing steps weigh coord_weight."""
     w = torch.ones_like(target)
     d = detected.float()
     w[:, :N_POSE, :] = (d + (1.0 - d) * coord_weight)[:, None, :]
@@ -153,7 +126,7 @@ def fit_scaler(ws: WindowSet, n: int = 2000, seed: int = 0):
     x, _ = ws.gather(rows)
     flat = x[:, ws.context : ws.context + ws.window].reshape(-1, x.shape[-1])
     std = flat.std(axis=0)
-    # A (near-)constant feature gets scale 1: a tiny floor would blow rare values up.
+    # A near-constant feature gets scale 1; no tiny floor.
     return flat.mean(axis=0), np.where(std < 1e-3, 1.0, std).astype(np.float32)
 
 
@@ -174,10 +147,7 @@ def train_v2(
     coord_weight: float = 0.0,
     device: str = "cpu",
 ):
-    """Train on random mini-batches of normal windows; returns (model, scaler).
-
-    The per-step loss is recorded on model.loss_history_.
-    """
+    """Train on random mini-batches of normal windows; returns (model, scaler)."""
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     width, code = SIZES[size]
@@ -227,14 +197,7 @@ def score_v2(
 
 
 def save_checkpoint(path, model: TCNAutoencoderV2, scaler, meta: dict | None = None):
-    """Write weights, architecture, feature scaler and run metadata to one file.
-
-    Args:
-        path: output file (e.g. runs/<name>/model_small_s0.pt).
-        model: a trained TCNAutoencoderV2.
-        scaler: the (mean, std) arrays train_v2 returned.
-        meta: anything needed to score with the model again (feature options, split).
-    """
+    """Write weights, architecture, feature scaler and run metadata to one file."""
     torch.save(
         {
             "state_dict": model.state_dict(),
