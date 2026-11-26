@@ -1,22 +1,5 @@
 """
 Convert AV1 source videos to H.264 so every extraction environment can decode them.
-
-The 10 clips that produced empty keypoint files are exactly the 10 AV1-encoded
-videos: Colab's OpenCV has no AV1 decoder, so it read 0 frames and nothing was
-extracted. H.264 decodes everywhere.
-
-Frame-exact on purpose. Event windows are in seconds and keypoints index frames,
-so a conversion that drops or duplicates a single frame would silently shift
-labels. Every source frame is passed through unchanged in count and timing
-(-fps_mode passthrough), then both files' frames are counted by full decode, and
-the original is only replaced if the counts match. Quality: CRF 18, visually
-lossless. Audio is dropped (unused). Originals are kept in <videos>/av1_originals/.
-
-Needs ffmpeg/ffprobe with an AV1 decoder (Homebrew's build has libdav1d).
-
-Usage:
-    uv run hydroknight transcode-av1 --dry-run   # list AV1 clips
-    uv run hydroknight transcode-av1             # convert, verify, replace
 """
 
 from __future__ import annotations

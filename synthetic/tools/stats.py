@@ -1,13 +1,6 @@
-"""Image-statistics diagnostics, real vs render (tells which knob to turn; not a pass/fail gate).
+"""Image-statistics diagnostics, real vs render (colour, noise, sharpness, blockiness, spectrum slope; not a pass/fail gate).
 
-Measured on the water (cyan pixels) and on the whole frame:
-  - colour: mean and std of L, a, b over water pixels
-  - noise: std of the high-pass residual in the flattest 10% of 32 px water tiles
-  - sharpness: median Laplacian variance over water tiles (crowd + ripples)
-  - blockiness: |gradient| on the 8 px grid / off the grid (> ~1.05 = visible H.264 blocking)
-  - spectrum slope: log-log slope of the radially averaged power spectrum (renders run smoother)
-
-    uv run python synthetic/tools/stats.py raw_local/pose_bench/6f5c67826a76_720.png synthetic/renders/b01/rgbv_0000.png
+uv run python synthetic/tools/stats.py raw_local/pose_bench/6f5c67826a76_720.png synthetic/renders/b01/rgbv_0000.png
 """
 
 import sys

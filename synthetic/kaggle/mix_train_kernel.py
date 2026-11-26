@@ -1,8 +1,6 @@
 """Kaggle GPU job: fine-tune the head detectors on real tiles (SAM 3 labels, cut 0.40) + synthetic tiles (private dataset hk-tiles-mix).
 
-RUNS lists the jobs (one per GPU); see the comment there for what each version trained. Weights + training curves land in /kaggle/working/train.
-Scoring on real frames happens on the Mac afterwards (synthetic/train/score_heads.py); no real
-footage is uploaded.
+RUNS lists the jobs (one per GPU); weights + training curves land in /kaggle/working/train.
 """
 
 import glob
@@ -31,7 +29,7 @@ subprocess.run(
     shell=True,
     check=False,
 )
-# stop here if the pin didn't take: 5.16.1's RT-DETR loss leaves the last decoder layer untrained
+# CAUTION[mixtrain-transformers-pin]: transformers must be 5.21.0, never 5.16.1
 subprocess.run(
     "python -c 'import transformers; assert transformers.__version__ == \"5.21.0\", transformers.__version__'",
     shell=True,
@@ -44,12 +42,7 @@ def run(cmd, gpu, log):
     return subprocess.Popen(f"{cmd} > {W}/{log} 2>&1", shell=True, env=env)
 
 
-# v7 (10-27): v6's RT-DETR seeds again with transformers pinned to 5.21.0. Under 5.16.1 (what Kaggle
-# installed for v1-v6) the last decoder layer's classifier never learns (top score ~0.06 vs ~0.99 on
-# earlier layers), so every RT-DETR before v7 was crippled. YOLO is unaffected and not rerun.
-# v6 (10-26): real + synthetic. Per GPU: two RT-DETR seeds (20-epoch schedule from COCO, weights every
-# 2 epochs; ~7.5 min/epoch on 8.8k tiles), then one YOLO11n seed (30 epochs, weights every 5).
-# Seed and checkpoint are picked on the 12 hand-labelled validation frames on the Mac, never on the test frames.
+# CAUTION[mixtrain-select-on-validation]: pick seed and checkpoint on the validation frames, never the test frames
 START_BY, HARD_STOP = 9 * 3600, 11.5 * 3600
 RTDETR = (
     "python {code}/train_rtdetr.py {tiles} --epochs 20 --save-every 2 --batch 8 "

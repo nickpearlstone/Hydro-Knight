@@ -19,7 +19,7 @@ for plan in ("a", "b", "c", "d"):
         "code_file": "batch_kernel.py",
         "language": "python",
         "kernel_type": "script",
-        "is_private": True,  # every Kaggle item for this project stays private
+        "is_private": True,
         "enable_gpu": True,
         "enable_internet": True,
         "machine_shape": "NvidiaTeslaT4",

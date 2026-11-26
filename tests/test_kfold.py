@@ -1,5 +1,3 @@
-"""Grouped K-fold: pooling held-out scores, and the train + evaluate path end to end on fake clips."""
-
 from __future__ import annotations
 
 import json
@@ -74,7 +72,6 @@ def _manifest_line(cid):
 
 @pytest.fixture
 def workspace(tmp_path, monkeypatch):
-    """Six labeled fake clips (victim track 7, two normal swimmers) under data/ in a temp dir."""
     monkeypatch.chdir(tmp_path)
     kp = tmp_path / "data" / "keypoints_tiled"
     kp.mkdir(parents=True)
@@ -117,7 +114,6 @@ def test_kfold_tests_each_clip_once_by_a_model_that_never_saw_it(
     assert sorted(folds) == CLIPS and set(folds.values()) == {0, 1, 2}
     assert sorted(summary["reports"]["0"]["used_test"]) == CLIPS
 
-    # Each fold's checkpoint trained on exactly the clips outside its fold.
     for f in range(3):
         meta = torch.load(run / f"model_small_s0_f{f}.pt", weights_only=False)["meta"]
         assert sorted(meta["test_clips"]) == sorted(
@@ -126,7 +122,6 @@ def test_kfold_tests_each_clip_once_by_a_model_that_never_saw_it(
         assert set(meta["train_clips"]) == set(CLIPS) - set(meta["test_clips"])
         assert meta["score_scale"] > 0
 
-    # The pooled table holds every clip, each from its own fold's model only.
     alarms = pd.read_parquet(run / "alarms_small_s0.parquet")
     by_clip = alarms.groupby("clip_id")["fold"].unique()
     assert sorted(by_clip.index) == CLIPS
@@ -149,7 +144,6 @@ def test_kfold_tests_each_clip_once_by_a_model_that_never_saw_it(
     assert len(pooled["detection_crossfit"]) == len(pooled["detection"])
     assert pooled["auc"] is not None and (alarms["track_id"] == 7).any()
 
-    # Re-scoring the saved fold checkpoints reproduces the pooled table exactly.
     _run(
         train_v2,
         monkeypatch,

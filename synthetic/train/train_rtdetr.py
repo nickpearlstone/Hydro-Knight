@@ -1,20 +1,6 @@
-"""Step 2b (main model): fine-tune RT-DETRv2-R18 (COCO-pretrained, Apache-2.0) into a head detector.
+"""Fine-tune RT-DETRv2-R18 (Apache-2.0) into a 1-class head detector on 640 px tiles.
 
-1. Load PekingU/rtdetr_v2_r18vd from the Hugging Face Hub with its COCO weights, but with a fresh
-   1-class output ("head"); ignore_mismatched_sizes lets the 80-class classifier be replaced.
-2. Freeze the ResNet-18 backbone (--freeze-backbone, default on) so only the hybrid encoder, the
-   transformer decoder and the new class/box heads learn. With --backbone-lr-scale > 0 instead, the
-   backbone trains too at a lower learning rate (the RT-DETR authors' fine-tuning recipe).
-3. Train on the 640 px synthetic tiles (YOLO txt labels read directly), with horizontal flips and
-   small brightness / contrast jitter, AdamW, cosine schedule, mixed precision on CUDA.
-4. Scale/crop jitter (0.5-1.5x), warm-up, an EMA of the weights. After each epoch, compute
-   validation loss (EMA weights) and keep the best weights (save_pretrained) in
-   <out>/best/, loadable with AutoModelForObjectDetection.from_pretrained.
-5. Seed runs: --seed fixes the random start (new class head, shuffling, augmentation);
-   --stop-after N trains only the first N epochs of the --epochs learning-rate schedule;
-   --save-every K also keeps the EMA weights at epochs K, 2K, ... in <out>/epoch_NNN/.
-
-    uv run --with transformers python synthetic/train/train_rtdetr.py synthetic/renders/tiles_c --epochs 40
+uv run --with transformers python synthetic/train/train_rtdetr.py synthetic/renders/tiles_c --epochs 40
 """
 
 import argparse
@@ -51,14 +37,12 @@ class Tiles(torch.utils.data.Dataset):
         for line in txt.read_text().split("\n") if txt.exists() else []:
             if line.strip():
                 _, cx, cy, w, h = map(float, line.split())
-                boxes.append(
-                    [(cx - w / 2) * W, (cy - h / 2) * H, w * W, h * H]
-                )  # COCO xywh, pixels
+                boxes.append([(cx - w / 2) * W, (cy - h / 2) * H, w * W, h * H])
         if self.augment:
             if random.random() < 0.5:
                 img = img[:, ::-1].copy()
                 boxes = [[W - x - w, y, w, h] for x, y, w, h in boxes]
-            if random.random() < 0.8:  # zoom 0.5-1.5x: the same head seen at many sizes
+            if random.random() < 0.8:
                 img, boxes = rescale(img, boxes, random.uniform(0.5, 1.5))
             a, b = random.uniform(0.8, 1.2), random.uniform(-20, 20)
             img = np.clip(img.astype(np.float32) * a + b, 0, 255).astype(np.uint8)
@@ -70,10 +54,7 @@ class Tiles(torch.utils.data.Dataset):
 
 
 def rescale(img, boxes, s):
-    """Zoom a tile by s, then crop (s > 1) or pad with the tile's mean colour (s < 1) back to its size.
-
-    Boxes (COCO xywh) move with the image; a box keeps going only if 40% of it survives the crop.
-    """
+    """Zoom a tile by s, then crop or pad back to its size; boxes (COCO xywh) move with it."""
     H, W = img.shape[:2]
     big = cv2.resize(img, (round(W * s), round(H * s)), interpolation=cv2.INTER_LINEAR)
     bh, bw = big.shape[:2]
@@ -100,10 +81,7 @@ def rescale(img, boxes, s):
 
 
 class Collate:
-    """Batch tiles through the HF image processor (resize, normalise, boxes -> its label format).
-
-    A class rather than a closure so DataLoader workers can pickle it (macOS spawns them).
-    """
+    """Batch tiles through the HF image processor; must stay a picklable class (DataLoader workers)."""
 
     def __init__(self, proc):
         self.proc = proc
@@ -148,10 +126,10 @@ def main():
     )
     ap.add_argument("--out", default="synthetic/renders/train/rtdetrv2_head")
     a = ap.parse_args()
-    if a.seed is not None:  # before the model loads: the new class head is random too
+    if a.seed is not None:
         random.seed(a.seed)
         np.random.seed(a.seed)
-        torch.manual_seed(a.seed)  # all devices, and the DataLoader workers' seeds
+        torch.manual_seed(a.seed)
     from transformers import AutoImageProcessor, AutoModelForObjectDetection
 
     dev = (
@@ -195,7 +173,7 @@ def main():
     )
     total, warm = a.epochs * len(dl), max(1, int(a.warmup_epochs * len(dl)))
 
-    def lr_factor(s):  # linear warm-up, then cosine decay to zero
+    def lr_factor(s):
         if s < warm:
             return (s + 1) / warm
         return 0.5 * (
@@ -203,7 +181,6 @@ def main():
         )
 
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_factor)
-    # EMA: a running average of the weights, smoother than the last step; used for val + saving
     ema = copy.deepcopy(model).eval() if a.ema > 0 else model
     for p_ in ema.parameters():
         p_.requires_grad_(False)

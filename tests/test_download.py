@@ -1,11 +1,3 @@
-"""
-Tests for the download command (ingest/download.py), without touching the network.
-
-Pins the clock contract every label depends on: a section download is cut EXACTLY at
-start_sec (so file time = source time - start_sec), whole downloads stay a plain copy,
-and trims never change what gets downloaded.
-"""
-
 from __future__ import annotations
 
 import subprocess
@@ -42,7 +34,6 @@ def _record(start=0.0, end=-1.0, trim_start=None, trim_end=None):
 
 @pytest.fixture
 def ran(tmp_path, monkeypatch):
-    """Capture the yt-dlp command instead of running it."""
     monkeypatch.setattr(download, "RAW_LOCAL", tmp_path)
     calls = []
 
@@ -64,9 +55,9 @@ def test_section_download_cuts_exactly_at_start(ran):
 @pytest.mark.parametrize(
     "rec",
     [
-        _record(),  # whole video
-        _record(end=38.0),  # whole video with a known length
-        _record(trim_start=8.24, trim_end=25.78),  # trims must not shrink the download
+        _record(),
+        _record(end=38.0),
+        _record(trim_start=8.24, trim_end=25.78),
     ],
 )
 def test_whole_downloads_are_never_sectioned(ran, rec):
@@ -77,10 +68,9 @@ def test_whole_downloads_are_never_sectioned(ran, rec):
 
 
 def test_format_prefers_h264_and_falls_back(ran):
-    # YouTube puts AV1 inside mp4 too, and Colab's OpenCV can't decode AV1 (the "10 empty
-    # clips"): ask for H.264 (avc1) first, and only then any mp4 / any video.
+    # H.264 (avc1) must be tried before any mp4.
     assert download.download_clip(_record())
     (cmd,) = ran
     choices = cmd[cmd.index("--format") + 1].split("/")
     assert "vcodec^=avc1" in choices[0]
-    assert any("vcodec" not in c for c in choices[1:])  # a fallback still exists
+    assert any("vcodec" not in c for c in choices[1:])

@@ -1,13 +1,5 @@
 """Pick head validation frames: one frame per rescue clip at drowning onset, from clips the
 benchmark frames don't use.
-
-    uv run hydroknight heads frames              # 40 frames -> data/annotations/head_val_gt.json
-    uv run hydroknight heads frames --n 20 --seed 1 --force
-
-These frames are for choosing a head detector's checkpoint, seed and threshold without
-touching the benchmark (test) frames, so no clip is in both sets. Label them in the labeler's
-Swimmer count tab (Frames: Head validation, Head boxes mode). Images are cached under
-raw_local/pose_bench/ like the benchmark's; the label file holds no pixels.
 """
 
 from __future__ import annotations
@@ -28,21 +20,7 @@ MANIFEST = Path("data/manifests/pool_footage.jsonl")
 def pick_val_frames(
     records, bench_ids: set[str], n: int, seed: int, fps_of
 ) -> list[dict]:
-    """One onset frame per eligible clip, n clips sampled with a fixed seed.
-
-    Eligible: a distress clip, not on [HOLD, with a local video, an onset time, and not one of
-    the benchmark clips.
-
-    Args:
-        records: manifest ClipRecords.
-        bench_ids: clip ids used by the benchmark (test) frames.
-        n: frames wanted (fewer if fewer clips are eligible).
-        seed: sampling seed.
-        fps_of: clip_id -> frame rate of the local video file.
-
-    Returns:
-        Frame records in the count-file format, ordered by clip id.
-    """
+    """One onset frame per eligible clip, n clips sampled with a fixed seed, ordered by clip id."""
     eligible = [
         r
         for r in records
@@ -96,7 +74,7 @@ def main() -> None:
         Manifest(MANIFEST).load(), bench, args.n, args.seed, file_fps
     )
     for item in frames:
-        count.read_frame(item)  # decode once and cache, so the labeler opens instantly
+        count.read_frame(item)
     count.save({"frames": frames}, count.VAL_PATH)
     print(
         f"picked {len(frames)} frames from {len(frames)} clips (none of the {len(bench)} "

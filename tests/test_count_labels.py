@@ -1,11 +1,3 @@
-"""
-Tests for the labeler's Swimmer count tab (annotate/count.py + its /api/count routes).
-
-These pin that clicks round-trip to the label file, that malformed points are refused
-instead of written, and that frame images come from the raw_local cache. Head boxes and
-the second frame set (?set=val) follow the same rules.
-"""
-
 from __future__ import annotations
 
 import cv2
@@ -40,7 +32,7 @@ HEADS = {"water": [[10.04, 20, 18, 29]], "deck": [[1, 1, 4, 4]], "no_head": [[7,
 def client(tmp_path, monkeypatch):
     raw = tmp_path / "raw_local"
     monkeypatch.setattr(download, "RAW_LOCAL", raw)
-    for f in FRAMES + VAL_FRAMES:  # cached frame images, so no video is needed
+    for f in FRAMES + VAL_FRAMES:
         path = count.frame_path(f)
         path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(path), np.zeros((48, 64, 3), np.uint8))
@@ -75,10 +67,10 @@ def test_save_round_trips_and_leaves_other_frames_alone(client):
 @pytest.mark.parametrize(
     "body",
     [
-        {"water": [[1, 2]]},  # missing deck list
-        {"water": [[1]], "deck": []},  # not a pair
-        {"water": [[-1, 2]], "deck": []},  # negative
-        {"water": [["nan", 2]], "deck": []},  # not finite
+        {"water": [[1, 2]]},
+        {"water": [[1]], "deck": []},
+        {"water": [[-1, 2]], "deck": []},
+        {"water": [["nan", 2]], "deck": []},
     ],
 )
 def test_bad_points_are_refused_and_nothing_is_written(client, body):
@@ -107,7 +99,7 @@ def test_head_boxes_and_reviewed_flag_round_trip(client):
         "no_head": [[7.0, 8.0]],
     }
     assert f["heads_reviewed"] is True
-    assert f["water"] == [[1.0, 2.0]]  # the dots are saved alongside, unchanged
+    assert f["water"] == [[1.0, 2.0]]
 
 
 def test_dots_only_save_keeps_existing_head_boxes(client):
@@ -120,11 +112,11 @@ def test_dots_only_save_keeps_existing_head_boxes(client):
 @pytest.mark.parametrize(
     "heads",
     [
-        {"water": [[5, 5, 1, 9]], "deck": [], "no_head": []},  # x1 > x2
-        {"water": [[1, 1, 5]], "deck": [], "no_head": []},  # not four numbers
-        {"water": [[-1, 1, 5, 5]], "deck": [], "no_head": []},  # negative
-        {"water": [], "deck": []},  # missing no_head list
-        [[1, 1, 5, 5]],  # not an object
+        {"water": [[5, 5, 1, 9]], "deck": [], "no_head": []},
+        {"water": [[1, 1, 5]], "deck": [], "no_head": []},
+        {"water": [[-1, 1, 5, 5]], "deck": [], "no_head": []},
+        {"water": [], "deck": []},
+        [[1, 1, 5, 5]],
     ],
 )
 def test_bad_head_boxes_are_refused_and_nothing_is_written(client, heads):
@@ -167,7 +159,6 @@ def test_hidden_dots_round_trip_and_are_optional(client):
     body = {"water": [[1, 2]], "deck": [], "hidden": [[5.04, 6]]}
     assert c.post("/api/count/0", json=body).status_code == 200
     assert count.load(path)["frames"][0]["hidden"] == [[5.0, 6.0]]
-    # an older client that doesn't send "hidden" leaves the saved list alone
     assert c.post("/api/count/0", json={"water": [], "deck": []}).status_code == 200
     assert count.load(path)["frames"][0]["hidden"] == [[5.0, 6.0]]
 

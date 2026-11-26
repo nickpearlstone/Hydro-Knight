@@ -1,20 +1,11 @@
-# Checks that run on every `git commit` (one-time setup per clone: `make hooks`).
-# Same ruff checks and secret scan CI runs, caught before the push.
-#
-# "local" hooks call the ruff already in .venv, so the hook, `make check` and CI
-# all use the one ruff version pinned in uv.lock. Pytest is left to CI and
-# `make check` because it is too slow to run on every commit.
-#
-# The secret scan needs gitleaks on your PATH (`brew install gitleaks`); CI pins
-# the same version in .github/workflows/ci.yml.
 repos:
   - repo: local
     hooks:
       - id: ruff-check
         name: ruff check
-        entry: uv run ruff check --fix  # --fix applies safe fixes, then the commit stops so you can review
-        language: system                # plain shell command, no separate environment
-        types: [python]                 # only runs when .py files are staged
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
       - id: ruff-format
         name: ruff format
         entry: uv run ruff format
@@ -22,6 +13,6 @@ repos:
         types: [python]
       - id: gitleaks
         name: gitleaks (API keys, tokens, passwords)
-        entry: gitleaks git --pre-commit --staged --redact --verbose --no-banner  # --redact hides the secret in the output
+        entry: gitleaks git --pre-commit --staged --redact --verbose --no-banner
         language: system
-        pass_filenames: false           # gitleaks reads the staged changes itself
+        pass_filenames: false

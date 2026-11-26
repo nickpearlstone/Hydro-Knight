@@ -1,38 +1,16 @@
-"""
-Data-side health views — the checks that expose representation gaps.
-
-The first training run failed for data reasons, not model reasons: the
-feature layer silently deleted the submersion frames. These functions make
-that class of failure *visible before training*:
-
-- pose coverage inside event windows: "of the seconds we labeled distress,
-  how many produced a usable pose at all?" Low coverage = the event never
-  reaches the model (the exact 0.539 mechanism).
-- track statistics: fragmentation and gaps, which drive both windowing yield
-  and Plan A's re-association design.
-- dataset census: what the manifest actually contains.
-"""
+"""Data-side health views that expose representation gaps before training."""
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
-# The four reference joints normalize.py gates on (COCO indices).
-REF_CONF_COLS = ["c5", "c6", "c11", "c12"]  # L/R shoulder, L/R hip
+# CAUTION[data-health-ref-joints]: keep in sync with normalize.py's reference joints (COCO indices).
+REF_CONF_COLS = ["c5", "c6", "c11", "c12"]
 
 
 def usable_pose_mask(df: pd.DataFrame, min_ref_conf: float = 0.3) -> np.ndarray:
-    """Per-row bool: would normalize.py keep this pose (all 4 reference joints >= min_ref_conf)?
-
-    Mirrors the normalize.py gate WITHOUT importing it, so this stays a pure data view; update
-    it here too if that gate changes, to keep the before/after coverage comparison honest.
-    Args:
-        df: keypoint rows with reference-joint confidence columns c5, c6, c11, c12.
-        min_ref_conf: minimum confidence required of each reference joint.
-    Returns:
-        (len(df),) bool array — True where the pose would be kept.
-    """
+    """Per-row bool: would normalize.py keep this pose? Keep in sync with normalize.py's gate."""
     conf = df[REF_CONF_COLS].to_numpy(dtype=float)
     return conf.min(axis=1) >= min_ref_conf
 
@@ -43,19 +21,7 @@ def frame_coverage_in_events(
     fps: float,
     min_ref_conf: float = 0.3,
 ) -> list[dict]:
-    """Per event: fraction of its frames with >= 1 usable pose ("did the filter eat the drowning?").
-
-    Coverage 0.35 means 65% of the annotated span produced no usable pose — invisible to any
-    pose-based model. (v1 is any-swimmer coverage; victim-track coverage needs track-scoped labels.)
-    Args:
-        df: keypoint-Parquet DataFrame for the clip.
-        events: list of {"start","end","label"} windows in seconds.
-        fps: clip frame rate, for the seconds<->frame conversion.
-        min_ref_conf: reference-joint confidence gate for "usable".
-    Returns:
-        One dict per event: event_start, event_end, event_label, frames_in_event,
-        frames_covered, coverage.
-    """
+    """Per event: fraction of its frames (events in seconds) with >= 1 usable pose."""
     usable_frames = set(df.loc[usable_pose_mask(df, min_ref_conf), "frame"].unique())
     out = []
     for ev in events:
@@ -76,16 +42,7 @@ def frame_coverage_in_events(
 
 
 def track_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """Per-track continuity: frame count, span, and gaps (breaks in consecutive frame numbers).
-
-    A gap is submersion, occlusion, or detector flicker — exactly what Plan A's re-association
-    timer must reason about, so it's surfaced here.
-    Args:
-        df: keypoint-Parquet DataFrame (needs track_id, frame).
-    Returns:
-        DataFrame (one row per track) with track_id, n_frames, first_frame, last_frame,
-        span_frames, n_gaps, longest_gap; sorted by n_frames descending.
-    """
+    """Per-track continuity: frame count, span, and gaps in consecutive frame numbers."""
     rows = []
     for tid, g in df.groupby("track_id"):
         frames = np.sort(g["frame"].unique())
@@ -106,14 +63,7 @@ def track_stats(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def dataset_census(records) -> dict:
-    """Manifest at a glance: label counts, event counts/durations, HOLD count.
-
-    Args:
-        records: an iterable of ClipRecord objects.
-    Returns:
-        Dict with n_clips, label_counts, n_events, event_label_counts,
-        event_duration_mean_s, event_duration_median_s, clips_with_hold.
-    """
+    """Manifest at a glance: label counts, event counts/durations, HOLD count."""
     label_counts: dict[str, int] = {}
     event_durs, event_labels, n_events = [], {}, 0
     for r in records:
@@ -123,7 +73,7 @@ def dataset_census(records) -> dict:
             lab = ev.get("label", "distress")
             event_labels[lab] = event_labels.get(lab, 0) + 1
             if ev.get("start") is None or ev.get("end") is None:
-                continue  # half-labeled or saved off camera: no fixed duration
+                continue
             event_durs.append(ev["end"] - ev["start"])
     return {
         "n_clips": len(records),

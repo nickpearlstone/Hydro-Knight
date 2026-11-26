@@ -1,5 +1,3 @@
-"""v2 detection metrics: causal alarm times, pre-contact scope, catches."""
-
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -33,14 +31,14 @@ def _record(onset=5.0, contact=8.0, clip="c"):
 def test_alarm_fires_after_the_window_and_its_context():
     ws = _ws(1)
     a = alarm_table(ws, np.zeros(len(ws)))
-    assert np.isclose(a["t"].iloc[0], (90 + ws.context) / 30.0)  # first window, t0 = 0
+    assert np.isclose(a["t"].iloc[0], (90 + ws.context) / 30.0)
 
 
 def test_only_pre_contact_alarms_and_victim_catch():
     normal, victim = _ws(1), _ws(7)
     s_n, s_v = np.zeros(len(normal)), np.zeros(len(victim))
     av = alarm_table(victim, s_v)
-    s_v[((av["t"] > 5.0) & (av["t"] < 8.0)).to_numpy()] = 10.0  # victim fires in event
+    s_v[((av["t"] > 5.0) & (av["t"] < 8.0)).to_numpy()] = 10.0
     alarms = __import__("pandas").concat(
         [alarm_table(normal, s_n), alarm_table(victim, s_v)]
     )
@@ -68,7 +66,6 @@ def test_empty_window_set_gives_empty_alarms():
 
 
 def _clip_alarms(clip, base, victim_peak):
-    """Normal swimmer scores `base`; the victim scores `victim_peak` inside the event."""
     normal, victim = _ws(1, clip=clip), _ws(7, clip=clip)
     av = alarm_table(victim, np.full(len(victim), float(base)))
     s_v = av["score"].to_numpy().copy()
@@ -79,7 +76,7 @@ def _clip_alarms(clip, base, victim_peak):
 
 
 def test_crossfit_points_pick_each_folds_threshold_on_the_other_folds():
-    # Fold 0's model scores low (0, victim 10); fold 1's runs high (50, victim 100).
+    # Fold 0's model scores low (victim 10); fold 1's high (victim 100).
     alarms = __import__("pandas").concat(
         [_clip_alarms("a", 0, 10), _clip_alarms("b", 50, 100)]
     )
@@ -87,7 +84,6 @@ def test_crossfit_points_pick_each_folds_threshold_on_the_other_folds():
     clips = clip_evals(alarms, [_record(clip="a"), _record(clip="b")], rep)
     (upper,) = operating_points(clips, fa_targets=(0,))["points"]
     (honest,) = crossfit_points(clips, {"a": 0, "b": 1}, fa_targets=(0,))
-    assert upper["caught"] == 1 and upper["fa_per_hour"] == 0  # line above 50: b only
-    # b's line comes from a alone (10), so b's normal swimmer fires: alarms appear.
+    assert upper["caught"] == 1 and upper["fa_per_hour"] == 0
     assert honest["threshold_by_fold"]["1"] == 10 and honest["fa_per_hour"] > 0
     assert honest["threshold_by_fold"]["0"] > 50 and honest["events"] == 2

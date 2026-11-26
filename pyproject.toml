@@ -4,37 +4,30 @@ version = "0.1.0"
 description = "Pose-based anomaly detection for swimming-pool drowning safety."
 readme = "README.md"
 requires-python = ">=3.11"
-# AGPL-3.0 because this depends on Ultralytics YOLO (AGPL-3.0); a public work
-# that links AGPL code must itself be AGPL. SPDX expression per PEP 639.
+# CAUTION[pyproject-agpl]: must stay AGPL-3.0.
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 dependencies = [
-    # --- Data collection ---
-    "yt-dlp[curl-cffi]>=2026.8.19",  # video search + download; curl-cffi lets it reach Dailymotion
-    "certifi>=2024.0.0",       # CA bundle for SSL verification (yt-dlp HTTPS)
-    # --- Annotation tool ---
-    "opencv-python>=4.9.0",    # video frame reading / drawing
-    "flask>=3.0",              # local browser labeler (annotate/server.py)
-    # --- Pose extraction (preprocess/) ---
-    "ultralytics>=8.4.0",      # YOLO-pose detection (pulls in torch)
-    "supervision>=0.29.0",     # Detections container feeding the tracker
-    "trackers>=2.4.0",         # ByteTrack/BoT-SORT over SAHI-merged detections
-    # --- Feature/model pipeline ---
+    # CAUTION[pyproject-curl-cffi]: keep the curl-cffi extra.
+    "yt-dlp[curl-cffi]>=2026.8.19",
+    "certifi>=2024.0.0",
+    "opencv-python>=4.9.0",
+    "flask>=3.0",
+    "ultralytics>=8.4.0",
+    "supervision>=0.29.0",
+    "trackers>=2.4.0",
     "numpy>=1.26.0",
-    "pandas>=2.2.0",           # assemble keypoint tables
-    "pyarrow>=15.0.0",         # Parquet file format for keypoint storage
-    "scikit-learn>=1.4.0",     # ROC-AUC / PR-AUC evaluation metrics
-    "tqdm>=4.66.0",            # progress bars for training + eval loops
-    "matplotlib>=3.8.0",       # report + MLflow run figures (was only pulled in by ultralytics)
+    "pandas>=2.2.0",
+    "pyarrow>=15.0.0",
+    "scikit-learn>=1.4.0",
+    "tqdm>=4.66.0",
+    "matplotlib>=3.8.0",
 ]
 
-# `uv run hydroknight --help` lists every command (src/hydro_knight/cli/).
 [project.scripts]
 hydroknight = "hydro_knight.cli:main"
 
 [project.optional-dependencies]
-# Alt pose backend, only needed to reproduce the YOLO-vs-MediaPipe spike.
-# The backend decision (YOLO) is made, so this is kept out of the default install.
 spike = ["mediapipe>=0.10.0"]
 tracking = ["mlflow>=2.9.0"]
 
@@ -42,31 +35,14 @@ tracking = ["mlflow>=2.9.0"]
 dev = [
     "pre-commit>=4.7.0",
     "pytest>=8.0.0",
-    "ruff>=0.9.0",   # linter + formatter (config in [tool.ruff] below)
+    "ruff>=0.9.0",
 ]
 
 [tool.pytest.ini_options]
-# Look for tests only under tests/, and treat plain `assert` as the assertion
-# mechanism (pytest rewrites them into rich failure messages).
 testpaths = ["tests"]
 addopts = "-q"
 
 [tool.ruff]
-# Formatter: all defaults (88-col lines, double quotes). The formatter is
-# deliberately near-unconfigurable — its value is ending style decisions,
-# not expressing them. Run: `uv run ruff format .`
-#
-# Linter rule families (run: `uv run ruff check .`):
-#   E4/E7/E9, F — pyflakes + core pycodestyle: real defects (undefined names,
-#                 unused imports/variables). Ruff's defaults; near-zero noise.
-#   I   — import sorting (auto-fixable, pure consistency)
-#   B   — bugbear: patterns that *work* but bite later (mutable default args,
-#         unused loop variables, blind excepts)
-#   UP  — modernize syntax to what requires-python (3.11) already allows
-#   SIM — flags needlessly convoluted constructs with simpler equivalents
-# Deliberately NOT enabled (revisit if the project grows contributors):
-#   D (docstring style), ANN (type-annotation coverage) — high-volume style
-#   opinions, low bug-catching value for a solo research repo.
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM"]
 
@@ -74,7 +50,5 @@ select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM"]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# src-layout: tell the build backend where the importable package lives, so
-# `uv sync` installs it editable and `import hydro_knight` works with no PYTHONPATH.
 [tool.hatch.build.targets.wheel]
 packages = ["src/hydro_knight"]

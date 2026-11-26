@@ -1,15 +1,6 @@
-"""
-The `hydroknight` command: one entry point for every pipeline step and tool.
+"""The `hydroknight` command: one entry point for every pipeline step and tool.
 
-    hydroknight --help                  # every command, one line each
-    hydroknight train --help            # the models `train` knows
-    hydroknight train tcn-v2 --help     # that command's own options
-
-Each command is a module in this package with a `main()` that parses `sys.argv`.
-The dispatcher below only picks the module and hands it the remaining arguments
-unchanged, so options live in one place: the module's own argparse. Modules are
-imported only when their command runs, so `--help` never loads torch, MLflow or
-MediaPipe.
+Command modules are imported only when run, so `--help` never loads torch or MLflow.
 """
 
 from __future__ import annotations
@@ -22,8 +13,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Command:
-    name: str  # what you type after `hydroknight`, e.g. "train tcn-v2"
-    module: str  # module in hydro_knight.cli that runs it
+    name: str
+    module: str
     help: str
     section: str
 
@@ -161,19 +152,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if argv else 2
 
     by_name = {c.name: c for c in COMMANDS}
-    for n_words in (2, 1):  # "train tcn-v2" before "train"
+    # CAUTION[cli-two-word-first]: two-word names first
+    for n_words in (2, 1):
         name = " ".join(argv[:n_words])
         if len(argv) >= n_words and name in by_name:
             cmd = by_name[name]
             module = importlib.import_module(f"{__name__}.{cmd.module}")
-            # The module's argparse reads sys.argv; argv[0] becomes its `prog`.
+            # CAUTION[cli-argv-before-main]: sys.argv must be set before module.main()
             sys.argv = [f"hydroknight {cmd.name}", *argv[n_words:]]
             module.main()
             return 0
 
     group = argv[0] + " "
     if any(c.name.startswith(group) for c in COMMANDS):
-        # A group (`train`, `eval`, ...) with no or an unknown choice after it.
         wanted = argv[1:2]
         if wanted and wanted[0] not in HELP_FLAGS:
             print(

@@ -1,5 +1,3 @@
-"""Synthetic keypoint tables for the v2 feature/model tests (no video, no YOLO)."""
-
 from __future__ import annotations
 
 import json
@@ -14,8 +12,6 @@ KP_COLS = [f"{a}{i}" for i in range(17) for a in ("x", "y", "c")]
 
 
 def track_rows(track_id, frames, box=(100, 100, 140, 180), conf=0.9, dx_per_frame=0.0):
-    """Rows for one track: a fixed-size box sliding right by dx_per_frame px per frame,
-    every keypoint at the box center with confidence `conf`."""
     rows = []
     for f in frames:
         x1, y1, x2, y2 = box
@@ -31,7 +27,6 @@ def track_rows(track_id, frames, box=(100, 100, 140, 180), conf=0.9, dx_per_fram
 
 
 def write_keypoints(path, df, fps, width=1920, height=1080):
-    """Write a keypoint Parquet carrying the provenance build_tracks records."""
     meta = {"video": {"fps": fps, "width": width, "height": height}}
     table = pa.Table.from_pandas(df, preserve_index=False)
     table = table.replace_schema_metadata({b"hydro_knight": json.dumps(meta).encode()})
@@ -41,7 +36,6 @@ def write_keypoints(path, df, fps, width=1920, height=1080):
 
 
 def series_of(n, n_feat=58, seed=0, detected=None):
-    """A random TrackSeries-like (feats, detected) pair of length n for windowing tests."""
     rng = np.random.default_rng(seed)
     feats = rng.normal(size=(n, n_feat)).astype(np.float32)
     det = np.ones(n, bool) if detected is None else np.asarray(detected, bool)

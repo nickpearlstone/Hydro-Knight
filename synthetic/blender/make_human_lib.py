@@ -1,13 +1,6 @@
 """Build a library of posed, dressed MPFB humans (CC0 MakeHuman assets) for the pool scenes.
 
-Each human: MakeHuman body with continuous age (kids to older adults), gender, weight, muscle and
-race mix; a skin chosen to match (young skins on kids); hair, eyebrows and eyes; swimwear painted
-on the body faces by rest-pose region (trunks, one-piece, bikini, rash guard, T-shirt), so no
-body is ever rendered without swimwear; a wet-skin gloss; one of five poses (tread, armsup,
-recline, prone, stand). The rig is baked into a single static mesh whose origin is the head
-centre; custom props hold pose, head radius, pelvis offset and age.
-
-Needs the MPFB extension + CC0 system asset pack installed under synthetic/mpfb (see README):
+Needs the MPFB extension + CC0 asset pack under synthetic/mpfb:
     synthetic/blender/mpfb_env.sh synthetic/blender-bin/Blender.app/Contents/MacOS/Blender -b \\
         -P synthetic/blender/make_human_lib.py -- --out synthetic/mpfb/humans.blend --per-pose 14
 """
@@ -31,7 +24,7 @@ ap.add_argument("--sheet", default="", help="optional PNG contact sheet of the l
 args = ap.parse_args(sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else [])
 
 addon_utils.enable("bl_ext.user_default.mpfb", default_set=True)
-# MPFB only exists once the extension is enabled, so import it after enable()
+# CAUTION[makehuman-import-after-enable]: import MPFB only after enable()
 _svc = "bl_ext.user_default.mpfb.services"
 HumanService = importlib.import_module(f"{_svc}.humanservice").HumanService
 LocationService = importlib.import_module(f"{_svc}.locationservice").LocationService
@@ -92,15 +85,12 @@ def j(rng, a=12):
     return rng.uniform(-a, a)
 
 
-def pose_tread(rig, rng):  # upright, arms sculling just under the surface, scissor kick
+def pose_tread(rig, rng):
     for s, sgn in (("l", 1), ("r", -1)):
-        rot(
-            rig, f"upperarm_{s}", Y * sgn, 30 + j(rng, 10)
-        )  # rest pose is a T-pose: +Y*sgn lowers the arm
+        # CAUTION[makehuman-tpose-arm-sign]: rest pose is a T-pose; +Y*sgn lowers the arm
+        rot(rig, f"upperarm_{s}", Y * sgn, 30 + j(rng, 10))
         rot(rig, f"upperarm_{s}", -X, 35 + j(rng))
-        rot(
-            rig, f"lowerarm_{s}", -X, 10 + j(rng, 10)
-        )  # forearms stay low, sculling under water
+        rot(rig, f"lowerarm_{s}", -X, 10 + j(rng, 10))
         rot(rig, f"thigh_{s}", -X, 25 + 15 * sgn + j(rng, 8))
         rot(rig, f"calf_{s}", X, 45 + j(rng, 10))
 
@@ -111,9 +101,7 @@ def pose_armsup(rig, rng):
         rot(rig, f"lowerarm_{s}", -Y * sgn, 15 + j(rng))
 
 
-def pose_recline(
-    rig, rng
-):  # in an inner tube: leaned back, thighs up, knees over the rim, arms on the rim
+def pose_recline(rig, rng):
     for s, sgn in (("l", 1), ("r", -1)):
         rot(rig, f"thigh_{s}", -X, 90 + j(rng, 10))
         rot(rig, f"calf_{s}", X, 80 + j(rng, 10))
@@ -123,7 +111,7 @@ def pose_recline(
     rig.rotation_euler = (R(-50 + j(rng, 8)), 0, 0)
 
 
-def pose_prone(rig, rng):  # freestyle: horizontal, one arm reaching forward
+def pose_prone(rig, rng):
     rig.rotation_euler = (R(-80 + j(rng, 6)), 0, 0)
     a, b = ("l", "r") if rng.random() < 0.5 else ("r", "l")
     sa = 1 if a == "l" else -1
@@ -134,9 +122,7 @@ def pose_prone(rig, rng):  # freestyle: horizontal, one arm reaching forward
     rot(rig, "thigh_r", X, 10 + j(rng, 6))
 
 
-def pose_stand(
-    rig, rng
-):  # waist- to chest-deep at the beach end, in one of several everyday stances
+def pose_stand(rig, rng):
     stance = rng.choice(
         ["down", "down", "on_water", "on_water", "one_up", "hips", "hold"]
     )
@@ -144,14 +130,14 @@ def pose_stand(
         if stance == "down":
             rot(rig, f"upperarm_{s}", Y * sgn, 65 + j(rng, 12))
             rot(rig, f"lowerarm_{s}", -X, 15 + j(rng, 15))
-        elif stance == "on_water":  # forearms resting on / skimming the surface
+        elif stance == "on_water":
             rot(rig, f"upperarm_{s}", Y * sgn, 50 + j(rng, 10))
             rot(rig, f"upperarm_{s}", -X, 30 + j(rng, 10))
             rot(rig, f"lowerarm_{s}", -X, 50 + j(rng, 15))
         elif stance == "hips":
             rot(rig, f"upperarm_{s}", Y * sgn, 60 + j(rng, 8))
             rot(rig, f"lowerarm_{s}", Y * sgn, -70 + j(rng, 10))
-        elif stance == "hold":  # arms in front, as if holding a child or a tube
+        elif stance == "hold":
             rot(rig, f"upperarm_{s}", Y * sgn, 45 + j(rng, 10))
             rot(rig, f"upperarm_{s}", -X, 55 + j(rng, 10))
             rot(rig, f"lowerarm_{s}", -Y * sgn, 60 + j(rng, 15))
@@ -164,7 +150,7 @@ def pose_stand(
 
 
 def natural(rig, rng):
-    """Small whole-body variation so no two people stand like mannequins: twist, lean, look around."""
+    """Small whole-body variation: twist, lean, look around."""
     rot(rig, "spine_02", Z, j(rng, 15))
     rot(rig, "spine_01", X, j(rng, 6))
     rot(rig, "spine_01", Y, j(rng, 5))
@@ -230,7 +216,7 @@ def wet(obj):
 
 
 def darken_hair(body, rng):
-    """Most real swimmers have dark (wet) hair: multiply the hair texture by a dark tint."""
+    """Multiply the hair texture by a dark or light tint."""
     dark = rng.random() < 0.75
     tint = (0.12, 0.09, 0.07) if dark else (0.6, 0.5, 0.4)
     for ob in [
@@ -348,7 +334,6 @@ def make_human(rng, pose, idx):
     head_c = hh + 0.45 * (ht - hh)
     head_r = 0.7 * (ht - hh).length
     pelvis = rig.matrix_world @ rig.pose.bones["pelvis"].head
-    # bake: evaluated copies of every mesh driven by the rig, joined into one object
     dg = bpy.context.evaluated_depsgraph_get()
     parts = []
     for ob in [

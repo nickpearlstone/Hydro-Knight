@@ -1,10 +1,3 @@
-"""
-fps source of truth: backfill snapping and the order evaluation reads fps in.
-
-Clicks and events are seconds, tracks are frames, so the tracker and the evaluation
-must agree on each clip's fps. These pin that eval reads the fps the tracker used.
-"""
-
 from __future__ import annotations
 
 import json
@@ -32,7 +25,7 @@ from hydro_knight.eval.timing import clip_fps
     ],
 )
 def test_snap_picks_the_nearest_standard_rate(reported, snapped):
-    # The old _snap took the first rate within 2%, so 60 became 59.94.
+    # regression: 60 must not snap to 59.94.
     assert _snap(reported) == snapped
 
 
@@ -55,6 +48,6 @@ def test_eval_uses_the_fps_the_tracker_used(tmp_path):
 
 
 def test_falls_back_to_manifest_then_default(tmp_path):
-    p = _parquet(tmp_path / "old.parquet")  # written before provenance existed
+    p = _parquet(tmp_path / "old.parquet")
     assert clip_fps(p, None, 30.0, record=_Rec()) == (59.94, False)
     assert clip_fps(p, None, 30.0, record=None) == (30.0, True)

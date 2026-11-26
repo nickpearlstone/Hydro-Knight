@@ -1,11 +1,3 @@
-"""
-Tests for preprocess/build_tracks.py: merge + ByteTrack over saved raw detections.
-
-Each fix gets a before/after pair: the default settings must behave correctly,
-and LEGACY must still reproduce the original bug, so a comparison run is honest.
-Scenarios are synthetic detection folders written with extract_pose.write_chunk.
-"""
-
 from __future__ import annotations
 
 import json
@@ -44,7 +36,7 @@ SWIMMER = [100.0, 100.0, 140.0, 200.0]
 
 
 def test_seam_half_box_does_not_become_a_second_swimmer():
-    # Every frame: a full-body box from tile 0 and its top half from tile 1.
+    # regression: tile-seam duplicate
     half = [100.0, 100.0, 140.0, 140.0]
     rows = [_det(f, SWIMMER, 0.9, crop=0) for f in range(10)]
     rows += [_det(f, half, 0.8, crop=1) for f in range(10)]
@@ -52,13 +44,12 @@ def test_seam_half_box_does_not_become_a_second_swimmer():
     fixed = track_detections(_dets(rows), _frames(10), fps=30, settings=TrackSettings())
     legacy = track_detections(_dets(rows), _frames(10), fps=30, settings=LEGACY)
 
-    assert len(fixed) == 10  # one row per frame: the half box was merged away
+    assert len(fixed) == 10
     assert fixed.loc[fixed["track_id"] >= 0, "track_id"].nunique() == 1
-    assert legacy.loc[legacy["track_id"] >= 0, "track_id"].nunique() == 2  # the phantom
+    assert legacy.loc[legacy["track_id"] >= 0, "track_id"].nunique() == 2
 
 
 def test_short_submersion_keeps_the_same_id_at_60fps():
-    # Visible for frames 0-19, gone for 45 frames (0.75 s at 60 fps), back at 65-79 in place.
     rows = [_det(f, SWIMMER) for f in list(range(20)) + list(range(65, 80))]
     frames = _frames(80)
 
@@ -66,19 +57,18 @@ def test_short_submersion_keeps_the_same_id_at_60fps():
     legacy = track_detections(_dets(rows), frames, fps=60, settings=LEGACY)
 
     confirmed = fixed[fixed["track_id"] >= 0]
-    assert confirmed["track_id"].nunique() == 1  # 1.0 s buffer = 60 frames > 45
+    assert confirmed["track_id"].nunique() == 1
     before = legacy[(legacy["frame"] < 20) & (legacy["track_id"] >= 0)][
         "track_id"
     ].unique()
     after = legacy[(legacy["frame"] >= 65) & (legacy["track_id"] >= 0)][
         "track_id"
     ].unique()
-    assert set(before).isdisjoint(after)  # 30-frame buffer: comes back as a new swimmer
+    assert set(before).isdisjoint(after)
 
 
 def test_frames_without_detections_still_count_toward_lost_time():
-    # Gone for 45 frames at 30 fps (1.5 s) exceeds the 1.0 s buffer, so the id must change.
-    # This only holds if empty frames are fed to the tracker.
+    # Only holds if empty frames are fed to the tracker.
     rows = [_det(f, SWIMMER) for f in list(range(20)) + list(range(65, 80))]
     out = track_detections(_dets(rows), _frames(80), fps=30, settings=TrackSettings())
     ids = out[out["track_id"] >= 0].groupby(out["frame"] >= 65)["track_id"].unique()
@@ -86,7 +76,7 @@ def test_frames_without_detections_still_count_toward_lost_time():
 
 
 def test_mid_confidence_swimmer_can_start_a_track():
-    # 0.55 clears the new 0.5 bar but not the original 0.6, which made activation=0.3 dead.
+    # 0.55 must clear the 0.5 start bar but not 0.6.
     rows = [_det(f, SWIMMER, conf=0.55) for f in range(5)]
     fixed = track_detections(_dets(rows), _frames(5), fps=30, settings=TrackSettings())
     legacy = track_detections(_dets(rows), _frames(5), fps=30, settings=LEGACY)
@@ -122,23 +112,18 @@ def test_build_tracks_writes_columns_boxes_and_provenance(tmp_path):
 
 def test_tracking_fps_divides_by_the_extraction_frame_step():
     assert tracking_fps({"video": {"fps": 60.0}, "settings": {"frame_step": 2}}) == 30.0
-    assert (
-        tracking_fps({"video": {"fps": 59.94}, "settings": {}}) == 59.94
-    )  # older folder
+    assert tracking_fps({"video": {"fps": 59.94}, "settings": {}}) == 59.94
 
 
 def test_short_submersion_survives_at_every_second_frame():
-    # 60 fps video processed at frame_step 2: frames 0, 2, 4, ... The swimmer is gone from
-    # frame 40 to 130 (1.5 s real time). At the tracking rate (30 updates/s) a 2 s buffer is
-    # 60 updates and the id holds; at the raw fps it would be 120 updates either way, so this
-    # pins that the rate passed in is the one the tracker counts in.
+    # Tracker buffer counts tracking-rate updates (30/s), not raw frames.
     seen = list(range(0, 40, 2)) + list(range(130, 160, 2))
     rows = [_det(f, SWIMMER) for f in seen]
     frames = pd.DataFrame({"frame": range(0, 160, 2), "n_dets": 0, "scene_diff": 0.0})
     s2 = TrackSettings(lost_track_seconds=2.0)
     held = track_detections(_dets(rows), frames, fps=30, settings=s2)
     assert held.loc[held.track_id >= 0, "track_id"].nunique() == 1
-    s1 = TrackSettings(lost_track_seconds=1.0)  # 30 updates < 45 missing updates
+    s1 = TrackSettings(lost_track_seconds=1.0)
     split = track_detections(_dets(rows), frames, fps=30, settings=s1)
     assert split.loc[split.track_id >= 0, "track_id"].nunique() == 2
 
@@ -149,7 +134,7 @@ def test_same_crop_conf_drops_faint_copy_inside_one_tile():
         100.0,
         140.0,
         150.0,
-    ]  # top half of SWIMMER, same tile, low confidence
+    ]
     rows = [
         r for f in range(10) for r in (_det(f, SWIMMER, 0.9, 3), _det(f, faint, 0.1, 3))
     ]

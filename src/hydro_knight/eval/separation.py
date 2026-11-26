@@ -1,16 +1,4 @@
-"""
-Victim separation: do the victim's windows score as more unusual than everyone else's?
-
-Two numbers, each next to the same number for random scores (the baseline that showed
-the old 0.539 meant nothing):
-
-- pooled AUC: chance that a random victim window (onset -> contact) outscores a random
-  normal window from the held-out clips. 0.5 = no separation.
-- per-clip rank: in each held-out clip with victim windows, the share of that clip's
-  normal windows scoring below the victim's highest window. The random baseline is not
-  0.5 here: the max of several random victim windows ranks high by chance, which is
-  exactly why it is always reported alongside.
-"""
+"""Victim separation: do the victim's windows score as more unusual than everyone else's?"""
 
 from __future__ import annotations
 
@@ -43,18 +31,7 @@ def victim_separation(
     n_random: int = 20,
     seed: int = 0,
 ) -> dict:
-    """Separation of victim windows from normal windows, with a random baseline.
-
-    Args:
-        normal: anomaly scores of normal (non-victim) test windows.
-        normal_clips: clip id of each normal window.
-        victim: anomaly scores of victim windows inside onset -> contact.
-        victim_clips: clip id of each victim window.
-        n_random: random score draws averaged for the baseline.
-    Returns:
-        Dict: auc, auc_random, clip_rank_median, clip_rank_median_random, per_clip
-        ranks, and the window/clip counts behind them.
-    """
+    """Separation of victim windows from normal windows, with a random baseline."""
     ranks = _per_clip_ranks(normal, normal_clips, victim, victim_clips)
     rng = np.random.default_rng(seed)
     rand_auc, rand_rank = [], []

@@ -1,17 +1,6 @@
-"""
-Short demo video of a trained model on held-out footage: every swimmer's box coloured by
-its anomaly score (green = normal, red = at or past the alarm line, grey = not scored),
-for the best and the worst held-out clip by within-clip AUC, from a few seconds before
-drowning onset to just after guard contact.
+"""Short demo video of a trained model on held-out footage, boxes coloured by anomaly score.
 
-Causal view: each box shows the latest score whose window ended at or before the current
-moment (what a live system would show): a colour describes the past 3 s window.
-The victim's boxes carry a "victim" tag; banners mark onset and guard contact.
-
-The output shows identifiable people (often minors). It is for local viewing only: it
-is written under runs/ and attached to local MLflow runs, both gitignored, and must never
-be committed or published (anonymised figures go through hydroknight legacy pose-figure).
-Needs ffmpeg on PATH (H.264 output that browsers and the MLflow UI can play).
+Shows identifiable people: local viewing only, never commit or publish. Needs ffmpeg on PATH.
 """
 
 from __future__ import annotations
@@ -27,7 +16,7 @@ import pandas as pd
 
 from . import protocol as P
 
-STALE_S = 1.0  # a score older than this is not shown (box goes grey)
+STALE_S = 1.0
 OUT_FPS = 30
 WHITE, GREY, BLACK = (255, 255, 255), (150, 150, 150), (0, 0, 0)
 
@@ -35,10 +24,7 @@ WHITE, GREY, BLACK = (255, 255, 255), (150, 150, 150), (0, 0, 0)
 def score_scale(
     row: dict, scores: np.ndarray, fa_target: float = 120
 ) -> tuple[float, float]:
-    """(low, high) of the colour scale: median normal score, and the alarm threshold at `fa_target` FA/h.
-
-    Falls back to the 50th and 99th percentile of `scores` when the run has no such value.
-    """
+    """(low, high) colour scale: median normal score and the alarm threshold at `fa_target` FA/h."""
     s = np.asarray(scores, float)
     s = s[np.isfinite(s) & (s > 0)]
     lo = row.get("test_median") or (float(np.median(s)) if len(s) else 1.0)
@@ -62,7 +48,7 @@ def score_color(score: float, lo: float, hi: float) -> tuple[int, int, int]:
     u = float(
         np.clip((math.log(score) - math.log(lo)) / (math.log(hi) - math.log(lo)), 0, 1)
     )
-    hue = int(round(60 * (1 - u)))  # OpenCV hue 60 = green, 0 = red
+    hue = int(round(60 * (1 - u)))
     b, g, r = cv2.cvtColor(np.uint8([[[hue, 255, 255]]]), cv2.COLOR_HSV2BGR)[0, 0]
     return int(b), int(g), int(r)
 
@@ -107,7 +93,6 @@ def _legend(img, lo, hi):
 
 
 def _banner(img, now, truth):
-    """Phase banner at the bottom: time from onset, and which phase of the rescue this is."""
     dt = now - truth.onset
     if now < truth.onset_lo:
         txt, col = f"before onset   {dt:+.1f} s", (200, 200, 200)
@@ -158,7 +143,7 @@ def _render_clip(
         ok, frame = cap.read()
         if not ok or f / fps > t1:
             break
-        if f + 1e-6 < f_next:  # downsample 60 fps sources to OUT_FPS
+        if f + 1e-6 < f_next:
             f += 1
             continue
         f_next += step
@@ -203,17 +188,7 @@ def render_demo(
     pre_s: float = 5.0,
     post_s: float = 3.0,
 ) -> Path | None:
-    """Write the best/worst demo as an H.264 mp4.
-
-    Args:
-        alarms: alarm table (clip_id, track_id, t in file seconds, score).
-        truths: clip_id -> EventTruth (file seconds, victim track ids).
-        picks: pick_best_worst output.
-        lo, hi: colour scale (score_scale).
-        subtitle: second title-card line, e.g. "train-v2 run, small seed 0".
-    Returns:
-        out_path, or None (nothing written) when ffmpeg, the picks or their video files are missing.
-    """
+    """Write the best/worst demo as an H.264 mp4; None when ffmpeg, picks or video files are missing."""
     picks = [
         p
         for p in picks

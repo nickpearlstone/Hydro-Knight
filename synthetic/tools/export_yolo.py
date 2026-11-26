@@ -1,10 +1,6 @@
 """Export person and head boxes from the render masks in YOLO format (run after post.py).
 
-Boxes come from the visible pixels in seg_<n>.npy (whole person) and headseg_<n>.npy (head only), so a
-half-submerged head gets a box around the part above the water. Both masks are already distorted to
-match the fish-eye image when post.py applied a lens. Per frame:
-  yolo/rgbv_<n>.txt   "class cx cy w h", normalised; class 0 = person, 1 = head
-  yolo/rgbv_<n>.json  the same boxes with person id, role, pose, share of head under water, pixels
+Per frame: yolo/rgbv_<n>.txt ("class cx cy w h", normalised; 0 = person, 1 = head) and yolo/rgbv_<n>.json.
 
     uv run python synthetic/tools/export_yolo.py synthetic/renders/b20
 """
@@ -16,7 +12,8 @@ from pathlib import Path
 import numpy as np
 from scipy import ndimage
 
-MIN_PX = {0: 20, 1: 6}  # fewer visible pixels than this = nobody could label it
+# CAUTION[export-yolo-min-px]: minimum visible pixels per class (0 person, 1 head)
+MIN_PX = {0: 20, 1: 6}
 
 
 def boxes(mask, min_px):
@@ -36,11 +33,9 @@ def boxes(mask, min_px):
 
 
 def add_deck_heads(head, seg, people):
-    """Procedural deck people and lifeguards carry no is_head mark, so the head pass misses them.
+    """Head boxes for procedural deck people and lifeguards (no is_head mark): their visible pixels inside the projected head circle.
 
-    Their head = their own visible pixels inside the projected head circle (centre u, v; radius
-    head_r_px, padded 20%). Swimmers are left alone: no head pixels there means the head is under
-    water or hidden, which is the correct label.
+    Swimmers are left alone.
     """
     head = head.copy()
     H, W = head.shape
@@ -69,11 +64,11 @@ def export(d: Path):
         lab = json.loads(lf.read_text())
         people = {p["id"]: p for p in lab["people"]}
         lines, rows = [], []
-        seg_mask = None  # person mask, needed by the head pass for deck people
+        seg_mask = None
         for cls, name in ((0, "seg"), (1, "headseg")):
             f = d / f"{name}_{n}.npy"
             if not f.exists() and f.with_suffix(".npz").exists():
-                f = f.with_suffix(".npz")  # Kaggle batches store masks compressed
+                f = f.with_suffix(".npz")
             if not f.exists():
                 continue
             m = np.load(f)["m"] if f.suffix == ".npz" else np.load(f)

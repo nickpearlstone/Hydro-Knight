@@ -1,12 +1,5 @@
 """
 Generate the privacy-safe pose-comparison figures used in the README.
-
-Backgrounds are heavily pixelated (faces unrecognizable) and crisp pose
-skeletons are drawn on top — so the figures show detection quality without
-committing identifiable footage, consistent with the project's data ethics.
-
-Reads from a gitignored local clip; writes committable PNGs to docs/images/.
-Run: uv run hydroknight legacy pose-figure
 """
 
 import argparse
@@ -15,7 +8,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-CLIP = "raw_local/b4b2db5ffb48.mp4"  # a wavepool rescue clip (crowded normal lead-in)
+CLIP = "raw_local/b4b2db5ffb48.mp4"
 FRAME = 1197
 OUT = Path("docs/images")
 MP_MODEL = "raw_local/pose_landmarker.task"
@@ -50,7 +43,7 @@ def draw_mp(img, poses, conns):
 def main():
     """Render the two README figures (resolution and YOLO-vs-MediaPipe) to docs/images/."""
     argparse.ArgumentParser(description=__doc__.split("\n\n")[0].strip()).parse_args()
-    # Imported here so `--help` works without the optional MediaPipe extra.
+    # CAUTION[posefig-lazy-mediapipe]: keep this import inside main()
     import mediapipe as mp
     from mediapipe.tasks import python as mp_python
     from mediapipe.tasks.python import vision
@@ -84,14 +77,12 @@ def main():
     mpres = lm.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb))
     lm.close()
 
-    # Figure 1 — resolution: YOLO @640 vs @1280 (same frame, same pixelated bg)
     a = r640.plot(img=bg.copy(), boxes=False, labels=False)
     label(a, f"YOLO @ 640px: {len(r640.boxes)} swimmers")
     b = r1280.plot(img=bg.copy(), boxes=False, labels=False)
     label(b, f"YOLO @ 1280px: {len(r1280.boxes)} swimmers")
     cv2.imwrite(str(OUT / "pose_resolution.png"), np.hstack([a, b]))
 
-    # Figure 2 — model: YOLO vs MediaPipe (same frame, both @ best settings)
     c = r1280.plot(img=bg.copy(), boxes=False, labels=False)
     label(c, f"YOLO-pose: {len(r1280.boxes)} swimmers")
     d = bg.copy()

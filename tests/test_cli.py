@@ -1,6 +1,3 @@
-"""The `hydroknight` dispatcher: help lists every command, and every command's own
-`--help` works without the optional extras (CI installs neither MLflow nor MediaPipe)."""
-
 import subprocess
 import sys
 import textwrap
@@ -50,7 +47,7 @@ def test_runs_module_with_remaining_args(monkeypatch):
 
 
 def test_help_everywhere_with_extras_blocked():
-    # A fresh interpreter, so blocking the extras can't be undone by an earlier import.
+    # Must run in a fresh interpreter.
     code = textwrap.dedent(
         """
         import sys

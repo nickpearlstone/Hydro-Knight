@@ -1,6 +1,3 @@
-"""Tests for MLflow run metadata (eval/run_meta.py), the run figures (eval/figures.py) and,
-when the optional `tracking` extra is installed, the MLflow wrapper (eval/tracking.py)."""
-
 import math
 
 import numpy as np
@@ -16,7 +13,6 @@ FAST = P.ProtocolConfig(n_boot=20, n_random=3, n_thresholds=30)
 
 
 def scores(clips=("c1", "c2"), n_tracks=6, victim_score=1.0, seed=0):
-    """Swimmers scored every 0.5 s with noise in [0, 0.5); track 1 is the victim from 15 s on."""
     rng = np.random.default_rng(seed)
     rows = []
     for c in clips:
@@ -31,9 +27,6 @@ def truths(clips=("c1", "c2")):
     return {c: P.EventTruth(c, 0.0, 20.0, 30.0, frozenset({1})) for c in clips}
 
 
-# ---------------------------------------------------------------- run_meta
-
-
 def test_file_hash_and_data_version_track_label_changes(tmp_path):
     m, r = tmp_path / "m.jsonl", tmp_path / "r.json"
     m.write_text("a\n")
@@ -41,7 +34,7 @@ def test_file_hash_and_data_version_track_label_changes(tmp_path):
     assert run_meta.file_sha256(tmp_path / "nope") == "missing"
     assert len(run_meta.file_sha256(m)) == 12
     v1 = run_meta.data_version(m, (r,))
-    r.write_text('{"x": 1}')  # a label review changed, the manifest did not
+    r.write_text('{"x": 1}')
     assert run_meta.data_version(m, (r,)) != v1
 
 
@@ -87,9 +80,6 @@ def test_flatten_search_runs_falls_back_to_the_old_folder_param():
     assert run_meta.flatten_search_runs(pd.DataFrame())["run_folder"].empty
 
 
-# ---------------------------------------------------------------- figures
-
-
 def test_loss_curves_one_panel_per_size_one_line_pair_per_seed():
     fig = F.loss_curves(
         {"small": {0: [1.0, 0.5, 0.2], 1: [1.2, 0.6, 0.3]}, "large": {0: [2, 1]}}
@@ -97,8 +87,7 @@ def test_loss_curves_one_panel_per_size_one_line_pair_per_seed():
     assert isinstance(fig, Figure)
     axes = [a for a in fig.axes if a.get_visible()]
     assert len(axes) == 2
-    assert len(axes[0].lines) == 4  # raw + smoothed per seed
-    # re-scored checkpoints have no real history: nothing to draw
+    assert len(axes[0].lines) == 4
     assert F.loss_curves({"small": {0: [math.nan]}}) is None
 
 
@@ -112,13 +101,13 @@ def test_victim_timelines_one_panel_per_clip_with_onset_and_contact():
         ncols=2,
     )
     visible = [a for a in fig.axes if a.get_visible()]
-    assert len(visible) == 3  # 2x2 grid, the spare panel hidden
+    assert len(visible) == 3
     ax = visible[0]
     xs = {round(float(line.get_xdata()[0]), 3) for line in ax.lines[2:]}
-    assert xs == {0.0, 10.0}  # onset at 0 s, contact 10 s after onset
+    assert xs == {0.0, 10.0}
     assert "AUC" in ax.get_title(loc="left")
     blue = ax.lines[1].get_ydata()
-    assert np.nanmin(blue) == 1  # the victim outscores everyone once it is flagged
+    assert np.nanmin(blue) == 1
     assert F.victim_timelines(scores(), {}, FAST) is None
 
 
@@ -132,7 +121,7 @@ def test_catch_vs_false_alarms_draws_model_and_both_baselines():
     labels = {t.get_text() for t in ax.texts}
     assert labels == {"model", "random scores", "track-shuffled"}
     model = ax.lines[0].get_ydata()
-    assert model.max() == 1.0  # a perfect victim score catches both rescues
+    assert model.max() == 1.0
     assert F.catch_vs_false_alarms({"points": []}, {}, {}) is None
 
 
@@ -149,7 +138,7 @@ def test_per_clip_results_sorts_by_auc_and_shows_detected_vs_scored():
     fig = F.per_clip_results(pc)
     a1, _, a3 = fig.axes
     assert [t.get_text() for t in a1.get_yticklabels()] == ["bbbbbbbb", "aaaaaaaa"]
-    assert len(a3.patches) == 4  # detected + scored per clip
+    assert len(a3.patches) == 4
     assert F.per_clip_results(pc.iloc[:0]) is None
 
 
@@ -163,7 +152,7 @@ def test_cross_run_comparison_groups_seeds_by_run_folder():
     )
     fig = F.cross_run_comparison(runs)
     labels = [t.get_text() for t in fig.axes[0].get_yticklabels()]
-    assert labels == ["B", "A"]  # sorted by mean, parent row (no metric) dropped
+    assert labels == ["B", "A"]
     assert F.cross_run_comparison(runs.drop(columns="headline.within_clip_auc")) is None
 
 
@@ -190,9 +179,6 @@ def test_pose_figures():
     assert F.pose_sweep(sweep.iloc[:0]) is None
 
 
-# ---------------------------------------------------------------- tracking (needs mlflow)
-
-
 def test_tracking_parent_child_series_figure_and_lookup(tmp_path, monkeypatch):
     pytest.importorskip("mlflow")
     from hydro_knight.eval import tracking
@@ -208,7 +194,7 @@ def test_tracking_parent_child_series_figure_and_lookup(tmp_path, monkeypatch):
     ):
         tracking.log_series("train_loss", [3.0, 2.0, math.nan, 1.0])
         tracking.log_figure(F.loss_curves({"s": {0: [1.0, 0.5]}}), "figs/l.png")
-        tracking.log_figure(None, "figs/none.png")  # nothing to draw: skipped
+        tracking.log_figure(None, "figs/none.png")
         tracking.log_dataset(
             run_meta.split_table(["a"], ["a"]), "train-s0", "training", "m.jsonl"
         )
@@ -225,9 +211,6 @@ def test_tracking_parent_child_series_figure_and_lookup(tmp_path, monkeypatch):
     assert tracking.find_runs("missing-experiment") == []
 
 
-# ---------------------------------------------------------------- demo video
-
-
 def test_demo_video_helpers():
     from hydro_knight.eval import demo_video as D
 
@@ -238,16 +221,16 @@ def test_demo_video_helpers():
     assert D.pick_best_worst({"a": 0.7}) == [("best", "a", 0.7)]
     assert D.pick_best_worst({"a": math.nan}) == []
     lo, hi = 0.2, 2.0
-    assert D.score_color(0.1, lo, hi) == D.score_color(lo, lo, hi)  # clipped green
+    assert D.score_color(0.1, lo, hi) == D.score_color(lo, lo, hi)
     b, g, r = D.score_color(hi, lo, hi)
-    assert r > 200 and g < 50  # red at the alarm line
+    assert r > 200 and g < 50
     assert D.score_color(math.nan, lo, hi) == D.GREY
     row = {"test_median": 0.3, "detection": [{"fa_target": 120, "threshold": 1.5}]}
     assert D.score_scale(row, np.array([1.0])) == (0.3, 1.5)
     lo2, hi2 = D.score_scale({}, np.arange(1, 101, dtype=float))
     assert lo2 == pytest.approx(50.5) and hi2 == pytest.approx(99.01)
     tr = P.EventTruth("c", 2.0, 4.0, 9.0, frozenset({1}))
-    assert D.clip_window(tr) == (2.0, 12.0)  # never before the trim start
+    assert D.clip_window(tr) == (2.0, 12.0)
 
 
 def test_render_demo_writes_a_playable_mp4(tmp_path):
@@ -265,7 +248,7 @@ def test_render_demo_writes_a_playable_mp4(tmp_path):
     w = cv2.VideoWriter(
         str(vids / "c1.mp4"), cv2.VideoWriter_fourcc(*"mp4v"), 30, (320, 180)
     )
-    for _ in range(150):  # 5 s
+    for _ in range(150):
         w.write(np.full((180, 320, 3), 120, np.uint8))
     w.release()
     frames = np.arange(150)
@@ -289,9 +272,7 @@ def test_render_demo_writes_a_playable_mp4(tmp_path):
     assert out is not None and out.stat().st_size > 0
     cap = cv2.VideoCapture(str(out))
     n = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    # 2.5 s title card + the 0..6 s window, cut at the end of the 5 s video
     assert n == pytest.approx(30 * 2.5 + 30 * 5, abs=3)
-    # a missing video file means nothing to render, not an error
     assert (
         D.render_demo(
             tmp_path / "x.mp4", alarms, tr, [("best", "zz", 0.9)], kps, vids, 0.2, 2.0

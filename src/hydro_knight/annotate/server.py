@@ -1,44 +1,6 @@
-"""
-Browser-based clip labeler: a small local Flask server plus a single-page UI.
+"""Browser-based clip labeler: a local Flask server (127.0.0.1 only) plus a single-page UI.
 
-Run `uv run python -m hydro_knight.annotate` and a browser tab opens. Everything
-stays on this machine: the server only listens on 127.0.0.1 and serves videos
-straight from raw_local/.
-
-What gets labeled, per clip:
-- label: distress or normal
-- trim: trim_start / trim_end, the part of the clip that counts (cuts intros,
-  post-save footage, end cards); None = untrimmed on that side
-- per event (distress clips):
-    start   drowning onset: the earliest visible sign of trouble (None until set)
-    contact guard (or rescue tube) first reaches the victim
-    end     victim saved: head held above water, supported (None until set)
-    saved_off_camera  true when the clip ends before the save (end stays None)
-    victim  clicked points on the victim  (new), each {"t", "x", "y", "kind"}
-            kind is "onset", "last_seen" or "extra"; x/y are pixels in the
-            original video frame, so they stay valid for any display size
-
-Victim marks are positions, never track ids. Tracking is rerun with different
-settings over time and a victim's id changes every second or so; a clicked
-position can be matched to whatever the tracker produced afterwards, and a
-click with no detection nearby records that the victim was not detected.
-
-A second tab, Swimmer count (/count), labels every person on a few still frames for
-the pose benchmark, and in head-box mode draws a box on each visible head. It has two
-frame sets: the benchmark frames and the head validation frames; see annotate/count.py
-for the file format.
-
-A third tab, Review (/review), plays each clip Claude labeled around the event with the
-victim marked, and records a good / not good verdict; see annotate/review.py.
-
-A fourth tab, Zones (/zones), draws each clip's coverage zone: the water its camera is
-responsible for. Evaluation scores only what happens inside it; see annotate/zones.py.
-
-Times: the manifest stores event and trim times in the source-video timeline.
-For clips downloaded as a section, the local file starts at start_sec, so the
-UI works in file time and converts with `offset` (ClipRecord.file_offset, 0 for
-whole downloads). The labeler never writes start_sec/end_sec: those are the
-download window, owned by ingest.
+Manifest event and trim times are source time; the UI works in file time via `offset`.
 """
 
 from __future__ import annotations
@@ -66,7 +28,6 @@ UI_LABELS = (Label.DISTRESS, Label.NORMAL)
 
 
 def _video_facts(path: Path) -> dict:
-    """fps, frame count, duration and size of a local video file (zeros if unreadable)."""
     cap = cv2.VideoCapture(str(path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
     n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -85,8 +46,7 @@ def _video_facts(path: Path) -> dict:
 
 
 def needs_victim_marks(record) -> bool:
-    """True for a distress clip whose event lacks onset, contact, a save (time or off camera),
-    or an onset/last_seen victim click."""
+    """True for a distress clip whose event lacks onset, contact, a save, or onset/last_seen clicks."""
     if record.label != Label.DISTRESS:
         return False
     if not record.events:
@@ -104,14 +64,13 @@ def needs_victim_marks(record) -> bool:
 
 
 def events_in_order(ev: dict) -> bool:
-    """True when the event's set times run onset <= contact <= saved (unset times are skipped)."""
+    """True when the set times run onset <= contact <= saved (unset ones skipped)."""
     times = [ev.get(k) for k in ("start", "contact", "end")]
     times = [t for t in times if t is not None]
     return times == sorted(times)
 
 
 def _optional_time(v) -> float | None:
-    """A posted time in seconds, or None when unset. Raises ValueError if negative."""
     if v is None:
         return None
     t = float(v)
@@ -121,14 +80,6 @@ def _optional_time(v) -> float | None:
 
 
 def _clean_events(events: list) -> list[dict]:
-    """Validate events posted by the UI and return them in manifest form.
-
-    Any field may still be unset (None), so a half-labeled event is kept, never dropped.
-    Times in the wrong order are kept too: the UI warns and the clip stays unfinished
-    (needs_victim_marks) until they're fixed, so one slip never discards a whole save.
-    Raises:
-        ValueError: malformed event or victim mark (not a number, negative, unknown kind).
-    """
     out = []
     for ev in events:
         start = _optional_time(ev.get("start"))
@@ -170,28 +121,15 @@ def create_app(
     zones_path: Path = zones.ZONES_PATH,
     head_val_path: Path = count.VAL_PATH,
 ) -> Flask:
-    """Build the labeler app around one manifest file.
-
-    Args:
-        manifest_path: JSONL manifest to read and write.
-        detections_dir: raw tiled detections (for the optional box overlay).
-        blocklist: URL blocklist for clip deletion (default: the project blocklist).
-        count_path: swimmer-count label file for the Swimmer count tab (benchmark frames).
-        head_val_path: the Swimmer count tab's second frame set (head validation frames).
-        claude_path: list of Claude-labeled clips (read only), for the Review tab.
-        review_path: review verdicts written by the Review tab.
-        zones_path: coverage zones written by the Zones tab.
-    Returns:
-        The Flask app.
-    """
+    """Build the labeler Flask app around one manifest file."""
     app = Flask(__name__, static_folder=str(STATIC), static_url_path="/static")
     manifest = Manifest(Path(manifest_path))
     blocklist = blocklist or Blocklist()
-    lock = threading.Lock()  # manifest rewrites are whole-file; serialize them
+    # CAUTION[server-manifest-lock]: hold for every manifest write
+    lock = threading.Lock()
 
     @app.after_request
     def no_cache(resp):
-        """Pages and scripts change while the labeler is in use; a plain reload must get them."""
         resp.headers["Cache-Control"] = "no-store"
         return resp
 
@@ -202,11 +140,6 @@ def create_app(
         abort(404, f"no clip {clip_id}")
 
     def detections_by_frame(clip_id: str):
-        """Merged raw detections per frame, or None if the clip was never extracted.
-
-        Cached per meta.json modification time, so a clip extracted (or extended) while the
-        labeler is running shows its boxes without a restart.
-        """
         meta = Path(detections_dir) / clip_id / "meta.json"
         if not meta.exists():
             return None
@@ -287,8 +220,7 @@ def create_app(
         body = request.get_json(force=True)
 
         def apply(r):
-            # Built from the latest saved record (inside the manifest lock), so a field
-            # another writer changed meanwhile, such as fps, is kept.
+            # CAUTION[server-save-latest-record]: must build from the latest saved record
             return dataclasses.replace(
                 r,
                 label=Label(body.get("label", r.label.value)),
@@ -322,7 +254,7 @@ def create_app(
         path = local_path(get_record(clip_id))
         if not path.exists():
             abort(404)
-        # conditional=True answers HTTP Range requests, which the browser needs to seek.
+        # CAUTION[server-range-requests]: conditional=True required
         return send_file(path.resolve(), mimetype="video/mp4", conditional=True)
 
     @app.get("/api/boxes/<clip_id>")
@@ -333,9 +265,6 @@ def create_app(
             return jsonify({"available": False, "boxes": []})
         return jsonify({"available": True, "boxes": by_frame.get(frame, [])})
 
-    # ------------------------------------------------------------ swimmer count tab
-
-    # ?set=bench (default): the benchmark (test) frames; ?set=val: head validation frames
     count_sets = {
         "bench": (count_path, "hydroknight benchmark pose frames"),
         "val": (head_val_path, "hydroknight heads frames"),
@@ -376,7 +305,6 @@ def create_app(
 
     @app.post("/api/count/<int:i>")
     def count_save(i: int):
-        """Save one frame: the dots, plus head boxes and the reviewed flag when sent."""
         path, _ = count_set()
         with lock:
             data = count.load(path) if path.exists() else None
@@ -397,8 +325,6 @@ def create_app(
             count.save(data, path)
         return jsonify({"ok": True})
 
-    # ------------------------------------------------------------ review tab
-
     @app.get("/review")
     def review_page():
         return send_file(STATIC / "review.html")
@@ -409,7 +335,7 @@ def create_app(
         verdicts = review.load(review_path)
         records = {r.clip_id: r for r in manifest.load()}
         rows = []
-        for clip_id, info in claude.items():  # labeling order
+        for clip_id, info in claude.items():
             r = records.get(clip_id)
             if r is None or not local_path(r).exists():
                 continue
@@ -440,8 +366,6 @@ def create_app(
                 verdicts[clip_id] = entry
             review.save(verdicts, review_path)
         return jsonify({"ok": True, "review": entry})
-
-    # ------------------------------------------------------------ zones tab
 
     @app.get("/zones")
     def zones_page():
@@ -493,7 +417,7 @@ def create_app(
 
     @app.post("/api/zones/<clip_id>")
     def zones_save(clip_id: str):
-        get_record(clip_id)  # 404 for an unknown clip
+        get_record(clip_id)
         body = request.get_json(force=True)
         with lock:
             data = zones.load(zones_path)
@@ -513,7 +437,7 @@ def create_app(
 
 
 def main(port: int = 8765, open_browser: bool = True) -> None:
-    """Start the labeler on http://127.0.0.1:<port> and open it in the default browser."""
+    """Start the labeler on http://127.0.0.1:<port> and open it in the browser."""
     app = create_app(Path("data/manifests/pool_footage.jsonl"))
     url = f"http://127.0.0.1:{port}"
     print(f"Labeler running at {url}  (Ctrl+C to stop)")

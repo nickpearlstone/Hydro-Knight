@@ -1,32 +1,4 @@
-"""
-Pose extraction (the GPU step): video -> raw tiled YOLO-pose detections on disk.
-
-YOLO is the only expensive stage of the pipeline, so this step saves its output
-*before* any decision that might change: every detection from every tile and
-the whole-frame pass, un-merged and un-tracked. Merging duplicates and assigning
-track ids happen later, on CPU, in `build_tracks.py` — so a better merge rule or
-tracker never requires another pass over the video.
-
-Output, one folder per clip:
-
-    <out_dir>/
-      det-00000.parquet     raw detections: DET_COLUMNS, one row per detection per crop
-      frames-00000.parquet  one row per processed frame: FRAME_COLUMNS
-      ...                   (one numbered pair per chunk of `chunk_frames` frames)
-      meta.json             video facts, settings, tile origins, versions, progress
-
-`frames` has a row for every frame processed, including frames with no detections.
-With `frame_step` > 1 only every step-th frame is processed (frame numbers stay the
-video's own), and `stop_frame` ends the clip early on purpose (e.g. a few seconds after
-guard contact); both are recorded in the settings.
-That is what separates "a swimmer vanished" from "that frame was never
-processed", and it is how a finished clip is verified against the video's
-frame count — an empty keypoint file used to be indistinguishable from a clip
-with no swimmers.
-
-Chunks make extraction resumable: `meta.json` records completed chunks, and a
-rerun continues after the last one (a crash loses at most one chunk).
-"""
+"""Pose extraction (GPU step): video -> raw tiled YOLO-pose detections on disk, resumable in chunks."""
 
 from __future__ import annotations
 
@@ -44,7 +16,6 @@ from ultralytics import YOLO
 
 from .tiled_pose import detect_crops, tile_grid
 
-# 17 COCO keypoints, in the order YOLO returns them.
 KEYPOINT_NAMES = [
     "nose",
     "l_eye",
@@ -66,7 +37,7 @@ KEYPOINT_NAMES = [
 ]
 
 KP_COLUMNS = [f"{axis}{i}" for i in range(17) for axis in ("x", "y", "c")]
-# Box corners are bx/by: plain x1,y1,x2,y2 would collide with keypoint 1 and 2 columns.
+# CAUTION[extract-pose-box-columns]: keep bx/by names; x1..y2 clash with keypoint columns.
 BOX_COLUMNS = ["bx1", "by1", "bx2", "by2"]
 DET_COLUMNS = ["frame", "crop"] + BOX_COLUMNS + ["conf"] + KP_COLUMNS
 FRAME_COLUMNS = ["frame", "n_dets", "scene_diff"]
@@ -76,7 +47,6 @@ class VideoReadError(RuntimeError):
     """The video opened but yielded far fewer frames than it reports (often an unsupported codec)."""
 
 
-# Settings that must match for a resumed or skipped folder to be trusted.
 _SETTING_KEYS = (
     "model",
     "tile",
@@ -88,12 +58,10 @@ _SETTING_KEYS = (
     "frame_step",
     "stop_frame",
 )
-# Values assumed for settings keys that older meta.json files don't have.
 _SETTING_DEFAULTS = {"frame_step": 1, "stop_frame": None}
 
 
 def _code_version() -> str | None:
-    """Current git commit of the repo, or None outside a git checkout."""
     try:
         out = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -120,13 +88,11 @@ def _versions() -> dict:
 
 
 def _fourcc(cap) -> str:
-    """Codec tag of an open capture, e.g. "h264" or "av01"."""
     code = int(cap.get(cv2.CAP_PROP_FOURCC))
     return "".join(chr((code >> 8 * i) & 0xFF) for i in range(4)).strip("\x00 ")
 
 
 def _scene_hist(frame: np.ndarray) -> np.ndarray:
-    """Normalized hue/saturation histogram of a downscaled frame (cheap scene fingerprint)."""
     small = cv2.resize(frame, (160, 90), interpolation=cv2.INTER_AREA)
     hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
     hist = cv2.calcHist([hsv], [0, 1], None, [32, 32], [0, 180, 0, 256])
@@ -142,15 +108,7 @@ def _write_json_atomic(path: Path, data: dict) -> None:
 def write_chunk(
     out_dir: Path, index: int, dets: pd.DataFrame, frames: pd.DataFrame
 ) -> None:
-    """Write one chunk's detections and frame rows with the on-disk dtypes.
-
-    Keypoints are stored as float16 (under 0.13 px error below 2048 px); boxes and conf stay float32.
-    Args:
-        out_dir: clip folder.
-        index: chunk number (file suffix).
-        dets: rows with DET_COLUMNS.
-        frames: rows with FRAME_COLUMNS.
-    """
+    """Write one chunk's detections and frame rows (keypoints float16, boxes and conf float32)."""
     dets = dets[DET_COLUMNS].astype(
         {"frame": "int32", "crop": "int8"}
         | {c: "float32" for c in BOX_COLUMNS + ["conf"]}
@@ -168,18 +126,7 @@ def write_chunk(
 
 
 def load_detections(det_dir: Path, require_complete: bool = True):
-    """Read a clip folder written by `extract_raw`.
-
-    Args:
-        det_dir: clip folder containing meta.json and the chunk files.
-        require_complete: raise if extraction did not finish.
-    Returns:
-        (meta, dets, frames): meta dict; dets DataFrame (DET_COLUMNS); frames DataFrame
-        (FRAME_COLUMNS), one row per processed frame, sorted by frame.
-    Raises:
-        FileNotFoundError: no meta.json in det_dir.
-        RuntimeError: require_complete and the folder is unfinished.
-    """
+    """Read a clip folder written by `extract_raw`; returns (meta, dets, frames). Raises if incomplete unless `require_complete` is False."""
     det_dir = Path(det_dir)
     meta_path = det_dir / "meta.json"
     if not meta_path.exists():
@@ -218,32 +165,7 @@ def extract_raw(
     frame_step: int = 1,
     stop_frame: int | None = None,
 ) -> dict:
-    """Extract raw tiled detections for one clip into `out_dir`, resuming if partly done.
-
-    A folder already marked complete with the same settings is skipped without loading the model.
-    Args:
-        video_path: input clip.
-        out_dir: clip output folder (created).
-        model_name: YOLO-pose weights.
-        tile: tile size in pixels.
-        overlap: fractional tile overlap.
-        imgsz: per-crop inference resolution (must exceed `tile` for tiling to help).
-        conf: detection confidence floor; detections below it are never saved.
-        include_full: also run a whole-frame pass per frame.
-        device: torch device for YOLO (e.g. 0 for the first GPU), or None.
-        chunk_frames: processed frames per chunk file (resume granularity).
-        max_frames: stop after this many frames (debugging only; real runs extract full clips).
-        frame_step: process every frame_step-th frame (e.g. 2 for 30 fps from a 60 fps clip).
-        stop_frame: stop before this frame and count the clip as complete (None = to the end).
-    Returns:
-        The final meta dict (also written to out_dir/meta.json).
-    Raises:
-        ValueError: the folder holds a previous run made with different settings, or the video's
-            frame size changed since frames were already extracted.
-        OSError: the video cannot be opened.
-        VideoReadError: the video yielded no frames, or under 99% of its reported frame count.
-            The folder stays incomplete, so a rerun retries it (e.g. after re-encoding the video).
-    """
+    """Extract raw tiled detections for one clip into `out_dir`, resuming if partly done; `tile` in pixels, `conf` is a floor below which nothing is saved."""
     video_path, out_dir = Path(video_path), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     meta_path = out_dir / "meta.json"
@@ -282,9 +204,7 @@ def extract_raw(
     origins = tile_grid(width, height, tile, overlap)
     codec = _fourcc(cap)
 
-    if (
-        meta is not None
-    ):  # resuming or retrying: the video file may have been re-encoded
+    if meta is not None:
         if meta["frames_processed"] and (width, height) != (
             meta["video"]["width"],
             meta["video"]["height"],
@@ -317,9 +237,9 @@ def extract_raw(
         _write_json_atomic(meta_path, meta)
 
     chunk_frames = meta["chunk_frames"]
-    start = meta["frames_processed"]  # updated in the same write as chunks_done
+    # CAUTION[extract-pose-resume-progress]: frames_processed must be written atomically with chunks_done.
+    start = meta["frames_processed"]
 
-    # Resume: step past finished frames without inference; keep the last one for scene_diff.
     prev_hist = None
     for i in range(start):
         if not cap.grab():
@@ -341,7 +261,7 @@ def extract_raw(
     while max_frames is None or frame_idx < max_frames:
         if stop_frame is not None and frame_idx >= stop_frame:
             break
-        if frame_idx % frame_step:  # skipped frame: advance without decoding a picture
+        if frame_idx % frame_step:
             if not cap.grab():
                 break
             frame_idx += 1
@@ -384,7 +304,7 @@ def extract_raw(
     bar.close()
     cap.release()
 
-    # Container frame counts are estimates, so only a gap over 1% is treated as real.
+    # frame-count tolerance is 1%
     expected = meta["video"]["frame_count"]
     if stop_frame is not None and expected:
         expected = min(expected, stop_frame)
@@ -412,7 +332,6 @@ def extract_raw(
 
 
 def _flush(out_dir, meta, det_parts, frame_rows, frame_idx) -> None:
-    """Write the pending chunk, then advance meta's progress counters on disk."""
     dets = pd.DataFrame(
         np.concatenate(det_parts) if det_parts else np.empty((0, len(DET_COLUMNS))),
         columns=DET_COLUMNS,

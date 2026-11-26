@@ -1,8 +1,6 @@
 """Kaggle GPU job: render the synthetic wave-pool scene with Linux Blender and time it.
 
-Input dataset (npstone/hk-synth): scene.py, humans.py, post.py, ref_6f5c.json, humans_packed.blend.
-Renders the same frame (seed 2, 32 samples, 1920 px) with the CUDA and OptiX backends, then post.py
-on both, to compare against the Mac CPU reference render. Writes timings.json + frames to /kaggle/working.
+Renders the same frame (seed 2, 32 samples, 1920 px) with CUDA and OptiX, then post.py on both. Writes timings.json + frames to /kaggle/working.
 """
 
 import glob
@@ -34,9 +32,7 @@ def sh(cmd, log=None):
 
 timings = {}
 src = os.path.dirname(glob.glob("/kaggle/input/**/scene.py", recursive=True)[0])
-if (
-    "--backend" not in Path(f"{src}/scene.py").read_text()
-):  # stale dataset version mounted
+if "--backend" not in Path(f"{src}/scene.py").read_text():
     raise SystemExit(
         f"stale scene.py in {src}: re-version the hk-synth dataset and re-run"
     )
@@ -54,7 +50,7 @@ _, t, _ = sh(f"cd /tmp && wget -q {BL_URL} && tar xf blender-4.2.1-linux-x64.tar
 timings["blender_download_s"] = round(t, 1)
 B = "/tmp/blender-4.2.1-linux-x64/blender"
 
-runs = {  # same frame (seed 2, labelled t = 0) on both GPU backends, to compare with the CPU reference
+runs = {
     "seed2_cuda": f"--seed 2 --clip 1 --samples 32 --res 1920 --backend CUDA --out {W}/cuda",
     "seed2_optix": f"--seed 2 --clip 1 --samples 32 --res 1920 --backend OPTIX --out {W}/optix",
 }

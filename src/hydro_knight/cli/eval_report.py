@@ -1,36 +1,13 @@
-"""
-Generate a full evaluation report from keypoint parquets + the manifest.
-
-Runs identically on Colab (full keypoint set restored from Drive) and locally
-(dev against a scratch parquet). Each invocation writes one self-contained
-run folder: figures, stats parquets, summary.md.
+"""Generate a full evaluation report from keypoint parquets + the manifest.
 
 Usage:
-  # Saved weights (e.g. the first Colab run's checkpoint):
-  hydroknight legacy eval-report \
-      --keypoints data/keypoints --manifest data/manifests/pool_footage.jsonl \
-      --videos raw_local --ckpt tcn_ae.pt --out runs/tcn_baseline
+  hydroknight legacy eval-report --keypoints data/keypoints --manifest data/manifests/pool_footage.jsonl --videos raw_local --ckpt tcn_ae.pt --out runs/tcn_baseline
+  hydroknight legacy eval-report --keypoints data/keypoints --manifest data/manifests/pool_footage.jsonl --videos raw_local --train-fresh --save-ckpt tcn_fresh.pt --out runs/tcn_fresh
+  hydroknight legacy eval-report --keypoints scratch/long.parquet --train-fresh --epochs 40 --window 16 --stride 4 --out runs/smoke
 
-  # Fresh train (holds out 20% of normal windows; saves the new weights):
-  hydroknight legacy eval-report \
-      --keypoints data/keypoints --manifest data/manifests/pool_footage.jsonl \
-      --videos raw_local --train-fresh --save-ckpt tcn_fresh.pt --out runs/tcn_fresh
-
-  # Local smoke test on a scratch parquet:
-  hydroknight legacy eval-report --keypoints scratch/long.parquet \
-      --train-fresh --epochs 40 --window 16 --stride 4 --out runs/smoke
-
-Timing correctness: event windows are annotated in *seconds*, so frame->time
-conversion needs each clip's true fps. Pass --videos to read fps per clip from
-<clip_id>.mp4; otherwise the single --fps value (default 30) is used for all.
-
-Honesty guard: with --train-fresh, a fraction of normal windows (--holdout,
-default 0.2) is excluded from training and window-level ROC/PR/percentiles are
-computed ONLY on held-out + distress windows — never on windows the model
-trained on. Event-level recall/latency use all windows (a catch is a catch).
-
-Threshold: defaults to the 99th percentile of (held-out) normal-window scores
-— "alarm on the weirdest 1%" — override with --threshold.
+--videos reads fps per clip from <clip_id>.mp4; otherwise --fps (default 30) is used.
+With --train-fresh, window-level ROC/PR/percentiles use only held-out + distress windows.
+Threshold defaults to the 99th percentile of held-out normal-window scores (--threshold).
 """
 
 from __future__ import annotations
@@ -162,8 +139,6 @@ def main() -> None:
         "epochs": args.epochs,
         "holdout": args.holdout,
         "mode": "ckpt" if args.ckpt else "train_fresh",
-        # The A/B variable. Logged so two MLflow runs are directly comparable
-        # and it is unambiguous which arm produced which numbers.
         "velocity": use_velocity,
         "n_feat": 70 if use_velocity else 34,
     }
@@ -181,9 +156,8 @@ def main() -> None:
         records = {r.clip_id: r for r in recs}
         census = dataset_census(recs)
 
-    # Pass 1 — windows per clip (shared by training and scoring).
-    per_clip = []  # (clip_id, df, windows, info, events, fps, duration_s)
-    guessed_fps = []  # clips with no known fps — their event labels are unreliable
+    per_clip = []
+    guessed_fps = []
     for p in tqdm(paths, desc="window"):
         df = pd.read_parquet(p)
         if df.empty:
@@ -201,8 +175,6 @@ def main() -> None:
     if not per_clip:
         raise SystemExit("no usable clips (all parquets empty)")
     if guessed_fps:
-        # A guessed fps silently shifts every event label for that clip, so say so
-        # loudly rather than letting it look like a normal run.
         print(
             f"WARNING: {len(guessed_fps)} clip(s) fell back to fps={args.fps} "
             f"(no manifest fps): {', '.join(guessed_fps[:5])}"
@@ -211,9 +183,8 @@ def main() -> None:
             "Fix with: uv run hydroknight backfill-fps"
         )
 
-    # Model + (for fresh training) which windows were trained on.
     loss_history = None
-    trained_sel: set[tuple[int, int]] = set()  # (clip_index, window_index)
+    trained_sel: set[tuple[int, int]] = set()
     if args.ckpt:
         model, scaler = _load_model(args.ckpt)
     elif args.train_fresh:
@@ -241,7 +212,6 @@ def main() -> None:
     else:
         raise SystemExit("provide --ckpt or --train-fresh")
 
-    # Pass 2 — score every clip, build the neutral detections + health views.
     clips, coverage_rows, track_frames = [], [], []
     for ci, (cid, df, w, info, events, fps, duration) in enumerate(
         tqdm(per_clip, desc="scoring")
@@ -257,7 +227,6 @@ def main() -> None:
 
     threshold = args.threshold
     if threshold is None:
-        # Normal windows need victim labels to be known; unlabeled clips can't supply them.
         err_n, _ = split_scores([c for c in clips if is_scorable(c)])
         threshold = float(np.percentile(err_n, 99)) if len(err_n) else 1.0
 
@@ -277,7 +246,7 @@ def main() -> None:
         from hydro_knight.eval import (
             run_meta,
             tracking,
-        )  # imports mlflow (optional extra)
+        )
 
         with tracking.run(
             Path(args.out).name,

@@ -1,14 +1,5 @@
 """Contact sheets for labeling one clip. Images go to scratch/lbl/ (gitignored): never
 commit them, footage shows minors.
-
-  uv run hydroknight sheets CLIP_ID overview             # 1 fps, 36 s per sheet -> scratch/lbl/<clip>/sheet_*.jpg
-  uv run hydroknight sheets CLIP_ID zoom T0 T1 X0 Y0 X1 Y1 [STEP]
-      # STEP s (default 0.25) from T0..T1, crop full-res box (X0,Y0)-(X1,Y1) at half size,
-      # white grid every 100 full-res px -> scratch/lbl/<clip>/zoom_*.jpg
-Reading positions in a zoom tile: full_x = X0 + k*tile_x, full_y = Y0 + k*tile_y
-(k = 2 for crops >= 600 px wide, else 1)
-(grid lines sit at full-res multiples of 100). Times are file seconds (= source seconds
-when the clip's start_sec is 0; otherwise source = file + start_sec).
 """
 
 import argparse
@@ -64,9 +55,7 @@ def main() -> None:
             cv2.putText(s, f"{t:.0f}s", (4, 18), 0, 0.6, (0, 255, 255), 2)
             tiles.append(s)
             t += 1.0
-        sheets(
-            tiles, "sheet", cols=6, per=36
-        )  # 36 s per sheet: read EVERY sheet (overlays)
+        sheets(tiles, "sheet", cols=6, per=36)
     else:
         t0, t1, step = args.t0, args.t1, args.step
         x0, y0, x1, y1 = args.x0, args.y0, args.x1, args.y1
@@ -76,9 +65,7 @@ def main() -> None:
             f = grab(t)
             if f is None:
                 break
-            k = (
-                2 if (x1 - x0) >= 600 else 1
-            )  # small crops stay full-res: full = X0 + k*tile
+            k = 2 if (x1 - x0) >= 600 else 1  # full-res coordinate = X0 + k*tile
             c = cv2.resize(f[y0:y1, x0:x1], ((x1 - x0) // k, (y1 - y0) // k))
             for gx in range((x0 // 100 + 1) * 100, x1, 100):
                 cv2.line(

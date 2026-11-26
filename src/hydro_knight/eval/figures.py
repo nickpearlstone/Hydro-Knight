@@ -1,15 +1,4 @@
-"""
-Figures attached to MLflow runs (one function per graph, each returns a matplotlib Figure
-or None when there is nothing to draw). Nothing here imports MLflow, so the graphs are
-tested without the optional `tracking` extra, and the same figures can be saved to disk.
-
-Figures are built with matplotlib.figure.Figure directly, never pyplot, so no global
-figure registry exists to leak memory across a long run; tracking.log_figure saves them.
-
-Chart conventions follow eval/report.py: recessive grey axes, the model in blue, the two
-baselines in grey (random dashed, track-shuffled dotted) and always direct-labelled.
-Seeds and models take categorical colours in a fixed order.
-"""
+"""Figures attached to MLflow runs: one function per graph, returning a Figure or None."""
 
 from __future__ import annotations
 
@@ -22,7 +11,6 @@ from matplotlib.figure import Figure
 from . import protocol as P
 from .report import GRID, INK, MUTED, NORMAL, SURFACE, _style
 
-# Categorical slots in fixed order (validated palette, light mode): seeds, models.
 SERIES = [
     "#2a78d6",
     "#eb6834",
@@ -33,7 +21,7 @@ SERIES = [
     "#6250d6",
     "#e34948",
 ]
-ONSET = "#e34948"  # onset marker, same red as "distress" in report.py
+ONSET = "#e34948"
 CONTACT = "#0b0b0b"
 
 
@@ -46,7 +34,6 @@ def _fig(w: float, h: float, nrows: int = 1, ncols: int = 1, **kw):
 
 
 def _smooth(y: np.ndarray, n: int) -> np.ndarray:
-    """Trailing mean over n points (shorter at the start), same length as y."""
     if n <= 1 or len(y) < 2:
         return y
     c = np.cumsum(np.r_[0.0, y])
@@ -56,7 +43,6 @@ def _smooth(y: np.ndarray, n: int) -> np.ndarray:
 
 
 def _spread(ys, gap: float = 0.07) -> list[float]:
-    """Label heights near ys, pushed apart so no two are closer than `gap` (data units)."""
     ys = [0.0 if not np.isfinite(y) else float(y) for y in ys]
     order = sorted(range(len(ys)), key=lambda i: ys[i])
     out = list(ys)
@@ -66,13 +52,7 @@ def _spread(ys, gap: float = 0.07) -> list[float]:
 
 
 def loss_curves(histories: dict[str, dict[int, list[float]]]) -> Figure | None:
-    """Training loss per step, one panel per model size, one line per seed.
-
-    Args:
-        histories: size -> seed -> per-step training loss.
-    Returns:
-        Figure, or None if no history has a finite value (e.g. re-scored checkpoints).
-    """
+    """Training loss per step, one panel per model size, one line per seed."""
     sizes = [
         s
         for s, by_seed in histories.items()
@@ -114,21 +94,7 @@ def victim_timelines(
     per_clip: pd.DataFrame | None = None,
     ncols: int = 3,
 ) -> Figure | None:
-    """The victim's rank among swimmers in view across each test clip's catch window.
-
-    One panel per clip: x is seconds from our onset, y the victim's outright rank (1 at
-    the top), the grey line the number of swimmers scored at that moment (the worst
-    possible rank), the band the top-3 zone. Red line = onset (shaded between ours and the
-    independent labeller's when both exist), black line = guard contact. Gaps in the blue
-    line are moments the model had no score for the victim.
-
-    Args:
-        table: score table (P.SCORE_COLUMNS) for the test clips.
-        truths: clip_id -> EventTruth.
-        per_clip: tier-1 per-clip table; adds within-clip AUC to each panel title.
-    Returns:
-        Figure, or None with no clips.
-    """
+    """The victim's rank among swimmers in view across each test clip's catch window."""
     if not truths:
         return None
     groups = P._drop_ignored(P._by_clip(table), truths)
@@ -172,7 +138,7 @@ def victim_timelines(
             tr.contact - tr.onset, color=CONTACT, linewidth=1.5, label="guard contact"
         )
         top = max(3.5, float(np.nanmax(n)) + 1 if np.isfinite(n).any() else 3.5)
-        ax.set_ylim(top, 0.5)  # rank 1 at the top
+        ax.set_ylim(top, 0.5)
         for xv, txt, c, ha in (
             (0, " onset", ONSET, "left"),
             (tr.contact - tr.onset, "contact ", CONTACT, "right"),
@@ -208,7 +174,7 @@ def victim_timelines(
         ax.tick_params(labelsize=8)
         if k % ncols == 0:
             ax.set_ylabel("victim rank (1 = top)", fontsize=8)
-        if k + ncols >= len(cids):  # lowest visible panel in its column
+        if k + ncols >= len(cids):
             ax.set_xlabel("seconds from onset", fontsize=8)
     handles, labels = {}, []
     for ax in axes.flat[: len(cids)]:
@@ -237,17 +203,7 @@ def victim_timelines(
 def catch_vs_false_alarms(
     proxy: dict, random_caught: dict, shuffled_caught: dict
 ) -> Figure | None:
-    """Rescues caught at each false-alarm budget for the model and both baselines on one axis.
-
-    Budgets are false alarms per hour counted on the rescue footage itself (the tier-1
-    proxy). The model's band is its 95% Clopper-Pearson interval on the share caught.
-
-    Args:
-        proxy: tier1(...)["proxy"] ({"hours", "points"}).
-        random_caught, shuffled_caught: budget -> mean rescues caught by the baseline.
-    Returns:
-        Figure, or None with no operating points.
-    """
+    """Rescues caught at each false-alarm budget for the model and both baselines on one axis."""
     pts = proxy.get("points", [])
     if not pts:
         return None
@@ -305,17 +261,7 @@ def catch_vs_false_alarms(
 
 
 def per_clip_results(per_clip: pd.DataFrame) -> Figure | None:
-    """Per test clip: within-clip AUC, time in the top 3, and victim detected vs scored.
-
-    Clips are sorted by AUC so the three panels line up row by row. AUC 0.5 and the
-    share-of-time axes all run 0 to 1.
-
-    Args:
-        per_clip: tier-1 per-clip table (clip_id, within_clip_auc, time_in_top3,
-            detected, scored).
-    Returns:
-        Figure, or None with no clips.
-    """
+    """Per test clip: within-clip AUC, time in the top 3, and victim detected vs scored."""
     if per_clip is None or not len(per_clip):
         return None
     pc = per_clip.sort_values("within_clip_auc", na_position="first").reset_index(
@@ -382,14 +328,7 @@ def cross_run_comparison(
     ),
     group: str = "run_folder",
 ) -> Figure | None:
-    """One metric across many evaluated runs: a dot per seed, a bar per run folder, baselines as ticks.
-
-    Args:
-        runs: one row per seed-level run, columns `group`, `metric` and the baseline
-            columns (e.g. flattened from mlflow.search_runs).
-    Returns:
-        Figure, or None if no row has the metric.
-    """
+    """One metric across many evaluated runs: a dot per seed, a bar per run folder, baselines as ticks."""
     if metric not in runs or not runs[metric].notna().any():
         return None
     df = runs.dropna(subset=[metric])
@@ -443,13 +382,7 @@ def cross_run_comparison(
 
 
 def pose_benchmark(rows: pd.DataFrame) -> Figure | None:
-    """Pose `run`: recall vs false positives, one point per model, whole frame vs tiled.
-
-    Args:
-        rows: benchmark summary (model, mode, recall, false_pos, ms_per_frame).
-    Returns:
-        Figure, or None when empty.
-    """
+    """Pose `run`: recall vs false positives, one point per model, whole frame vs tiled."""
     if rows is None or not len(rows):
         return None
     models = list(dict.fromkeys(rows["model"]))
@@ -482,13 +415,7 @@ def pose_benchmark(rows: pd.DataFrame) -> Figure | None:
 
 
 def pose_sweep(rows: pd.DataFrame) -> Figure | None:
-    """Pose `sweep`: recall vs false positives as the confidence floor moves, one line per model.
-
-    Args:
-        rows: sweep table (model, threshold, recall, false_pos).
-    Returns:
-        Figure, or None when empty.
-    """
+    """Pose `sweep`: recall vs false positives as the confidence floor moves, one line per model."""
     if rows is None or not len(rows):
         return None
     models = list(dict.fromkeys(rows["model"]))

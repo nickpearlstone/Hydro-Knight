@@ -1,26 +1,16 @@
-"""
-Pose-backend benchmark: missed swimmers, duplicate detections, and speed, scored
+"""Pose-backend benchmark: missed swimmers, duplicate detections and speed, scored
 against hand-clicked swimmer positions.
 
-Steps, in order:
-
     uv run hydroknight benchmark pose frames   # pick reference frames from local clips
-    uv run python -m hydro_knight.annotate            # Swimmer count tab: click every person
+    uv run python -m hydro_knight.annotate     # Swimmer count tab: click every person
     uv run hydroknight benchmark pose run      # score every backend, write results
     uv run hydroknight benchmark pose sweep    # recall vs false positives across cutoffs
-    uv run hydroknight benchmark pose log      # push results on disk to MLflow (or run/sweep --mlflow)
+    uv run hydroknight benchmark pose log      # push results on disk to MLflow
 
-Ground truth is one click per person, in the water or out of it (deck, stairs, guard stand);
-the file format lives in hydro_knight/annotate/count.py. A detection is matched to a click that lies inside
-its box (padded 10%), one detection per click, highest confidence first:
-  - found:     a water click that some detection claimed
-  - duplicate: a detection whose box holds only clicks already claimed by another detection
-  - false pos: a detection whose box holds no click at all
-  - deck hits: detections on out-of-water people, reported but not scored either way
-Missed = water clicks no detection claimed. Speed is median wall time per frame on this machine.
-
-MediaPipe needs `uv sync --extra spike`. On an 8 GB M1 Mac, crops go to YOLO 4 at a time
-(--batch): all 16 at once wedged the GPU for the s/m models.
+A detection matches a click inside its box (padded 10%), one per click, highest
+confidence first. found = claimed water click; duplicate = box holds only claimed
+clicks; false pos = box holds no click; deck hits are reported, not scored.
+MediaPipe needs `uv sync --extra spike`.
 """
 
 from __future__ import annotations
@@ -47,7 +37,7 @@ GT_PATH = count.COUNT_PATH
 OUT_DIR = Path("runs/pose_bench")
 MP_MODEL = "raw_local/pose_landmarker.task"
 
-# Production extraction settings (extract_pose.extract_raw defaults).
+# CAUTION[benchpose-extract-defaults]: keep in sync with extract_pose.extract_raw defaults
 TILE, OVERLAP, IMGSZ, CONF = 480, 0.25, 1280, 0.25
 BOX_PAD = 0.10
 
@@ -59,9 +49,6 @@ YOLO_MODELS = [
     "yolo26s-pose",
     "yolo26m-pose",
 ]
-
-
-# ---------------------------------------------------------------- frames
 
 
 def cmd_frames(args) -> None:
@@ -81,7 +68,7 @@ def cmd_frames(args) -> None:
     for r in distress + other:
         if r["events"]:
             idx = int(round(r["events"][0]["start"] * r["fps"]))
-        else:  # start_sec can be a livestream offset, so take the local file's midpoint
+        else:  # file midpoint, not start_sec
             cap = cv2.VideoCapture(f"raw_local/{r['clip_id']}.mp4")
             idx = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) // 2
             cap.release()
@@ -92,15 +79,8 @@ def cmd_frames(args) -> None:
     print(f"picked {len(frames)} frames -> {GT_PATH}, images in {count.frame_dir()}/")
 
 
-# ---------------------------------------------------------------- backends
-
-
 class YoloBackend:
-    """YOLO-pose, fed `batch` images per call: all 16 crops at once hangs the 8 GB M1 for s/m.
-
-    A "+nms" suffix (e.g. "yolo26n-pose+nms") runs YOLO26 through its one-to-many head with
-    classic NMS instead of the default NMS-free end-to-end head.
-    """
+    """YOLO-pose, `batch` images per call; a "+nms" name suffix selects classic NMS on YOLO26."""
 
     def __init__(self, name: str, device: str, batch: int, conf: float = CONF):
         from ultralytics import YOLO
@@ -110,7 +90,6 @@ class YoloBackend:
         self.model = YOLO(f"{name.removesuffix('+nms')}.pt")
 
     def __call__(self, images: list[np.ndarray]):
-        """Per image: (boxes (n,4) xyxy in image pixels, confs (n,))."""
         results = []
         for k in range(0, len(images), self.batch):
             chunk = images[k : k + self.batch]
@@ -174,7 +153,7 @@ class MediaPipeBackend:
 
 
 def detect(backend, frame: np.ndarray, tiled: bool):
-    """Whole-frame pass, or production tiling (tiles + whole frame, IoS merge). Returns boxes, confs."""
+    """Whole-frame pass, or production tiling; returns (boxes, confs)."""
     if not tiled:
         return backend([frame])[0]
     h, w = frame.shape[:2]
@@ -200,9 +179,6 @@ def detect(backend, frame: np.ndarray, tiled: bool):
     return boxes[keep], confs[keep]
 
 
-# ---------------------------------------------------------------- scoring
-
-
 def _inside(boxes: np.ndarray, pts: np.ndarray) -> np.ndarray:
     """(n_boxes, n_pts) bool: point inside box padded by BOX_PAD of its size."""
     if len(pts) == 0 or len(boxes) == 0:
@@ -219,7 +195,7 @@ def _inside(boxes: np.ndarray, pts: np.ndarray) -> np.ndarray:
 
 
 def score_frame(boxes, confs, water, deck) -> dict:
-    """Greedy one-detection-per-click match, highest confidence first, nearest click to box centre."""
+    """Greedy one-detection-per-click match, highest confidence first."""
     pts = np.asarray(water + deck, np.float32).reshape(-1, 2)
     is_water = np.arange(len(pts)) < len(water)
     inside = _inside(boxes, pts)
@@ -276,7 +252,7 @@ def cmd_run(args) -> None:
         backend = make()
         for tiled in (False, True):
             mode = "tiled" if tiled else "whole"
-            for img in images[:2]:  # warm-up (model load, MPS kernel compile)
+            for img in images[:2]:
                 detect(backend, img, tiled)
             totals, times = {}, []
             for f, img in zip(frames, images, strict=True):
@@ -340,11 +316,7 @@ def cmd_run(args) -> None:
 
 
 def cmd_sweep(args) -> None:
-    """Fair threshold comparison: detect once at a low floor, then score every cutoff offline.
-
-    Thresholding after the merge gives the same boxes as detecting at that cutoff, because the
-    greedy merge only lets a box be removed by a higher-confidence one.
-    """
+    """Detect once at a low floor, then score every confidence cutoff offline."""
     import pandas as pd
 
     frames = [
@@ -383,9 +355,6 @@ def cmd_sweep(args) -> None:
         log_benchmark("sweep", df, out, vars(args))
 
 
-# ---------------------------------------------------------------- MLflow
-
-
 def cmd_log(args) -> None:
     """Log results already on disk (summary.csv and/or sweep.csv) without re-running any model."""
     import pandas as pd
@@ -401,15 +370,11 @@ def cmd_log(args) -> None:
 
 
 def log_benchmark(kind: str, df, out: Path, settings: dict) -> None:
-    """Parent run per command, one child per model (and mode for `run`); mlflow is imported only here.
-
-    `sweep` children log recall / false positives / duplicates with step = confidence
-    floor x 1000, so the MLflow UI can plot them against the cutoff.
-    """
+    """Log a parent MLflow run per command and one child per model (step = confidence floor x 1000 for sweep)."""
     import pandas as pd
 
     from hydro_knight.eval import figures as F
-    from hydro_knight.eval import run_meta, tracking  # imports mlflow
+    from hydro_knight.eval import run_meta, tracking
 
     gt = json.loads(GT_PATH.read_text())["frames"]
     frames = pd.DataFrame(

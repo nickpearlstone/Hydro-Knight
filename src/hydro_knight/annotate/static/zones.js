@@ -1,6 +1,3 @@
-// Hydro-Knight labeler, Zones tab: one coverage polygon per clip, in original-frame pixels.
-// Zoom/pan works like the Swimmer count tab. A zone saves itself once it has 3 corners
-// (or the clip is marked "camera moves"); removing every corner deletes it.
 
 const $ = (s) => document.querySelector(s);
 
@@ -18,15 +15,13 @@ const S = {
   w: 1, h: 1,
   points: [],
   moves: false,
-  history: [],       // [{idx, points, moves}] snapshots for undo
+  history: [],
   zoom: { k: 1, tx: 0, ty: 0, bx: 0, by: 0, bw: 0, bh: 0 },
   saveTimer: null,
   imgTimer: null,
 };
 
 const cur = () => S.clips[S.idx];
-
-// ---------------------------------------------------------------- feedback
 
 function toast(msg, kind = "ok") {
   const el = document.createElement("div");
@@ -41,8 +36,6 @@ function setSaveState(state, text) {
   pill.className = `pill ${state}`;
   pill.textContent = text;
 }
-
-// ---------------------------------------------------------------- clips + frames
 
 async function loadClips() {
   const res = await fetch("/api/zones");
@@ -85,13 +78,10 @@ async function showFrame(f, refit) {
   fitStage(refit || sizeChanged);
 }
 
-// Slider drags fire constantly: load the image once the hand stops.
 function scrubTo(f) {
   clearTimeout(S.imgTimer);
   S.imgTimer = setTimeout(() => showFrame(f, false).then(() => scheduleSave()), 120);
 }
-
-// ---------------------------------------------------------------- edits + save
 
 function edit(fn) {
   S.history.push({ idx: S.idx, points: S.points.map((p) => [...p]), moves: S.moves });
@@ -152,14 +142,11 @@ async function save(idx) {
   }
 }
 
-// ---------------------------------------------------------------- mouse
-
 function toFrame(clientX, clientY) {
   const r = img.getBoundingClientRect();
   return [((clientX - r.left) / r.width) * S.w, ((clientY - r.top) / r.height) * S.h];
 }
 
-// Frame pixels per screen pixel at the current fit and zoom.
 const unit = () => S.w / (S.zoom.bw * S.zoom.k || 1);
 
 function nearestCorner(x, y) {
@@ -183,7 +170,7 @@ window.addEventListener("mousemove", (e) => {
   if (!drag) return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   if (!drag.moved && Math.hypot(dx, dy) < 4) return;
-  if (!drag.moved && drag.corner >= 0) {  // snapshot once, so one drag = one undo step
+  if (!drag.moved && drag.corner >= 0) {
     S.history.push({ idx: S.idx, points: S.points.map((p) => [...p]), moves: S.moves });
   }
   drag.moved = true;
@@ -223,8 +210,6 @@ function addCorner(e) {
   edit(() => S.points.push([clamp(x, S.w), clamp(y, S.h)]));
 }
 
-// ---------------------------------------------------------------- zoom + pan
-
 function fitStage(reset) {
   const sw = stage.clientWidth, sh = stage.clientHeight;
   const scale = Math.min(sw / S.w, sh / S.h);
@@ -260,8 +245,6 @@ stage.addEventListener("wheel", (e) => {
 }, { passive: false });
 window.addEventListener("resize", () => fitStage(false));
 
-// ---------------------------------------------------------------- rendering
-
 function drawOverlay() {
   ctx.clearRect(0, 0, overlay.width, overlay.height);
   if (S.idx < 0) return;
@@ -275,7 +258,7 @@ function drawOverlay() {
     return;
   }
   const pts = S.points;
-  if (pts.length >= 3) {  // dim everything outside the zone
+  if (pts.length >= 3) {
     ctx.save();
     ctx.fillStyle = "rgba(15, 18, 22, 0.5)";
     ctx.beginPath();
@@ -334,8 +317,6 @@ function render() {
   drawOverlay();
 }
 
-// ---------------------------------------------------------------- wiring
-
 const step = (sec) => scrubTo(S.frame + sec * (cur().fps || 30));
 
 $("#prev").onclick = () => openClip(S.idx - 1);
@@ -363,7 +344,6 @@ document.addEventListener("keydown", (e) => {
   else if (e.key.toLowerCase() === "z" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); undo(); }
 });
 
-// Closing the tab with a save still waiting on its timer: send it anyway.
 window.addEventListener("beforeunload", () => {
   if (!S.saveTimer) return;
   navigator.sendBeacon(`/api/zones/${cur().clip_id}`,

@@ -1,5 +1,3 @@
-"""Minimal stand-ins for Ultralytics Results objects, shared by the extraction tests."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -30,6 +28,6 @@ class Result:
     def __init__(self, xyxy, conf):
         self.boxes = Boxes(xyxy, conf)
         kp = np.zeros((len(conf), 17, 3), np.float32)
-        kp[:, :, :2] = 5.0  # every keypoint at (5, 5) in crop pixels
+        kp[:, :, :2] = 5.0
         kp[:, :, 2] = 0.7
         self.keypoints = type("K", (), {"data": T(kp)})()

@@ -1,18 +1,4 @@
-"""
-Coverage zones: the patch of water each clip's camera is responsible for.
-
-A real install gives every camera a zone drawn once at setup; swimmers outside it
-belong to another camera (or are too far away to judge). The labeler's Zones tab
-draws one polygon per clip, and evaluation scores only swimmers, victims and false
-alarms inside it. The file is data/annotations/zones.json:
-
-    {clip_id: {"points": [[x, y], ...], "frame": int, "camera_moves": bool, "date": "YYYY-MM-DD"}}
-
-points are original-frame pixels (at least 3; the polygon closes itself), frame is
-the file frame the zone was drawn on, and camera_moves marks clips whose camera pans
-or is handheld, where one fixed polygon can't apply (points may then be empty). No
-pixels, so the file is safe to commit.
-"""
+"""Coverage zones: one polygon per clip (original-frame pixels) for the patch of water its camera covers."""
 
 from __future__ import annotations
 
@@ -34,7 +20,7 @@ def load(path: Path = ZONES_PATH) -> dict:
 
 
 def save(data: dict, path: Path = ZONES_PATH) -> None:
-    """Write the zone file atomically (temp file + rename), so a crash never truncates it."""
+    """Write the zone file atomically."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
@@ -43,12 +29,7 @@ def save(data: dict, path: Path = ZONES_PATH) -> None:
 
 
 def clean_zone(body: dict) -> dict:
-    """Validate {"points", "frame", "camera_moves"} posted by the UI; rounds to 0.1 px.
-
-    Raises:
-        ValueError: not an object, a bad point or frame, or fewer than 3 points on a
-            fixed camera.
-    """
+    """Validate a posted zone; points rounded to 0.1 px, at least 3 unless camera_moves."""
     if not isinstance(body, dict):
         raise ValueError("expected a JSON object")
     moves = bool(body.get("camera_moves", False))
@@ -79,8 +60,7 @@ def clean_zone(body: dict) -> dict:
 def in_zone(zone: dict | None, x, y) -> np.ndarray:
     """Bool array: which (x, y) points lie inside the zone polygon (even-odd rule).
 
-    A missing zone, or a moving-camera zone, contains everything: no zone means no
-    cutoff, so callers fall back to the size cutoff alone.
+    A missing or moving-camera zone contains everything.
     """
     x, y = np.atleast_1d(np.asarray(x, float)), np.atleast_1d(np.asarray(y, float))
     if zone is None or zone.get("camera_moves") or len(zone.get("points", [])) < 3:
@@ -90,7 +70,7 @@ def in_zone(zone: dict | None, x, y) -> np.ndarray:
     qx, qy = np.roll(px, -1), np.roll(py, -1)
     inside = np.zeros(x.shape, bool)
     for x1, y1, x2, y2 in zip(px, py, qx, qy, strict=True):
-        crosses = (y1 > y) != (y2 > y)  # this edge spans the point's height
+        crosses = (y1 > y) != (y2 > y)
         with np.errstate(divide="ignore", invalid="ignore"):
             xc = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
         inside ^= crosses & (x < xc)

@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Quick camera-fit check: exact (unvaried) low-quality render of a config, with its lens applied,
-# stacked above the config's real reference frame.  synthetic/tools/fit_preview.sh ref_dc93 [samples] [res]
 set -euo pipefail
 NAME=$1
 OUT=synthetic/renders/fit/$NAME

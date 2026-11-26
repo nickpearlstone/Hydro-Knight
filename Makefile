@@ -1,4 +1,3 @@
-# Short commands for common tasks. `make help` lists them.
 N ?= 5
 
 .PHONY: help harvest harvest-status labeler mlflow test check hooks

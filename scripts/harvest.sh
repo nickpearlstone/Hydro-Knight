@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Unattended harvest: find, judge, and label up to N new clips, extract them, open a PR.
-#
-#   make harvest          # up to 5 clips
-#   make harvest N=3
-#
-# Steps: fresh branch from main -> Claude (headless, .claude/HARVEST.md, limited tools) judges
-# and labels -> pose extraction + tracking on the Mac GPU -> commit the manifest,
-# candidate queue and label log -> push -> PR. Claude's labels stay out of training
-# until reviewed in the labeler's Review tab. Logs: runs/logs/harvest_<stamp>.log
 set -euo pipefail
 N="${1:-5}"
 cd "$(dirname "$0")/.."

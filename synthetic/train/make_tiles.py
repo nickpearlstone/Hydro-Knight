@@ -1,17 +1,9 @@
-"""Step 1: cut rendered frames into 640 px training tiles with head boxes (YOLO format).
+"""Step 1: cut rendered frames into 640 px training tiles with head boxes (YOLO format, class 0 = head).
 
-Heads are 5-40 px across in a 1920x1080 frame. Shrinking the whole frame to a detector's 640 px input
-would make them 3x smaller still, so we cut tiles at native resolution instead (the detector at test
-time also runs on tiles). A head box goes into a tile if at least 60% of it falls inside; it is clipped
-to the tile edge. Whole frames are split into train / val (never tiles of one frame on both sides).
-
-Output: <out>/images/{train,val}/*.jpg, <out>/labels/{train,val}/*.txt (class 0 = head), data.yaml,
-and tiles.json (provenance: source frame, camera config, tile offset).
+A head box goes into a tile if at least 60% of it falls inside (clipped to the tile edge). Frames are split into train / val whole.
+Writes <out>/images, <out>/labels, data.yaml, tiles.json.
 
     uv run python synthetic/train/make_tiles.py synthetic/renders/batch_out_c synthetic/renders/tiles_c
-    uv run python synthetic/train/make_tiles.py synthetic/renders/batch_out_c synthetic/renders/batch_out_d synthetic/renders/tiles_cd
-
-Tile names start with the batch folder (batch_c, batch_d, ...), so batches can be combined.
 """
 
 import argparse
@@ -57,7 +49,7 @@ def main():
     random.Random(a.seed).shuffle(items)
     n_val = max(1, int(len(items) * a.val))
     meta = []
-    counts = {"train": [0, 0], "val": [0, 0]}  # tiles, head boxes
+    counts = {"train": [0, 0], "val": [0, 0]}
     for k, (img_path, txt, cam) in enumerate(items):
         split = "val" if k < n_val else "train"
         (out / "images" / split).mkdir(parents=True, exist_ok=True)
@@ -66,7 +58,8 @@ def main():
         H, W = img.shape[:2]
         heads = []
         for line in txt.read_text().split("\n"):
-            if line.startswith("1 "):  # class 1 = head in the export
+            # CAUTION[maketiles-head-class]: class 1 = head in the export
+            if line.startswith("1 "):
                 _, cx, cy, w, h = map(float, line.split())
                 heads.append(
                     (
@@ -93,7 +86,7 @@ def main():
                     f"0 {((cx0 + cx1) / 2 - ox) / TILE:.6f} {((cy0 + cy1) / 2 - oy) / TILE:.6f} "
                     f"{(cx1 - cx0) / TILE:.6f} {(cy1 - cy0) / TILE:.6f}"
                 )
-            batch = img_path.parents[2].name  # batch_c/<camera>/gpu0/rgbv_0002.png
+            batch = img_path.parents[2].name
             name = f"{batch}_{cam}_{img_path.parent.name}_{img_path.stem}_{ox}_{oy}"
             cv2.imwrite(
                 str(out / "images" / split / f"{name}.jpg"),

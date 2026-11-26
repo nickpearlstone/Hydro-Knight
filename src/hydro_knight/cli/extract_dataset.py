@@ -1,20 +1,5 @@
 """
 Extract raw tiled pose detections for every clip in the manifest (the GPU step).
-
-Walks the manifest, skips held clips and clips whose video is missing or
-unreadable, and runs `extract_raw` on each. Labeled clips go first and
-unlabeled/review clips last, so the clips that training and eval need are
-finished early in a long run. Finished clips are skipped and interrupted ones
-resume, so rerunning the same command after a Colab disconnect just continues.
-A clip whose video cannot be decoded is reported at the end and left incomplete,
-so it is retried on the next run.
-
-Usage:
-    uv run hydroknight extract --device 0                # full run (GPU)
-    uv run hydroknight extract --clips b4b2db5ffb48 --max-frames 50   # smoke test
-    uv run hydroknight extract --out /content/drive/MyDrive/hydroknight/detections
-    uv run hydroknight extract --conf 0.05 --target-fps 30 --stop-after-contact 5 \
-        --out data/detections_c05      # low floor, 30 fps, stop 5 s after guard contact
 """
 
 from __future__ import annotations
@@ -71,9 +56,7 @@ def main() -> None:
     if args.clips:
         records = [r for r in records if r.clip_id in set(args.clips)]
     records = [r for r in records if "[HOLD" not in r.notes]
-    records.sort(
-        key=lambda r: r.label in _LATER
-    )  # stable: labeled first, manifest order kept
+    records.sort(key=lambda r: r.label in _LATER)
 
     todo = []
     for r in records:
@@ -105,9 +88,7 @@ def main() -> None:
                 frame_step=step,
                 stop_frame=stop,
             )
-        except (
-            VideoReadError
-        ) as e:  # keep going; the folder stays incomplete for a retry
+        except VideoReadError as e:
             print(f"[{i}/{len(todo)}] FAILED {e}")
             failed.append(r.clip_id)
             continue

@@ -30,7 +30,6 @@ body {
 .muted { color: var(--muted); }
 [hidden] { display: none !important; }
 
-/* ---------- top bar ---------- */
 .topbar {
   display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
   padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
@@ -59,7 +58,6 @@ body {
 .pill.saved { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 60%, transparent); }
 .pill.error { color: #fff; background: var(--bad); border-color: var(--bad); }
 
-/* ---------- layout ---------- */
 .layout {
   display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px;
   padding: 16px; height: calc(100% - 58px);
@@ -72,7 +70,6 @@ body {
   .layout { grid-template-columns: 1fr; height: auto; }
 }
 
-/* ---------- video stage ---------- */
 .stage {
   position: relative; flex: 1 1 auto; min-height: 320px;
   background: #000; border-radius: var(--radius); overflow: hidden;
@@ -94,7 +91,6 @@ body {
 }
 .empty-state { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
 
-/* ---------- timeline ---------- */
 .timeline {
   position: relative; height: 34px; background: var(--card); border-radius: 8px;
   border: 1px solid var(--line); cursor: pointer; overflow: hidden;
@@ -123,12 +119,10 @@ body {
 .sw.after { background: var(--seg-after); }
 .sw.trimmed { background: repeating-linear-gradient(45deg, #000 0 3px, #333 3px 6px); }
 
-/* ---------- transport ---------- */
 .transport { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .speeds { display: flex; gap: 4px; margin-left: 8px; }
 .clock { margin-left: auto; color: var(--muted); }
 
-/* ---------- buttons ---------- */
 .btn {
   appearance: none; border: 1px solid var(--line); background: #252b35; color: var(--text);
   padding: 8px 12px; border-radius: 8px; font: inherit; cursor: pointer;
@@ -149,7 +143,6 @@ body {
 .btn.chip { padding: 4px 10px; border-radius: 999px; }
 .btn.chip.active, .btn.toggle.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.arm.armed { background: var(--warn); border-color: var(--warn); color: #111; }
-/* flash: a brief glow so every press visibly registers */
 .btn.flash { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 70%, transparent); border-color: var(--ok); }
 kbd {
   font: 11px ui-monospace, Menlo, monospace; color: var(--muted); border: 1px solid var(--line);
@@ -157,7 +150,6 @@ kbd {
 }
 .btn.primary kbd, .btn.active kbd { color: #dbeafe; border-color: #93c5fd66; }
 
-/* ---------- panel cards ---------- */
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
 .card h2 { font-size: 14px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
 .step {
@@ -190,7 +182,6 @@ kbd {
 .tools { display: flex; flex-wrap: wrap; gap: 8px; }
 .danger-zone { background: transparent; border-style: dashed; }
 
-/* ---------- toasts + modal ---------- */
 .toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 50; }
 .toast {
   background: #111827; border: 1px solid var(--line); border-left: 4px solid var(--ok);
@@ -206,7 +197,6 @@ kbd {
 .modal-box p { color: var(--muted); margin: 0 0 16px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
-/* ---------- swimmer count tab ---------- */
 .stage.counting { cursor: crosshair; }
 .stage img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .tally { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -224,7 +214,6 @@ kbd {
 .frames li.blank .muted { color: var(--warn); }
 .sw.water { background: #ef4444; border-radius: 50%; }
 .sw.deck { background: #3b82f6; border-radius: 50%; }
-/* head-box mode */
 .modes { display: flex; gap: 4px; }
 .stage.boxing { cursor: crosshair; }
 .stage.boxing.pan-ready { cursor: grab; }
@@ -235,7 +224,6 @@ kbd {
 .sw.head-deck { border-color: #3b82f6; }
 .sw.no-head { background: transparent; border: 2px solid #f59e0b; border-radius: 50%; }
 
-/* ---------- review tab ---------- */
 .phase { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; }
 .phase.normal { background: var(--seg-normal); }
 .phase.distress { background: var(--seg-distress); }
@@ -272,9 +260,8 @@ kbd {
 .frames li .v { font-size: 12px; color: var(--muted); }
 .frames li.good .v { color: var(--ok); }
 .frames li.not_good .v { color: var(--bad); }
-.timeline { touch-action: none; user-select: none; } /* dragging the timeline scrubs, never scrolls or selects */
+.timeline { touch-action: none; user-select: none; }
 .tl-ends { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; margin-top: -6px; }
 
-/* Zones tab: frame scrubber under the stage */
 .scrub { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .scrub input[type="range"] { flex: 1; accent-color: var(--accent); }

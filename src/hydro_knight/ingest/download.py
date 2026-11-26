@@ -1,10 +1,4 @@
-"""
-Download video files for clips registered in the manifest.
-
-Videos are saved to raw_local/ which is gitignored — they never enter the repo.
-A sidecar file (<clip_id>.done) is written next to each video on success so
-re-running this script skips already-downloaded clips.
-"""
+"""Download video files for clips registered in the manifest."""
 
 from __future__ import annotations
 
@@ -15,46 +9,25 @@ from pathlib import Path
 
 from .manifest import ClipRecord, Manifest
 
-# Ensure Homebrew binaries (ffmpeg, node) are visible to subprocesses even
-# when the shell PATH isn't inherited by the venv.
 _ENV = {
     **os.environ,
     "PATH": f"/opt/homebrew/bin:/usr/local/bin:{os.environ.get('PATH', '')}",
 }
 
-# Invoke yt-dlp through THIS interpreter (the venv's python) rather than the
-# bare "yt-dlp" name. Several yt-dlp copies of different ages exist on this
-# machine; the bare name resolved to an old 2023 build without --js-runtimes.
-# "python -m yt_dlp" guarantees the venv's up-to-date version is used.
+# Run yt-dlp via sys.executable, never the bare name.
 _YTDLP = [sys.executable, "-m", "yt_dlp"]
 
 
-# Where downloaded videos land. Gitignored.
 RAW_LOCAL = Path("raw_local")
 
 
 def local_path(record: ClipRecord) -> Path:
-    """Expected local video path for a clip (raw_local/<clip_id>.mp4).
-
-    Named by clip_id so the filename is stable and unique regardless of the original title.
-    Args:
-        record: the clip whose path to compute.
-    Returns:
-        Path to raw_local/<clip_id>.mp4 (the file may not exist yet).
-    """
+    """Expected local video path for a clip (raw_local/<clip_id>.mp4)."""
     return RAW_LOCAL / f"{record.clip_id}.mp4"
 
 
 def done_marker(record: ClipRecord) -> Path:
-    """Path to the sidecar marking a clip as fully downloaded (raw_local/<clip_id>.done).
-
-    A separate .done file is used instead of checking the .mp4, because a partial download
-    leaves a real-but-broken .mp4; .done is written only on success.
-    Args:
-        record: the clip whose marker to compute.
-    Returns:
-        Path to the .done sidecar (may not exist).
-    """
+    """Path to the sidecar marking a clip as fully downloaded (raw_local/<clip_id>.done)."""
     return RAW_LOCAL / f"{record.clip_id}.done"
 
 
@@ -68,18 +41,7 @@ def download_clip(
     cookies_file: Path | None = None,
     cookies_from_browser: str | None = None,
 ) -> bool:
-    """Download one clip's video to raw_local/, optionally just its [start,end] section.
-
-    A clip with start_sec/end_sec > 0 downloads only that source section, cut exactly at
-    start_sec and re-based to 0; clips starting at 0 download whole. Trims never affect
-    the download. Writes a .done marker on success.
-    Args:
-        record: the clip to download.
-        cookies_file: optional cookies.txt for age/region-gated videos.
-        cookies_from_browser: optional browser name to pull cookies from instead.
-    Returns:
-        True on success, False on failure.
-    """
+    """Download one clip's video to raw_local/, optionally just its [start,end] section."""
     RAW_LOCAL.mkdir(parents=True, exist_ok=True)
     out_path = local_path(record)
 
@@ -89,22 +51,14 @@ def download_clip(
         "--output",
         str(out_path),
         "--format",
-        # Video-only up to 1080p, H.264 (avc1) first: YouTube also serves AV1 inside mp4,
-        # and OpenCV builds without an AV1 decoder (Colab's) read those as zero frames.
-        # Fallbacks keep a video with no H.264 version downloadable (convert it with
-        # hydroknight transcode-av1); 136/135/134 are YouTube's H.264 720p/480p/360p;
-        # last: combined mp4 (Dailymotion, Vimeo HLS).
+        # CAUTION[download-h264-first]: keep H.264 (avc1) first.
         "bestvideo[ext=mp4][vcodec^=avc1][height<=1080]/bestvideo[ext=mp4][height<=1080]"
         "/bestvideo[height<=1080]/136/135/134/best[ext=mp4][height<=1080]",
         "--js-runtimes",
-        "node",  # use installed Node to run YouTube's JS
-        # YouTube's upgraded "n challenge" now needs yt-dlp's remote EJS solver
-        # script (fetched from its official GitHub) run via Node. Without this,
-        # extraction yields "only images" -> "requested format is not available".
+        "node",
+        # Requires yt-dlp's remote EJS solver via Node.
         "--remote-components",
         "ejs:github",
-        # Download DASH fragments in parallel to beat YouTube's per-connection
-        # throttling (single connection was ~0.5 MB/s; this multiplies it).
         "--concurrent-fragments",
         "5",
         "--quiet",
@@ -115,22 +69,14 @@ def download_clip(
     elif cookies_from_browser:
         cmd += ["--cookies-from-browser", cookies_from_browser]
 
-    # Section download for clips with a real start offset (e.g. a 3h slice of
-    # a 12h livestream). Downloading the full source would be wasteful/huge.
-    # Convention: the local file always corresponds to the manifest's
-    # [start_sec, end_sec] window, re-based to 0, so file time t is source time
-    # start_sec + t (ClipRecord.to_file_time / to_source_time do the conversion).
-    # Clips with start_sec == 0 download whole (the common short-clip case).
+    # CAUTION[download-file-time-rebase]: file time t = source time start_sec + t; convert with ClipRecord.to_file_time/to_source_time.
     if (
         record.start_sec
         and record.start_sec > 0
         and record.end_sec
         and record.end_sec > 0
     ):
-        # --force-keyframes-at-cuts re-encodes so the file starts EXACTLY at
-        # start_sec. A plain stream copy can only cut at an existing keyframe,
-        # which lands a few seconds early by a different amount each download,
-        # silently shifting every label on the clip. Slower, but paid once.
+        # CAUTION[download-keyframes-at-cuts]: keep --force-keyframes-at-cuts; file frame 0 must be exactly start_sec.
         cmd += [
             "--download-sections",
             f"*{record.start_sec}-{record.end_sec}",
@@ -145,7 +91,6 @@ def download_clip(
         )
         return False
 
-    # Write the sidecar marker so future runs skip this clip.
     done_marker(record).touch()
     return True
 
@@ -156,16 +101,7 @@ def download(
     cookies_file: Path | None = None,
     cookies_from_browser: str | None = None,
 ) -> None:
-    """Download every not-yet-downloaded clip in the manifest.
-
-    Args:
-        manifest_path: JSONL manifest to read.
-        limit: if set, download at most this many clips (handy for test runs).
-        cookies_file: optional cookies.txt passed to each download.
-        cookies_from_browser: optional browser name to pull cookies from instead.
-    Returns:
-        None (prints a per-clip progress summary).
-    """
+    """Download every not-yet-downloaded clip in the manifest."""
     manifest = Manifest(manifest_path)
     records = manifest.load()
 
@@ -196,15 +132,7 @@ def download(
 
 
 def cleanup_orphans(manifest_path: Path) -> None:
-    """Delete raw_local/ files whose clip_id no longer appears in the manifest.
-
-    Guards against a regenerated manifest (new ids) leaving old downloads orphaned — they'd
-    waste disk and be unreachable by the annotator/extractor.
-    Args:
-        manifest_path: JSONL manifest defining the known clip_ids.
-    Returns:
-        None (prints how many files were removed).
-    """
+    """Delete raw_local/ files whose clip_id no longer appears in the manifest."""
     if not RAW_LOCAL.exists():
         print("raw_local/ does not exist — nothing to clean.")
         return
@@ -214,8 +142,6 @@ def cleanup_orphans(manifest_path: Path) -> None:
 
     removed = 0
     for f in RAW_LOCAL.iterdir():
-        # Each file is named <clip_id>.mp4 or <clip_id>.done
-        # Strip the suffix to get the clip_id
         clip_id = f.stem
         if clip_id not in known_ids:
             f.unlink()

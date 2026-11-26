@@ -1,20 +1,5 @@
 """
 Write one Claude label to the manifest from a small JSON spec, then log it.
-
-    uv run hydroknight write-label SPEC.json
-
-Rescue spec (times are FILE seconds; converted to source seconds and frame-snapped):
-    {"clip": ID, "onset": t, "contact": t, "saved": t | null,
-     "trim_start": t | null | "keep", "trim_end": t | null | "keep",
-     "clicks": [[t, x, y, "onset" | "extra" | "last_seen"], ...], "notes": "..."}
-Normal-footage spec:
-    {"clip": ID, "kind": "normal", "trim_start": ..., "trim_end": ..., "notes": "..."}
-
-Refuses to overwrite a clip that is already labeled or already in the Claude log. Every
-label is recorded in data/annotations/labeled_by_claude.json, so it stays separate from
-the hand labels and is held out of training until a review marks it good. fps comes from the
-keypoint file if the clip is extracted, otherwise from the video (the same value).
-If keypoints exist, the victim clicks are matched to tracks as a check.
 """
 
 from __future__ import annotations

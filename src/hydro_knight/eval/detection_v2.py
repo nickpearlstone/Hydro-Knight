@@ -1,20 +1,4 @@
-"""
-Detection metrics for the v2 model: recall, time to alarm, false alarms per hour.
-
-Turns per-window anomaly scores into the neutral detections table of eval/metrics.py
-and scores the held-out rescue clips with its victim rule.
-
-Alarm time. A window can only raise an alarm once the model has seen all of it: its
-scored steps plus the context after them. So each window becomes one instant alarm at
-first scored step + (window + context) steps (about 4.5 s after the window starts).
-Measuring from the window's start would claim catches a live system could not make.
-
-Scope (agreed 2026-10-13). There is little purely normal footage, so false
-alarms are counted on the held-out rescue clips, from the trim start to guard contact:
-alarms after contact (the rescue and its commotion) are dropped, and footage hours run
-from trim start to contact. Recall counts every held-out labeled event, including
-victims the tracker never kept for long enough to score (a miss).
-"""
+"""Detection metrics for the v2 model: recall, time to alarm, false alarms per hour."""
 
 from __future__ import annotations
 
@@ -50,13 +34,7 @@ def alarm_table(ws: WindowSet, scores: np.ndarray) -> pd.DataFrame:
 
 
 def clip_evals(alarms: pd.DataFrame, records, rep) -> list[ClipEval]:
-    """ClipEvals for every held-out clip, ready for metrics.sweep_recall_fa.
-
-    Args:
-        alarms: alarm_table rows for the test clips' normal and victim windows.
-        records: manifest ClipRecords.
-        rep: the DatasetReport (used_test, victim_tracks).
-    """
+    """ClipEvals for every held-out clip, ready for metrics.sweep_recall_fa."""
     by_id = {r.clip_id: r for r in records}
     out = []
     for cid in rep.used_test:
@@ -94,12 +72,7 @@ def operating_points(
 ) -> dict:
     """Best recall at or under each false-alarm budget, plus the full sweep.
 
-    Each threshold is picked on the same clips it is then scored on: an upper bound.
-    crossfit_points gives the honest version for K-fold runs.
-
-    Returns:
-        {"sweep": DataFrame, "points": [{fa_target, threshold, recall, fa_per_hour,
-        median_latency_s, caught, events}], "events", "hours"}.
+    Thresholds are picked on the clips they are scored on: an upper bound (see crossfit_points).
     """
     scores = np.concatenate([c.detections["score"].to_numpy(float) for c in clips])
     thr = np.unique(np.quantile(scores, np.linspace(0, 1, n_thresholds)))
@@ -139,16 +112,7 @@ def crossfit_points(
     fa_targets=(30, 60, 120, 240),
     n_thresholds: int = 200,
 ) -> list[dict]:
-    """operating_points without hindsight, for a pooled K-fold table on one score scale.
-
-    Each fold's threshold per target is picked (operating_points) on the other folds'
-    clips only, then applied to that fold; catches and false alarms are summed over
-    folds, so the pooled alarm rate can exceed the target.
-
-    Returns:
-        [{fa_target, recall, fa_per_hour, caught, events, median_latency_s,
-        threshold_by_fold}] in fa_targets order.
-    """
+    """operating_points without hindsight: each fold's threshold is picked on the other folds only."""
     by_fold: dict[int, list[ClipEval]] = {}
     for c in clips:
         by_fold.setdefault(folds[c.clip_id], []).append(c)

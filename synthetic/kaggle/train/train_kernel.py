@@ -1,8 +1,6 @@
 """Kaggle GPU job: fine-tune the head detectors on the synthetic tiles (private dataset hk-synth-tiles).
 
-RUNS lists the jobs (one per GPU); see the comment there for what each version trained. Weights + training curves land in /kaggle/working/train.
-Scoring on real frames happens on the Mac afterwards (synthetic/train/score_heads.py); no real
-footage is uploaded.
+RUNS lists the jobs (one per GPU); weights + training curves land in /kaggle/working/train.
 """
 
 import glob
@@ -31,7 +29,7 @@ subprocess.run(
     shell=True,
     check=False,
 )
-# fetch the COCO weights once, so parallel YOLO workers don't race to download the same file
+# CAUTION[train-coco-prefetch]: fetch COCO weights once before the parallel YOLO workers start
 subprocess.run(
     f"cd {W} && python -c \"from ultralytics import YOLO; YOLO('yolo11n.pt')\"",
     shell=True,
@@ -44,20 +42,7 @@ def run(cmd, gpu, log):
     return subprocess.Popen(f"{cmd} > {W}/{log} 2>&1", shell=True, env=env)
 
 
-# RUNS: which jobs to start, one per GPU. v1 (10-20) = RT-DETR frozen then 0.1x on GPU 0 + YOLO on GPU 1;
-# v2 = RT-DETR with scale jitter, warm-up and EMA for 100 epochs, frozen vs 0.1x backbone side by side;
-# v3 (10-23) = seed spread of v2 frozen: the same 100-epoch schedule cut at 30 epochs, weights kept every
-# 5 epochs, seeds 1-8, four after another per GPU (~21 min each), START_BY 85 min / HARD_STOP 110 min to
-# fit the ~2 h of quota left. JOB was:
-#   python {code}/train_rtdetr.py {tiles} --epochs 100 --stop-after 30 --save-every 5 --batch 8
-#     --seed {seed} --out {W}/train/rtdetr_v3_seed{seed}
-# v4 (10-24) = seed spread of the synthetic-only YOLO11n (the v1 recipe: 60 epochs, patience 15), seeds 1-8,
-# four after another per GPU (~10 min each), weights kept every 10 epochs. JOB was:
-#   python {code}/train_yolo.py {tiles}/data.yaml --epochs 60 --batch 16 --device 0 --save-period 10
-#     --seed {seed} --project {W}/train --name yolo_v4_seed{seed}
-# v5 (10-24) = v3 again on 300 frames (batches c + d, dataset hk-synth-tiles-cd): does doubling the
-# synthetic data raise recall or narrow the seed spread? Same flags, so epochs are 2x the steps (~40 min).
-# A seed only starts before START_BY, and `timeout` ends a slow one at HARD_STOP (Kaggle's limit is 12 h).
+# CAUTION[train-start-by-hard-stop]: a seed starts only before START_BY; timeout ends it at HARD_STOP (Kaggle limit 12 h)
 START_BY, HARD_STOP = 9 * 3600, 11 * 3600
 JOB, LOG = (
     "python {code}/train_rtdetr.py {tiles} --epochs 100 --stop-after 30 --save-every 5 --batch 8 "
